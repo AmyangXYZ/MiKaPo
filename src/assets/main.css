@@ -1,0 +1,37 @@
+@import "./base.css";
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background-image: url("./wavy-lines.svg");
+  background-size: cover;
+  user-select: none;
+}
+
+#root {
+  width: 100%;
+}
+
+.react {
+  background: -webkit-linear-gradient(315deg, #087ea4 55%, #7c93ee);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 700;
+}
+
+.videoPlayer {
+  width: 40%;
+  height: calc(100vh - 6rem);
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.scene {
+  width: 40%;
+  height: calc(100vh - 6rem);
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
