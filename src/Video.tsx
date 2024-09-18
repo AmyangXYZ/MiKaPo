@@ -1,9 +1,18 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { FilesetResolver, PoseLandmarker, NormalizedLandmark } from "@mediapipe/tasks-vision"
 
 function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [videoSrc, setVideoSrc] = useState<string>("./blue.mp4")
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      const url = URL.createObjectURL(file)
+      setVideoSrc(url)
+    }
+  }
 
   useEffect(() => {
     const initPoseDetector = async (): Promise<void> => {
@@ -38,16 +47,23 @@ function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): 
   }, [setPose])
 
   return (
-    <video
-      ref={videoRef}
-      className="videoPlayer"
-      controls
-      playsInline
-      disablePictureInPicture
-      controlsList="nodownload nofullscreen noremoteplayback"
-    >
-      <source src="./zhiyin.mp4" type="video/mp4" />
-    </video>
+    <>
+      <input
+        type="file"
+        accept="video/*"
+        onChange={handleFileUpload}
+        style={{ position: "absolute", zIndex: "999", left: "2rem" }}
+      />
+      <video
+        ref={videoRef}
+        className="videoPlayer"
+        controls
+        playsInline
+        disablePictureInPicture
+        controlsList="nofullscreen noremoteplayback"
+        src={videoSrc}
+      />
+    </>
   )
 }
 
