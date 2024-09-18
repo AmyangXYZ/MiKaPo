@@ -16,13 +16,15 @@ function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): 
           delegate: "GPU",
         },
         runningMode: "VIDEO",
+        minPoseDetectionConfidence: 0.95,
+        minTrackingConfidence: 0.95,
       })
       let lastTime = performance.now()
       const detect = () => {
         if (videoRef.current && lastTime != videoRef.current.currentTime) {
           lastTime = videoRef.current.currentTime
           poseLandmarker.detectForVideo(videoRef.current, performance.now(), (result) => {
-            setPose(result.landmarks[0])
+            setPose(result.worldLandmarks[0])
           })
         }
         requestAnimationFrame(detect)
@@ -34,8 +36,7 @@ function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): 
 
   return (
     <video ref={videoRef} className="videoPlayer" controls muted>
-      <source src="./blue.mp4" type="video/mp4" />
-      Your browser does not support the video tag.
+      <source src="./zhiyin.mp4" type="video/mp4" />
     </video>
   )
 }

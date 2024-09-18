@@ -1,50 +1,41 @@
-# React + TypeScript + Vite
+# MiKaPo: AI Pose Picker for MikuMikuDance
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+MiKaPo is a **Web-based tool** that poses MMD models from video input in real-time.
 
-Currently, two official plugins are available:
+## Tech Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- 3D key points detection: [Mediapipe](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/web_js)
+- 3D scene: [Babylon.js](https://www.babylonjs.com/)
+- MMD model viewer: [babylon-mmd](https://github.com/noname0310/babylon-mmd)
+- Web framework: [Vite+React](https://vitejs.dev/)
 
-## Expanding the ESLint configuration
+## Todo
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+- [ ] Face detection
+- [ ] Hand detection
+- [ ] Model selection
+- [ ] Ollama support
 
-- Configure the top-level `parserOptions` property like this:
+## Project Setup
 
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+```sh
+npm install
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+### Compile and Hot-Reload for Development
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
+```sh
+npm run dev
+```
 
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
+### Type-Check, Compile and Minify for Production
+
+```sh
+npm run build
+```
+
+### Lint with [ESLint](https://eslint.org/)
+
+```sh
+npm run lint
 ```
