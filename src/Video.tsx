@@ -4,6 +4,7 @@ import { FilesetResolver, PoseLandmarker, NormalizedLandmark } from "@mediapipe/
 
 function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
+
   useEffect(() => {
     const initPoseDetector = async (): Promise<void> => {
       const vision = await FilesetResolver.forVisionTasks(
@@ -45,7 +46,7 @@ function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): 
       disablePictureInPicture
       controlsList="nodownload nofullscreen noremoteplayback"
     >
-      <source src="./blue.mp4" type="video/mp4" />
+      <source src="./zhiyin.mp4" type="video/mp4" />
     </video>
   )
 }

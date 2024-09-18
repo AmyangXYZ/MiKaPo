@@ -34,8 +34,8 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
     const createScene = (canvas: HTMLCanvasElement): Scene => {
       const engine = new Engine(canvas, true, {}, true)
       const scene = new Scene(engine)
-      const camera = new ArcRotateCamera("ArcRotateCamera", 0, 0, 45, new Vector3(0, 10, 0), scene)
-      camera.setPosition(new Vector3(0, 22, -25))
+      const camera = new ArcRotateCamera("ArcRotateCamera", 0, 0, 45, new Vector3(0, 12, 0), scene)
+      camera.setPosition(new Vector3(0, 20, -25))
       camera.attachControl(canvas, false)
       camera.inertia = 0.8
       camera.speed = 10
