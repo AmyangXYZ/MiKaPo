@@ -16,9 +16,9 @@ function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): 
           delegate: "GPU",
         },
         runningMode: "VIDEO",
-        minPosePresenceConfidence: 0.7,
-        minPoseDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.7,
+        minPosePresenceConfidence: 0.5,
+        minPoseDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
         outputSegmentationMasks: false,
       })
       let lastTime = performance.now()
