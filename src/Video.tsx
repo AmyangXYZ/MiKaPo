@@ -4,7 +4,7 @@ import { FilesetResolver, PoseLandmarker, NormalizedLandmark } from "@mediapipe/
 
 function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [videoSrc, setVideoSrc] = useState<string>("./blue.mp4")
+  const [videoSrc, setVideoSrc] = useState<string>("./zhiyin.mp4")
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
