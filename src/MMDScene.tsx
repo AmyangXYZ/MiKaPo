@@ -27,6 +27,7 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
   const sceneRef = useRef<Scene | null>(null)
   const mmdModelRef = useRef<MmdModel | null>(null)
   const mmdRuntimeRef = useRef<MmdRuntime | null>(null)
+  const shadowGeneratorRef = useRef<ShadowGenerator | null>(null)
 
   useEffect(() => {
     const createScene = (canvas: HTMLCanvasElement): Scene => {
@@ -46,12 +47,12 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
       const directionalLight = new DirectionalLight("DirectionalLight", new Vector3(8, -15, 10), scene)
       directionalLight.intensity = 0.8
 
-      const shadowGenerator = new ShadowGenerator(1024, directionalLight, true)
-      shadowGenerator.usePercentageCloserFiltering = true
-      shadowGenerator.forceBackFacesOnly = true
-      shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_MEDIUM
-      shadowGenerator.frustumEdgeFalloff = 0.1
-      shadowGenerator.transparencyShadow = true
+      shadowGeneratorRef.current = new ShadowGenerator(1024, directionalLight, true)
+      shadowGeneratorRef.current.usePercentageCloserFiltering = true
+      shadowGeneratorRef.current.forceBackFacesOnly = true
+      shadowGeneratorRef.current.filteringQuality = ShadowGenerator.QUALITY_MEDIUM
+      shadowGeneratorRef.current.frustumEdgeFalloff = 0.1
+      shadowGeneratorRef.current.transparencyShadow = true
 
       const backgroundMaterial = new BackgroundMaterial("backgroundMaterial", scene)
       backgroundMaterial.diffuseTexture = new Texture(backgroundGroundUrl, scene)
@@ -87,6 +88,7 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
         for (const m of mesh.metadata.meshes) {
           m.receiveShadows = true
         }
+        shadowGeneratorRef.current!.addShadowCaster(mesh)
         mmdModelRef.current = mmdRuntimeRef.current!.createMmdModel(mesh as Mesh)
       })
     }
@@ -96,13 +98,14 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
       loadMMD(sceneRef.current)
     }
   }, [setFps])
+
   useEffect(() => {
     const updateMMDPose = (mmdModel: MmdModel | null, pose: NormalizedLandmark[] | null): void => {
       if (!pose || !mmdModel) {
         return
       }
 
-      const lerpFactor = 0.33
+      const lerpFactor = 0.4
       const scale = 10
       const yOffset = 8
 
