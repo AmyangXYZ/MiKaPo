@@ -45,7 +45,7 @@ function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): 
       disablePictureInPicture
       controlsList="nodownload nofullscreen noremoteplayback"
     >
-      <source src="./zhiyin.mp4" type="video/mp4" />
+      <source src="./blue.mp4" type="video/mp4" />
     </video>
   )
 }

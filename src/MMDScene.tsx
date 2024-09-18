@@ -18,9 +18,10 @@ import {
   Vector3,
 } from "@babylonjs/core"
 import { NormalizedLandmark } from "@mediapipe/tasks-vision"
-import { MmdModel, MmdRuntime } from "babylon-mmd"
+import { MmdAmmoJSPlugin, MmdAmmoPhysics, MmdModel, MmdRuntime } from "babylon-mmd"
 import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
+import ammoPhysics from "./ammo/ammo.wasm"
 
 function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps: (fps: number) => void }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -62,8 +63,8 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
       backgroundMaterial.useRGBColor = false
       backgroundMaterial.primaryColor = Color3.Magenta()
       const ground = MeshBuilder.CreateGround("Ground", {
-        width: 64,
-        height: 64,
+        width: 28,
+        height: 28,
         subdivisions: 2,
         updatable: false,
       })
@@ -78,9 +79,13 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
       return scene
     }
 
-    const loadMMD = (scene: Scene | null): void => {
+    const loadMMD = async (scene: Scene | null): Promise<void> => {
       if (!scene) return
-      mmdRuntimeRef.current = new MmdRuntime(scene)
+      const physicsInstance = await ammoPhysics()
+      const physicsPlugin = new MmdAmmoJSPlugin(true, physicsInstance)
+      scene.enablePhysics(new Vector3(0, -98, 0), physicsPlugin)
+
+      mmdRuntimeRef.current = new MmdRuntime(scene, new MmdAmmoPhysics(scene))
       mmdRuntimeRef.current.register(scene)
 
       SceneLoader.ImportMeshAsync(undefined, `./model/Thoth/`, `Thoth.pmx`, scene).then((result) => {
@@ -150,20 +155,6 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
       }
       const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
         return mmdModel!.skeleton.bones.find((bone) => bone.name === name)
-      }
-
-      const moveCenter = (): void => {
-        const leftHip = getKeypoint("left_hip")
-        const rightHip = getKeypoint("right_hip")
-        const bone = getBone("センター")
-        if (leftHip && rightHip && bone) {
-          const center = new Vector3(
-            ((leftHip.x + rightHip.x) / 2) * scale,
-            -((leftHip.y + rightHip.y) / 2) * scale + yOffset - 0.5,
-            ((leftHip.z + rightHip.z) / 2) * scale
-          )
-          bone.position = Vector3.Lerp(bone.position, center, lerpFactor)
-        }
       }
 
       const rotateHead = (): void => {
@@ -399,7 +390,6 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
         }
       }
 
-      moveCenter()
       rotateHead()
       rotateUpperBody()
       rotateLowerBody()
