@@ -37,7 +37,14 @@ function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): 
   }, [setPose])
 
   return (
-    <video ref={videoRef} className="videoPlayer" controls muted>
+    <video
+      ref={videoRef}
+      className="videoPlayer"
+      controls
+      playsInline
+      disablePictureInPicture
+      controlsList="nodownload nofullscreen noremoteplayback"
+    >
       <source src="./zhiyin.mp4" type="video/mp4" />
     </video>
   )
