@@ -105,10 +105,10 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
         return
       }
 
-      const lerpFactor = 0.4
+      const lerpFactor = 0.5
       const scale = 10
       const yOffset = 8
-
+      const visibilityThreshold = 0.5
       const keypointIndexByName: { [key: string]: number } = {
         nose: 0,
         left_eye_inner: 1,
@@ -146,7 +146,7 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
       }
       const getKeypoint = (name: string): Vector3 | null => {
         const point = pose[keypointIndexByName[name]]
-        return new Vector3(point.x, point.y, point.z)
+        return point.visibility > visibilityThreshold ? new Vector3(point.x, point.y, point.z) : null
       }
       const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
         return mmdModel!.skeleton.bones.find((bone) => bone.name === name)
