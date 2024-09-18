@@ -108,7 +108,7 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
       const lerpFactor = 0.5
       const scale = 10
       const yOffset = 8
-      const visibilityThreshold = 0.5
+      const visibilityThreshold = 0.1
       const keypointIndexByName: { [key: string]: number } = {
         nose: 0,
         left_eye_inner: 1,
