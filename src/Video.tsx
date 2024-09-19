@@ -12,6 +12,9 @@ function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): 
     if (file) {
       const url = URL.createObjectURL(file)
       setVideoSrc(url)
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0
+      }
     }
   }
 
@@ -45,7 +48,7 @@ function Video({ setPose }: { setPose: (pose: NormalizedLandmark[]) => void }): 
         drawingUtils.drawConnectors(landmarks, PoseLandmarker.POSE_CONNECTIONS)
       }
       const detect = () => {
-        if (videoRef.current && lastTime != videoRef.current.currentTime) {
+        if (videoRef.current && lastTime != videoRef.current.currentTime && videoRef.current.videoWidth > 0) {
           lastTime = videoRef.current.currentTime
           poseLandmarker.detectForVideo(videoRef.current, performance.now(), (result) => {
             setPose(result.worldLandmarks[0])
