@@ -280,6 +280,26 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
         }
       }
 
+      const rotateFoot = (side: "right" | "left"): void => {
+        const hip = getKeypoint(`${side}_hip`)
+        const ankle = getKeypoint(`${side}_ankle`)
+        const footBone = getBone(`${side === "right" ? "右" : "左"}足首`)
+
+        if (hip && ankle && footBone) {
+          const footDir = ankle.subtract(hip).normalize()
+          footDir.y = 0 // Ensure the foot stays level with the ground
+
+          const defaultDir = new Vector3(0, 0, 1) // Assuming default foot direction is forward
+
+          const rotationQuaternion = Quaternion.FromUnitVectorsToRef(defaultDir, footDir, new Quaternion())
+
+          footBone.setRotationQuaternion(
+            Quaternion.Slerp(footBone.rotationQuaternion || new Quaternion(), rotationQuaternion, lerpFactor),
+            Space.WORLD
+          )
+        }
+      }
+
       const rotateUpperArm = (side: "left" | "right"): void => {
         const shoulder = getKeypoint(`${side}_shoulder`)
         const elbow = getKeypoint(`${side}_elbow`)
@@ -397,6 +417,8 @@ function MMDScene({ pose, setFps }: { pose: NormalizedLandmark[] | null; setFps:
       rotateHip("left")
       moveFoot("right")
       moveFoot("left")
+      rotateFoot("right")
+      rotateFoot("left")
       rotateUpperArm("right")
       rotateUpperArm("left")
       rotateLowerArm("right")
