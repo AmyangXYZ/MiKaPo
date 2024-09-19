@@ -11,10 +11,13 @@ MiKaPo is a **Web-based tool** that poses MMD models from video input in real-ti
 
 ## Todo
 
-- [ ] Face detection
+- [x] Pose detection
+- [x] Face detection
 - [ ] Hand detection
+- [x] Video upload
+- [x] Camera input
 - [ ] Model selection
-- [ ] Ollama support
+- [ ] Ollama support (electron version)
 
 ## Project Setup
 
