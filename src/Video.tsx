@@ -8,6 +8,8 @@ import {
   FaceLandmarker,
 } from "@mediapipe/tasks-vision"
 
+const defaultVideoSrc = "./zhiyin.mp4"
+
 function Video({
   setPose,
   setFace,
@@ -17,9 +19,11 @@ function Video({
 }): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [videoSrc, setVideoSrc] = useState<string>("./blue.mp4")
+  const [videoSrc, setVideoSrc] = useState<string>(defaultVideoSrc)
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false)
   const isDebug = useRef<boolean>(true)
+  const isPoseDetectionEnabled = useRef<boolean>(true)
+  const isFaceDetectionEnabled = useRef<boolean>(true)
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -40,10 +44,10 @@ function Video({
       }
       setIsCameraActive(false)
       // Set the video source after disabling the camera
-      setVideoSrc("./blue.mp4")
+      setVideoSrc(defaultVideoSrc)
       if (videoRef.current) {
         videoRef.current.srcObject = null
-        videoRef.current.src = "./blue.mp4"
+        videoRef.current.src = defaultVideoSrc
         videoRef.current.load()
       }
     } else {
@@ -127,16 +131,25 @@ function Video({
             }
 
             lastTime = videoRef.current.currentTime
-            poseLandmarker.detectForVideo(videoRef.current, performance.now(), (result) => {
-              setPose(result.worldLandmarks[0])
-              if (canvasRef.current && isDebug.current) {
-                drawPose(result.landmarks[0])
+            if (isPoseDetectionEnabled.current) {
+              poseLandmarker.detectForVideo(videoRef.current, performance.now(), (result) => {
+                setPose(result.worldLandmarks[0])
+                if (canvasRef.current && isDebug.current) {
+                  drawPose(result.landmarks[0])
+                }
+              })
+            } else {
+              setPose([])
+            }
+
+            if (isFaceDetectionEnabled.current) {
+              const faceResult = faceLandmarker.detectForVideo(videoRef.current, performance.now(), {})
+              setFace(faceResult.faceLandmarks[0])
+              if (canvasRef.current && faceResult.faceLandmarks.length > 0 && isDebug.current) {
+                drawFace(faceResult.faceLandmarks[0])
               }
-            })
-            const faceResult = faceLandmarker.detectForVideo(videoRef.current, performance.now(), {})
-            setFace(faceResult.faceLandmarks[0])
-            if (canvasRef.current && faceResult.faceLandmarks.length > 0 && isDebug.current) {
-              drawFace(faceResult.faceLandmarks[0])
+            } else {
+              setFace([])
             }
           }
           requestAnimationFrame(detect)
@@ -144,7 +157,7 @@ function Video({
         detect()
       }
     )
-  }, [setPose, setFace, isDebug])
+  }, [setPose, setFace])
 
   useEffect(() => {
     const resizeCanvas = () => {
@@ -191,9 +204,27 @@ function Video({
         <button className="toolbar-item" onClick={toggleCamera}>
           {isCameraActive ? "Disable Camera" : "Enable Camera"}
         </button>
-        <button className="toolbar-item" onClick={toggleDebug}>
-          {isDebug.current ? "Hide Landmarks" : "Show Landmarks"}
-        </button>
+
+        <label className="toolbar-item">
+          <input type="checkbox" checked={isDebug.current} onChange={(e) => (isDebug.current = e.target.checked)} />
+          Landmark
+        </label>
+        <label className="toolbar-item">
+          <input
+            type="checkbox"
+            checked={isPoseDetectionEnabled.current}
+            onChange={(e) => (isPoseDetectionEnabled.current = e.target.checked)}
+          />
+          Pose
+        </label>
+        <label className="toolbar-item">
+          <input
+            type="checkbox"
+            checked={isFaceDetectionEnabled.current}
+            onChange={(e) => (isFaceDetectionEnabled.current = e.target.checked)}
+          />
+          Face
+        </label>
       </div>
       <div className="videoPlayer" style={{ position: "relative" }}>
         <video
