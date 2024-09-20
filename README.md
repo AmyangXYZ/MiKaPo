@@ -1,6 +1,9 @@
 # MiKaPo: AI Pose Picker for MikuMikuDance
 
-MiKaPo is a **Web-based tool** that poses MMD models from video input in real-time.
+[MiKaPo](https://mikapo.amyang.dev) is a **Web-based tool** that poses MMD models from video input in real-time.
+
+<img width="400px" alt="demo_pose" src="./demo1.gif" />
+<img width="400px" alt="demo_face" src="./demo2.gif" />
 
 ## Tech Stack
 
