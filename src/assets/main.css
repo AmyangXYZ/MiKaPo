@@ -98,8 +98,13 @@ body {
 
 .toolbar-item {
   align-items: center;
-  height: 1.6rem;
-  max-width: 33%;
+  height: 1.5rem;
+  max-width: 20%;
+}
+
+.toolbar-item .MuiFormControlLabel-label,
+.toolbar-item .MuiTypography-root {
+  font-size: 0.85rem;
 }
 
 .scene {

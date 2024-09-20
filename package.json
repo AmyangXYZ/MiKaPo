@@ -11,7 +11,12 @@
   },
   "dependencies": {
     "@babylonjs/core": "^7.25.1",
+    "@emotion/react": "^11.13.3",
+    "@emotion/styled": "^11.13.0",
+    "@fontsource/roboto": "^5.1.0",
     "@mediapipe/tasks-vision": "^0.10.15",
+    "@mui/icons-material": "^6.1.1",
+    "@mui/material": "^6.1.1",
     "babylon-mmd": "^0.54.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

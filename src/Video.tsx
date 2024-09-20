@@ -7,8 +7,24 @@ import {
   DrawingUtils,
   FaceLandmarker,
 } from "@mediapipe/tasks-vision"
+import { Button, FormControlLabel, Switch, Typography } from "@mui/material"
+import { Videocam, CloudUpload } from "@mui/icons-material"
+import { styled } from "@mui/material/styles"
+import { blue, green } from "@mui/material/colors"
 
 const defaultVideoSrc = "./zhiyin.mp4"
+
+const VisuallyHiddenInput = styled("input")({
+  clip: "rect(0 0 0 0)",
+  clipPath: "inset(50%)",
+  height: 1,
+  overflow: "hidden",
+  position: "absolute",
+  bottom: 0,
+  left: 0,
+  whiteSpace: "nowrap",
+  width: 1,
+})
 
 function Video({
   setPose,
@@ -194,37 +210,57 @@ function Video({
   return (
     <div className="videoContainer">
       <div className="toolbar">
-        <input
-          type="file"
-          accept="video/*"
+        <Button
           className="toolbar-item"
-          onChange={handleFileUpload}
-          disabled={isCameraActive}
-        />
-        <button className="toolbar-item" onClick={toggleCamera}>
-          {isCameraActive ? "Disable Camera" : "Enable Camera"}
-        </button>
+          component="label"
+          role={undefined}
+          variant="contained"
+          tabIndex={-1}
+          startIcon={<CloudUpload />}
+          sx={{ backgroundColor: blue[500], "&:hover": { backgroundColor: blue[700] } }}
+        >
+          <Typography>Upload</Typography>
+          <VisuallyHiddenInput type="file" onChange={handleFileUpload} accept="video/*" disabled={isCameraActive} />
+        </Button>
 
-        <label className="toolbar-item">
-          <input type="checkbox" checked={isDebug.current} onChange={(e) => (isDebug.current = e.target.checked)} />
-          Landmark
-        </label>
-        <label className="toolbar-item">
-          <input
-            type="checkbox"
-            checked={isPoseDetectionEnabled.current}
-            onChange={(e) => (isPoseDetectionEnabled.current = e.target.checked)}
-          />
-          Pose
-        </label>
-        <label className="toolbar-item">
-          <input
-            type="checkbox"
-            checked={isFaceDetectionEnabled.current}
-            onChange={(e) => (isFaceDetectionEnabled.current = e.target.checked)}
-          />
-          Face
-        </label>
+        <Button
+          className="toolbar-item"
+          variant="contained"
+          endIcon={<Videocam />}
+          onClick={toggleCamera}
+          sx={{ backgroundColor: green[500], "&:hover": { backgroundColor: green[700] } }}
+        >
+          <Typography>Camera</Typography>
+        </Button>
+
+        <FormControlLabel
+          className="toolbar-item"
+          style={{ marginLeft: "1.5rem" }}
+          control={
+            <Switch
+              checked={isPoseDetectionEnabled.current}
+              onChange={(e) => (isPoseDetectionEnabled.current = e.target.checked)}
+              color="secondary"
+            />
+          }
+          label="Pose"
+        />
+        <FormControlLabel
+          className="toolbar-item"
+          control={
+            <Switch
+              checked={isFaceDetectionEnabled.current}
+              onChange={(e) => (isFaceDetectionEnabled.current = e.target.checked)}
+              color="secondary"
+            />
+          }
+          label="Face"
+        />
+        <FormControlLabel
+          className="toolbar-item"
+          control={<Switch checked={isDebug.current} onChange={toggleDebug} color="warning" />}
+          label="Landmark"
+        />
       </div>
       <div className="videoPlayer" style={{ position: "relative" }}>
         <video
