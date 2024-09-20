@@ -156,7 +156,7 @@ function MMDScene({
       right_foot_index: 32,
     }
     const updateMMDPose = (mmdModel: MmdModel | null, pose: NormalizedLandmark[] | null): void => {
-      if (!pose || !mmdModel) {
+      if (!pose || !mmdModel || pose.length === 0) {
         return
       }
 
@@ -389,33 +389,37 @@ function MMDScene({
 
         if (wrist && indexFinger && handBone && lowerArmBone) {
           // Calculate hand direction
-          let handDir = indexFinger.subtract(wrist).normalize()
-
-          // Ensure Z-axis is always pointing forward
-          handDir.z = Math.abs(handDir.z)
-
-          // Correct X-axis direction based on the side
-          handDir.x = side === "left" ? -Math.abs(handDir.x) : Math.abs(handDir.x)
-
-          handDir = handDir.normalize()
+          const handDir = indexFinger.subtract(wrist).normalize()
 
           // Get lower arm rotation
           const lowerArmRotation = lowerArmBone.rotationQuaternion || new Quaternion()
           const lowerArmRotationMatrix = new Matrix()
           Matrix.FromQuaternionToRef(lowerArmRotation, lowerArmRotationMatrix)
 
-          // Transform hand direction to local space
+          // Transform hand direction to local space relative to lower arm
           const localHandDir = Vector3.TransformNormal(handDir, lowerArmRotationMatrix.invert())
 
-          // Define default direction
-          const defaultDir = new Vector3(side === "left" ? -1 : 1, 0, 0)
+          // Define default direction (pointing along the arm)
+          const defaultDir = new Vector3(0, -1, 0)
 
-          // Calculate rotation
+          // Calculate rotation from default to current hand direction
           const rotationQuaternion = Quaternion.FromUnitVectorsToRef(defaultDir, localHandDir, new Quaternion())
+
+          // Decompose the rotation into Euler angles
+          const rotation = rotationQuaternion.toEulerAngles()
+
+          // Clamp each rotation axis
+          const maxAngle = Math.PI / 3 // 60 degrees
+          rotation.x = Math.max(-maxAngle, Math.min(maxAngle, rotation.x))
+          rotation.y = Math.max(-maxAngle, Math.min(maxAngle, rotation.y))
+          rotation.z = Math.max(-maxAngle, Math.min(maxAngle, rotation.z))
+
+          // Create a new quaternion from the clamped Euler angles
+          const clampedQuaternion = Quaternion.FromEulerAngles(rotation.x, rotation.y, rotation.z)
 
           // Apply rotation with lerp for smooth transition
           handBone.setRotationQuaternion(
-            Quaternion.Slerp(handBone.rotationQuaternion || new Quaternion(), rotationQuaternion, lerpFactor),
+            Quaternion.Slerp(handBone.rotationQuaternion || new Quaternion(), clampedQuaternion, lerpFactor),
             Space.LOCAL
           )
         }
@@ -441,9 +445,10 @@ function MMDScene({
       updateMMDPose(mmdModelRef.current, pose)
     }
   }, [pose])
+
   useEffect(() => {
     const updateMMDFace = (mmdModel: MmdModel | null, face: NormalizedLandmark[] | null): void => {
-      if (!face || !mmdModel) {
+      if (!face || !mmdModel || face.length === 0) {
         return
       }
 
