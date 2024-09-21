@@ -2,6 +2,10 @@ import { useState } from "react"
 import Video from "./Video"
 import MMDScene from "./MMDScene"
 import { NormalizedLandmark } from "@mediapipe/tasks-vision"
+import { IconButton } from "@mui/material"
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
+import { faGithub } from "@fortawesome/free-brands-svg-icons"
+import { Download } from "@mui/icons-material"
 
 function App(): JSX.Element {
   const [pose, setPose] = useState<NormalizedLandmark[] | null>(null)
@@ -16,18 +20,24 @@ function App(): JSX.Element {
         </div>
       )}
       <header className="header">
-        <a href="https://github.com/AmyangXYZ/MiKaPo" target="_blank">
-          <h2>MiKaPo</h2>
-        </a>
+        <h3>MiKaPo</h3>
+
         <p>FPS: {fps}</p>
-        <a href="https://github.com/AmyangXYZ/MiKaPo-electron" target="_blank">
-          <h4>Download</h4>
-        </a>
+        <div className="header-item">
+          <a href="https://github.com/AmyangXYZ/MiKaPo" target="_blank">
+            <IconButton>
+              <FontAwesomeIcon icon={faGithub} color="white" size="sm" />
+            </IconButton>
+          </a>
+          <a href="https://github.com/AmyangXYZ/MiKaPo-Electron" target="_blank">
+            <IconButton size="small" color="inherit">
+              <Download sx={{ color: "white", fontSize: "1.5rem", marginTop: ".2rem" }} />
+            </IconButton>
+          </a>
+        </div>
       </header>
-      <div className="container">
-        <Video setPose={setPose} setFace={setFace}></Video>
-        <MMDScene pose={pose} face={face} setFps={setFps}></MMDScene>
-      </div>
+      <Video setPose={setPose} setFace={setFace}></Video>
+      <MMDScene pose={pose} face={face} setFps={setFps}></MMDScene>
     </>
   )
 }

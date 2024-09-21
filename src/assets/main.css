@@ -1,5 +1,13 @@
 @import "./base.css";
 
+* {
+  outline: none !important;
+}
+
+:focus {
+  outline: none !important;
+}
+
 body {
   display: flex;
   align-items: center;
@@ -12,6 +20,7 @@ body {
 
 #root {
   width: 100%;
+  height: 100vh;
 }
 
 .react {
@@ -23,13 +32,16 @@ body {
 }
 
 .header {
+  height: 2rem;
+  width: 100%;
+  padding: 0 1rem;
+  top: 0;
+  left: 0;
+  position: absolute;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: -1.5rem;
-  padding-left: 2rem;
-  padding-right: 2rem;
-  padding-bottom: 0.5rem;
+  z-index: 1010;
 }
 
 .header-item {
@@ -37,12 +49,15 @@ body {
   align-items: center;
 }
 
+.header-item a {
+  display: flex;
+}
 .loading-overlay {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
+  height: 100vh;
   background-color: rgba(0, 0, 0, 0.5);
   display: flex;
   justify-content: center;
@@ -69,28 +84,33 @@ body {
   }
 }
 
-.container {
-  display: flex;
-  justify-content: space-around;
-  width: 100%;
+.video-player {
+  position: absolute;
+  top: 4rem;
+  left: 1rem;
+  width: 400px;
+  z-index: 1001;
 }
 
-.videoContainer {
-  width: 45%;
-  height: calc(100vh - 8rem);
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.videoPlayer {
+video {
   width: 100%;
   height: 100%;
 }
 
+.video-canvas {
+  position: absolute;
+  z-index: 1001;
+  pointer-events: none;
+}
+
 .toolbar {
+  position: absolute;
+  top: 2rem;
+  left: 1rem;
+  width: 400px;
   z-index: 1002;
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
   gap: 1rem;
   height: 2rem;
@@ -99,19 +119,20 @@ body {
 .toolbar-item {
   align-items: center;
   height: 1.5rem;
-  max-width: 20%;
+  max-width: 22%;
 }
 
 .toolbar-item .MuiFormControlLabel-label,
 .toolbar-item .MuiTypography-root {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
 .scene {
-  width: 45%;
-  height: calc(100vh - 6.2rem);
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
 }
 
 a {
