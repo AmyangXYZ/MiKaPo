@@ -138,3 +138,31 @@ video {
 a {
   color: inherit;
 }
+
+@media screen and (max-width: 767px) {
+  .scene {
+    position: relative;
+    top: auto;
+    width: 100%;
+    height: calc(100vh - 4rem - 200px);
+  }
+
+  .toolbar {
+    position: relative;
+    top: auto;
+    left: auto;
+    width: 100%;
+    height: 2rem;
+  }
+  .video-player {
+    position: relative;
+    height: 200px;
+    width: 100%;
+    top: auto;
+  }
+
+  .header {
+    position: relative;
+    height: 2rem;
+  }
+}
