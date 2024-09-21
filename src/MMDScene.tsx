@@ -3,6 +3,7 @@ import {
   ArcRotateCamera,
   BackgroundMaterial,
   Color3,
+  Color4,
   DirectionalLight,
   Engine,
   HemisphericLight,
@@ -42,7 +43,7 @@ function MMDScene({
     const createScene = async (canvas: HTMLCanvasElement): Promise<Scene> => {
       const engine = new Engine(canvas, true, {}, true)
       const scene = new Scene(engine)
-
+      scene.clearColor = new Color4(0, 0, 0, 0)
       const physicsInstance = await ammoPhysics()
       const physicsPlugin = new MmdAmmoJSPlugin(true, physicsInstance)
       scene.enablePhysics(new Vector3(0, -98, 0), physicsPlugin)
@@ -50,7 +51,7 @@ function MMDScene({
       mmdRuntimeRef.current.register(scene)
 
       const camera = new ArcRotateCamera("ArcRotateCamera", 0, 0, 45, new Vector3(0, 12, 0), scene)
-      camera.setPosition(new Vector3(0, 20, -25))
+      camera.setPosition(new Vector3(0, 15, -27))
       camera.attachControl(canvas, false)
       camera.inertia = 0.8
       camera.speed = 10

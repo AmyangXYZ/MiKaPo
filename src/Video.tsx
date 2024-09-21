@@ -7,10 +7,9 @@ import {
   DrawingUtils,
   FaceLandmarker,
 } from "@mediapipe/tasks-vision"
-import { Button, FormControlLabel, Switch, Typography } from "@mui/material"
-import { Videocam, CloudUpload } from "@mui/icons-material"
+import { FormControlLabel, IconButton, Switch } from "@mui/material"
+import { Videocam, Movie } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
-import { blue, green } from "@mui/material/colors"
 
 const defaultVideoSrc = "./zhiyin.mp4"
 
@@ -208,39 +207,25 @@ function Video({
     }
   }, [])
   return (
-    <div className="videoContainer">
+    <>
       <div className="toolbar">
-        <Button
-          className="toolbar-item"
-          component="label"
-          role={undefined}
-          variant="contained"
-          tabIndex={-1}
-          startIcon={<CloudUpload />}
-          sx={{ backgroundColor: blue[500], "&:hover": { backgroundColor: blue[700] } }}
-        >
-          <Typography>Upload</Typography>
+        <IconButton className="toolbar-item" color="info" component="label" disabled={isCameraActive}>
+          <Movie />
           <VisuallyHiddenInput type="file" onChange={handleFileUpload} accept="video/*" disabled={isCameraActive} />
-        </Button>
+        </IconButton>
 
-        <Button
-          className="toolbar-item"
-          variant="contained"
-          endIcon={<Videocam />}
-          onClick={toggleCamera}
-          sx={{ backgroundColor: green[500], "&:hover": { backgroundColor: green[700] } }}
-        >
-          <Typography>Camera</Typography>
-        </Button>
+        <IconButton className="toolbar-item" onClick={toggleCamera} color={isCameraActive ? "error" : "success"}>
+          <Videocam />
+        </IconButton>
 
         <FormControlLabel
           className="toolbar-item"
-          style={{ marginLeft: "1.5rem" }}
           control={
             <Switch
               checked={isPoseDetectionEnabled.current}
               onChange={(e) => (isPoseDetectionEnabled.current = e.target.checked)}
               color="secondary"
+              size="small"
             />
           }
           label="Pose"
@@ -252,17 +237,18 @@ function Video({
               checked={isFaceDetectionEnabled.current}
               onChange={(e) => (isFaceDetectionEnabled.current = e.target.checked)}
               color="secondary"
+              size="small"
             />
           }
           label="Face"
         />
         <FormControlLabel
           className="toolbar-item"
-          control={<Switch checked={isDebug.current} onChange={toggleDebug} color="warning" />}
+          control={<Switch checked={isDebug.current} onChange={toggleDebug} color="warning" size="small" />}
           label="Landmark"
         />
       </div>
-      <div className="videoPlayer" style={{ position: "relative" }}>
+      <div className="video-player">
         <video
           ref={videoRef}
           controls={!isCameraActive}
@@ -270,18 +256,10 @@ function Video({
           disablePictureInPicture
           controlsList="nofullscreen noremoteplayback"
           src={isCameraActive ? undefined : videoSrc}
-          style={{ width: "100%", height: "100%" }}
         />
-        <canvas
-          ref={canvasRef}
-          style={{
-            position: "absolute",
-            zIndex: "1001",
-            pointerEvents: "none",
-          }}
-        />
+        <canvas ref={canvasRef} className="video-canvas" />
       </div>
-    </div>
+    </>
   )
 }
 
