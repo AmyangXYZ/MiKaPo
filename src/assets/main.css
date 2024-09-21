@@ -158,6 +158,7 @@ a {
     position: relative;
     height: 200px;
     width: 100%;
+    left: auto;
     top: auto;
   }
 
