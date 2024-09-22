@@ -11,7 +11,7 @@ import { FormControlLabel, IconButton, Switch } from "@mui/material"
 import { Videocam, Movie } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
 
-const defaultVideoSrc = "./zhiyin.mp4"
+const defaultVideoSrc = "./video/flash.mp4"
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",

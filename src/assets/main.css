@@ -135,6 +135,13 @@ video {
   height: 100vh;
 }
 
+.model-selector {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 1002;
+}
+
 a {
   color: inherit;
 }
