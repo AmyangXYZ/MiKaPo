@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   ArcRotateCamera,
   BackgroundMaterial,
@@ -23,6 +23,10 @@ import { MmdAmmoJSPlugin, MmdAmmoPhysics, MmdModel, MmdRuntime } from "babylon-m
 import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
 import ammoPhysics from "./ammo/ammo.wasm"
+import { Box, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material"
+
+const defaultModel = "深空之眼-托特"
+const availableModels = ["深空之眼-托特", "深空之眼-托特2", "鸣潮-吟霖", "原神-荧"]
 
 function MMDScene({
   pose,
@@ -35,9 +39,15 @@ function MMDScene({
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sceneRef = useRef<Scene | null>(null)
+  const [sceneRendered, setSceneRendered] = useState<boolean>(false)
+  const [selectedModel, setSelectedModel] = useState<string>(defaultModel)
   const mmdModelRef = useRef<MmdModel | null>(null)
   const mmdRuntimeRef = useRef<MmdRuntime | null>(null)
   const shadowGeneratorRef = useRef<ShadowGenerator | null>(null)
+
+  const handleModelChange = (event: SelectChangeEvent): void => {
+    setSelectedModel(event.target.value)
+  }
 
   useEffect(() => {
     const createScene = async (canvas: HTMLCanvasElement): Promise<Scene> => {
@@ -95,10 +105,27 @@ function MMDScene({
       return scene
     }
 
-    const loadMMD = async (): Promise<void> => {
-      if (!sceneRef.current) return
+    if (canvasRef.current) {
+      createScene(canvasRef.current).then((scene) => {
+        sceneRef.current = scene
+        setSceneRendered(true)
+      })
+    }
+  }, [setFps, setSceneRendered])
 
-      SceneLoader.ImportMeshAsync(undefined, `./model/Thoth/`, `Thoth.pmx`, sceneRef.current).then((result) => {
+  useEffect(() => {
+    const loadMMD = async (): Promise<void> => {
+      if (!sceneRendered || !selectedModel || !mmdRuntimeRef.current) return
+      if (mmdModelRef.current) {
+        mmdRuntimeRef.current.destroyMmdModel(mmdModelRef.current)
+        mmdModelRef.current.mesh.dispose()
+      }
+      SceneLoader.ImportMeshAsync(
+        undefined,
+        `./model/${selectedModel}/`,
+        `${selectedModel}.pmx`,
+        sceneRef.current
+      ).then((result) => {
         const mesh = result.meshes[0]
         for (const m of mesh.metadata.meshes) {
           m.receiveShadows = true
@@ -107,14 +134,8 @@ function MMDScene({
         mmdModelRef.current = mmdRuntimeRef.current!.createMmdModel(mesh as Mesh)
       })
     }
-
-    if (canvasRef.current) {
-      createScene(canvasRef.current).then((scene) => {
-        sceneRef.current = scene
-        loadMMD()
-      })
-    }
-  }, [setFps])
+    loadMMD()
+  }, [sceneRendered, sceneRef, mmdRuntimeRef, selectedModel])
 
   useEffect(() => {
     const lerpFactor = 0.5
@@ -634,7 +655,29 @@ function MMDScene({
       updateMMDFace(mmdModelRef.current, face)
     }
   }, [face])
-  return <canvas ref={canvasRef} className="scene"></canvas>
+  return (
+    <>
+      <canvas ref={canvasRef} className="scene"></canvas>
+      <Box className="model-selector">
+        <FormControl sx={{ borderColor: "white" }}>
+          <InputLabel sx={{ color: "white", fontSize: ".9rem" }}>Model</InputLabel>
+          <Select
+            label="Model"
+            value={selectedModel}
+            onChange={handleModelChange}
+            sx={{ color: "white", fontSize: ".9rem" }}
+            autoWidth
+          >
+            {availableModels.map((model) => (
+              <MenuItem sx={{ fontSize: ".8rem" }} key={model} value={model}>
+                {model}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Box>
+    </>
+  )
 }
 
 export default MMDScene
