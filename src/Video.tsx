@@ -176,7 +176,7 @@ function Video({
 
   const replayCallback = () => {
     let currentIndex = 0
-    const frameInterval = 1000 / 24 // 24 FPS
+    const frameInterval = 1000 / 60 // 60 FPS
 
     const playNextFrame = () => {
       if (currentIndex < landmarkHistoryRef.current.length) {
