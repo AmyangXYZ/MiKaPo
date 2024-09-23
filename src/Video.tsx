@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react"
 
-import { FilesetResolver, NormalizedLandmark, HolisticLandmarker } from "@mediapipe/tasks-vision"
+import {
+  FilesetResolver,
+  NormalizedLandmark,
+  HolisticLandmarker,
+  HolisticLandmarkerResult,
+} from "@mediapipe/tasks-vision"
 import { FormControlLabel, IconButton, Switch, Tooltip } from "@mui/material"
-import { Videocam, CloudUpload } from "@mui/icons-material"
+import { Videocam, CloudUpload, Replay } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
 
 const defaultVideoSrc = "./video/flash.mp4"
@@ -30,7 +35,6 @@ function Video({
 }): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const [videoSrc, setVideoSrc] = useState<string>(defaultVideoSrc)
   const [imgSrc, setImgSrc] = useState<string>("")
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false)
@@ -38,6 +42,8 @@ function Video({
   const isFaceDetectionEnabled = useRef<boolean>(true)
   const holisticLandmarkerRef = useRef<HolisticLandmarker | null>(null)
   const [lastMedia, setLastMedia] = useState<string>("VIDEO")
+
+  const landmarkHistoryRef = useRef<HolisticLandmarkerResult[]>([])
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -76,6 +82,7 @@ function Video({
   }
 
   const toggleCamera = async () => {
+    landmarkHistoryRef.current = []
     if (isCameraActive) {
       if (videoRef.current && videoRef.current.srcObject) {
         const tracks = (videoRef.current.srcObject as MediaStream).getTracks()
@@ -127,6 +134,10 @@ function Video({
           if (videoRef.current && lastTime != videoRef.current.currentTime && videoRef.current.videoWidth > 0) {
             lastTime = videoRef.current.currentTime
             holisticLandmarkerRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
+              if (!isCameraActive) {
+                landmarkHistoryRef.current.push(result)
+              }
+
               if (isPoseDetectionEnabled.current && result.poseWorldLandmarks[0]) {
                 setPose(result.poseWorldLandmarks[0])
               } else {
@@ -161,45 +172,55 @@ function Video({
         detect()
       }
     )
-  }, [setPose, setFace, imgRef, videoRef])
+  }, [setPose, setFace, imgRef, videoRef, isCameraActive])
 
-  useEffect(() => {
-    const resizeCanvas = () => {
-      if (videoRef.current && canvasRef.current) {
-        const videoWidth = videoRef.current.videoWidth
-        const videoHeight = videoRef.current.videoHeight
-        const containerWidth = videoRef.current.clientWidth
-        const containerHeight = videoRef.current.clientHeight
+  const replayCallback = () => {
+    let currentIndex = 0
+    const frameInterval = 1000 / 24 // 24 FPS
 
-        const scale = Math.min(containerWidth / videoWidth, containerHeight / videoHeight)
-        const scaledWidth = videoWidth * scale
-        const scaledHeight = videoHeight * scale
+    const playNextFrame = () => {
+      if (currentIndex < landmarkHistoryRef.current.length) {
+        const result = landmarkHistoryRef.current[currentIndex]
 
-        canvasRef.current.width = scaledWidth
-        canvasRef.current.height = scaledHeight
-        canvasRef.current.style.left = `${(containerWidth - scaledWidth) / 2}px`
-        canvasRef.current.style.top = `${(containerHeight - scaledHeight) / 2}px`
-      }
-      if (imgRef.current && imgRef.current.complete && canvasRef.current) {
-        const containerWidth = imgRef.current.clientWidth
-        const containerHeight = imgRef.current.clientHeight
-        console.log("containerWidth", containerWidth)
-        canvasRef.current.width = containerWidth
-        canvasRef.current.height = containerHeight
-        canvasRef.current.style.width = `${containerWidth}px`
-        canvasRef.current.style.height = `${containerHeight}px`
-        canvasRef.current.style.left = "0"
-        canvasRef.current.style.top = "0"
+        if (isPoseDetectionEnabled.current && result.poseWorldLandmarks && result.poseWorldLandmarks[0]) {
+          setPose(result.poseWorldLandmarks[0])
+        } else {
+          setPose([])
+        }
+
+        if (isFaceDetectionEnabled.current && result.faceLandmarks && result.faceLandmarks.length > 0) {
+          setFace(result.faceLandmarks[0])
+        } else {
+          setFace([])
+        }
+
+        currentIndex++
+        setTimeout(() => requestAnimationFrame(playNextFrame), frameInterval)
       }
     }
-    resizeCanvas()
-  }, [videoSrc, imgSrc])
+
+    requestAnimationFrame(playNextFrame)
+  }
+
+  useEffect(() => {
+    const clearLandmarkHistory = () => {
+      landmarkHistoryRef.current = []
+    }
+
+    const videoElement = videoRef.current
+    if (videoElement) {
+      videoElement.addEventListener("play", clearLandmarkHistory)
+      return () => {
+        videoElement.removeEventListener("play", clearLandmarkHistory)
+      }
+    }
+  }, [])
 
   return (
     <>
       <div className="toolbar">
         <Tooltip title="Upload a video or image">
-          <IconButton className="toolbar-item" color="primary" component="label" disabled={isCameraActive}>
+          <IconButton className="toolbar-item" color="primary" component="label" disabled={isCameraActive} size="small">
             <CloudUpload />
             <VisuallyHiddenInput
               type="file"
@@ -214,7 +235,11 @@ function Video({
             <Videocam />
           </IconButton>
         </Tooltip>
-
+        <Tooltip title="Replay last captured motion">
+          <IconButton className="toolbar-item" onClick={replayCallback} color="secondary" size="small">
+            <Replay />
+          </IconButton>
+        </Tooltip>
         <FormControlLabel
           className="toolbar-item"
           control={
