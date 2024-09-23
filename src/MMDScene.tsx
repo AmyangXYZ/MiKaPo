@@ -31,10 +31,12 @@ const availableModels = ["深空之眼-托特", "深空之眼-托特2", "鸣潮-
 function MMDScene({
   pose,
   face,
+  lerpFactor,
   setFps,
 }: {
   pose: NormalizedLandmark[] | null
   face: NormalizedLandmark[] | null
+  lerpFactor: number
   setFps: (fps: number) => void
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -138,7 +140,6 @@ function MMDScene({
   }, [sceneRendered, sceneRef, mmdRuntimeRef, selectedModel])
 
   useEffect(() => {
-    const lerpFactor = 0.5
     const scale = 10
     const yOffset = 7
     const visibilityThreshold = 0.1
@@ -466,7 +467,7 @@ function MMDScene({
     if (sceneRef.current && mmdModelRef.current) {
       updateMMDPose(mmdModelRef.current, pose)
     }
-  }, [pose])
+  }, [pose, lerpFactor])
 
   useEffect(() => {
     const updateMMDFace = (mmdModel: MmdModel | null, face: NormalizedLandmark[] | null): void => {

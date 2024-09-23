@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 
-import {
-  FilesetResolver,
-  PoseLandmarker,
-  NormalizedLandmark,
-  DrawingUtils,
-  FaceLandmarker,
-} from "@mediapipe/tasks-vision"
-import { FormControlLabel, IconButton, Switch } from "@mui/material"
-import { Videocam, Movie } from "@mui/icons-material"
+import { FilesetResolver, PoseLandmarker, NormalizedLandmark, FaceLandmarker } from "@mediapipe/tasks-vision"
+import { FormControlLabel, IconButton, Switch, Tooltip } from "@mui/material"
+import { Videocam, CloudUpload } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
 
 const defaultVideoSrc = "./video/flash.mp4"
@@ -28,25 +22,60 @@ const VisuallyHiddenInput = styled("input")({
 function Video({
   setPose,
   setFace,
+  setLerpFactor,
 }: {
   setPose: (pose: NormalizedLandmark[]) => void
   setFace: (face: NormalizedLandmark[]) => void
+  setLerpFactor: (lerpFactor: number) => void
 }): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [videoSrc, setVideoSrc] = useState<string>(defaultVideoSrc)
+  const [imgSrc, setImgSrc] = useState<string>("")
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false)
-  const isDebug = useRef<boolean>(true)
   const isPoseDetectionEnabled = useRef<boolean>(true)
   const isFaceDetectionEnabled = useRef<boolean>(true)
+  const poseDetectorRef = useRef<PoseLandmarker | null>(null)
+  const faceDetectorRef = useRef<FaceLandmarker | null>(null)
+  const [lastMedia, setLastMedia] = useState<string>("VIDEO")
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
       const url = URL.createObjectURL(file)
-      setVideoSrc(url)
-      if (videoRef.current) {
-        videoRef.current.currentTime = 0
+      if (file.type.includes("video")) {
+        if (lastMedia === "IMAGE") {
+          setLerpFactor(0.5)
+          poseDetectorRef.current?.setOptions({ runningMode: "VIDEO" }).then(() => {
+            faceDetectorRef.current?.setOptions({ runningMode: "VIDEO" }).then(() => {
+              setVideoSrc(url)
+              setImgSrc("")
+              if (videoRef.current) {
+                videoRef.current.currentTime = 0
+              }
+            })
+          })
+        } else {
+          setVideoSrc(url)
+          if (videoRef.current) {
+            videoRef.current.currentTime = 0
+          }
+        }
+        setLastMedia("VIDEO")
+      } else if (file.type.includes("image")) {
+        if (lastMedia === "VIDEO") {
+          setLerpFactor(1)
+          poseDetectorRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
+            faceDetectorRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
+              setVideoSrc("")
+              setImgSrc(url)
+            })
+          })
+        } else {
+          setImgSrc(url)
+        }
+        setLastMedia("IMAGE")
       }
     }
   }
@@ -62,34 +91,33 @@ function Video({
       setVideoSrc(defaultVideoSrc)
       if (videoRef.current) {
         videoRef.current.srcObject = null
-        videoRef.current.src = defaultVideoSrc
         videoRef.current.load()
       }
     } else {
       try {
+        setIsCameraActive(true)
         const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+        if (lastMedia === "IMAGE") {
+          await poseDetectorRef.current?.setOptions({ runningMode: "VIDEO" })
+          await faceDetectorRef.current?.setOptions({ runningMode: "VIDEO" })
+          setLerpFactor(0.5)
+          setImgSrc("")
+        }
         if (videoRef.current) {
           videoRef.current.srcObject = stream
           videoRef.current.play()
         }
-        setIsCameraActive(true)
+        setLastMedia("VIDEO")
       } catch (error) {
         console.error("Error accessing camera:", error)
       }
     }
   }
 
-  const toggleDebug = () => {
-    isDebug.current = !isDebug.current
-    if (!isDebug.current && canvasRef.current) {
-      canvasRef.current.getContext("2d")?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
-    }
-  }
-
   useEffect(() => {
     FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm").then(
       async (vision) => {
-        const poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        poseDetectorRef.current = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath:
               "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
@@ -101,7 +129,8 @@ function Video({
           minTrackingConfidence: 0.5,
           outputSegmentationMasks: false,
         })
-        const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+
+        faceDetectorRef.current = await FaceLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath:
               "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
@@ -115,56 +144,47 @@ function Video({
           minFaceDetectionConfidence: 0.2,
         })
 
-        const canvasCtx = canvasRef.current?.getContext("2d")
-        if (canvasCtx) {
-          canvasCtx.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height)
-        }
-        const drawingUtils = new DrawingUtils(canvasCtx as CanvasRenderingContext2D)
-
-        const drawPose = (landmarks: NormalizedLandmark[]) => {
-          drawingUtils.drawLandmarks(landmarks, {
-            radius: 2,
-          })
-          drawingUtils.drawConnectors(landmarks, PoseLandmarker.POSE_CONNECTIONS, {
-            color: "white",
-            lineWidth: 3,
-          })
-        }
-
-        const drawFace = (landmarks: NormalizedLandmark[]) => {
-          drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_TESSELATION, {
-            color: "white",
-            lineWidth: 1,
-          })
-        }
-
         let lastTime = performance.now()
+        let lastImgSrc = ""
         const detect = () => {
           if (videoRef.current && lastTime != videoRef.current.currentTime && videoRef.current.videoWidth > 0) {
-            if (canvasCtx) {
-              canvasCtx.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height)
-            }
-
             lastTime = videoRef.current.currentTime
             if (isPoseDetectionEnabled.current) {
-              poseLandmarker.detectForVideo(videoRef.current, performance.now(), (result) => {
+              poseDetectorRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
                 setPose(result.worldLandmarks[0])
-                if (canvasRef.current && isDebug.current) {
-                  drawPose(result.landmarks[0])
-                }
               })
             } else {
               setPose([])
             }
 
             if (isFaceDetectionEnabled.current) {
-              const faceResult = faceLandmarker.detectForVideo(videoRef.current, performance.now(), {})
-              setFace(faceResult.faceLandmarks[0])
-              if (canvasRef.current && faceResult.faceLandmarks.length > 0 && isDebug.current) {
-                drawFace(faceResult.faceLandmarks[0])
+              const faceResult = faceDetectorRef.current!.detectForVideo(videoRef.current, performance.now(), {})
+              if (faceResult?.faceLandmarks.length) {
+                setFace(faceResult.faceLandmarks[0])
+              } else {
+                setFace([])
               }
             } else {
               setFace([])
+            }
+          } else if (
+            imgRef.current &&
+            imgRef.current.src.length > 0 &&
+            imgRef.current.src != lastImgSrc &&
+            imgRef.current.complete
+          ) {
+            lastImgSrc = imgRef.current.src
+            if (isPoseDetectionEnabled.current) {
+              poseDetectorRef.current!.detect(imgRef.current, (result) => {
+                setPose(result.worldLandmarks[0])
+              })
+            }
+
+            if (isFaceDetectionEnabled.current) {
+              const faceResult = faceDetectorRef.current!.detect(imgRef.current, {})
+              if (faceResult?.faceLandmarks.length) {
+                setFace(faceResult.faceLandmarks[0])
+              }
             }
           }
           requestAnimationFrame(detect)
@@ -172,7 +192,7 @@ function Video({
         detect()
       }
     )
-  }, [setPose, setFace])
+  }, [setPose, setFace, imgRef, videoRef])
 
   useEffect(() => {
     const resizeCanvas = () => {
@@ -191,32 +211,40 @@ function Video({
         canvasRef.current.style.left = `${(containerWidth - scaledWidth) / 2}px`
         canvasRef.current.style.top = `${(containerHeight - scaledHeight) / 2}px`
       }
-    }
-
-    const videoElement = videoRef.current
-    if (videoElement) {
-      videoElement.addEventListener("loadedmetadata", resizeCanvas)
-      window.addEventListener("resize", resizeCanvas)
-    }
-
-    return () => {
-      if (videoElement) {
-        videoElement.removeEventListener("loadedmetadata", resizeCanvas)
+      if (imgRef.current && imgRef.current.complete && canvasRef.current) {
+        const containerWidth = imgRef.current.clientWidth
+        const containerHeight = imgRef.current.clientHeight
+        console.log("containerWidth", containerWidth)
+        canvasRef.current.width = containerWidth
+        canvasRef.current.height = containerHeight
+        canvasRef.current.style.width = `${containerWidth}px`
+        canvasRef.current.style.height = `${containerHeight}px`
+        canvasRef.current.style.left = "0"
+        canvasRef.current.style.top = "0"
       }
-      window.removeEventListener("resize", resizeCanvas)
     }
-  }, [])
+    resizeCanvas()
+  }, [videoSrc, imgSrc])
+
   return (
     <>
       <div className="toolbar">
-        <IconButton className="toolbar-item" color="info" component="label" disabled={isCameraActive}>
-          <Movie />
-          <VisuallyHiddenInput type="file" onChange={handleFileUpload} accept="video/*" disabled={isCameraActive} />
-        </IconButton>
-
-        <IconButton className="toolbar-item" onClick={toggleCamera} color={isCameraActive ? "error" : "success"}>
-          <Videocam />
-        </IconButton>
+        <Tooltip title="Upload a video or image">
+          <IconButton className="toolbar-item" color="primary" component="label" disabled={isCameraActive}>
+            <CloudUpload />
+            <VisuallyHiddenInput
+              type="file"
+              onChange={handleFileUpload}
+              accept="video/*, image/*"
+              disabled={isCameraActive}
+            />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Use your camera">
+          <IconButton className="toolbar-item" onClick={toggleCamera} color={isCameraActive ? "error" : "success"}>
+            <Videocam />
+          </IconButton>
+        </Tooltip>
 
         <FormControlLabel
           className="toolbar-item"
@@ -242,22 +270,20 @@ function Video({
           }
           label="Face"
         />
-        <FormControlLabel
-          className="toolbar-item"
-          control={<Switch checked={isDebug.current} onChange={toggleDebug} color="warning" size="small" />}
-          label="Landmark"
-        />
       </div>
       <div className="video-player">
-        <video
-          ref={videoRef}
-          controls={!isCameraActive}
-          playsInline
-          disablePictureInPicture
-          controlsList="nofullscreen noremoteplayback"
-          src={isCameraActive ? undefined : videoSrc}
-        />
-        <canvas ref={canvasRef} className="video-canvas" />
+        {videoSrc || isCameraActive ? (
+          <video
+            ref={videoRef}
+            controls={!isCameraActive}
+            playsInline
+            disablePictureInPicture
+            controlsList="nofullscreen noremoteplayback"
+            src={isCameraActive ? undefined : videoSrc}
+          />
+        ) : (
+          <img ref={imgRef} src={imgSrc} style={{ width: "100%", height: "auto" }} />
+        )}
       </div>
     </>
   )
