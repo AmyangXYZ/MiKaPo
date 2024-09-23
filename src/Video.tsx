@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
-import { FilesetResolver, PoseLandmarker, NormalizedLandmark, FaceLandmarker } from "@mediapipe/tasks-vision"
+import { FilesetResolver, NormalizedLandmark, HolisticLandmarker } from "@mediapipe/tasks-vision"
 import { FormControlLabel, IconButton, Switch, Tooltip } from "@mui/material"
 import { Videocam, CloudUpload } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
@@ -36,8 +36,7 @@ function Video({
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false)
   const isPoseDetectionEnabled = useRef<boolean>(true)
   const isFaceDetectionEnabled = useRef<boolean>(true)
-  const poseDetectorRef = useRef<PoseLandmarker | null>(null)
-  const faceDetectorRef = useRef<FaceLandmarker | null>(null)
+  const holisticLandmarkerRef = useRef<HolisticLandmarker | null>(null)
   const [lastMedia, setLastMedia] = useState<string>("VIDEO")
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -47,14 +46,12 @@ function Video({
       if (file.type.includes("video")) {
         if (lastMedia === "IMAGE") {
           setLerpFactor(0.5)
-          poseDetectorRef.current?.setOptions({ runningMode: "VIDEO" }).then(() => {
-            faceDetectorRef.current?.setOptions({ runningMode: "VIDEO" }).then(() => {
-              setVideoSrc(url)
-              setImgSrc("")
-              if (videoRef.current) {
-                videoRef.current.currentTime = 0
-              }
-            })
+          holisticLandmarkerRef.current?.setOptions({ runningMode: "VIDEO" }).then(() => {
+            setVideoSrc(url)
+            setImgSrc("")
+            if (videoRef.current) {
+              videoRef.current.currentTime = 0
+            }
           })
         } else {
           setVideoSrc(url)
@@ -66,11 +63,9 @@ function Video({
       } else if (file.type.includes("image")) {
         if (lastMedia === "VIDEO") {
           setLerpFactor(1)
-          poseDetectorRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
-            faceDetectorRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
-              setVideoSrc("")
-              setImgSrc(url)
-            })
+          holisticLandmarkerRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
+            setVideoSrc("")
+            setImgSrc(url)
           })
         } else {
           setImgSrc(url)
@@ -98,8 +93,7 @@ function Video({
         setIsCameraActive(true)
         const stream = await navigator.mediaDevices.getUserMedia({ video: true })
         if (lastMedia === "IMAGE") {
-          await poseDetectorRef.current?.setOptions({ runningMode: "VIDEO" })
-          await faceDetectorRef.current?.setOptions({ runningMode: "VIDEO" })
+          await holisticLandmarkerRef.current?.setOptions({ runningMode: "VIDEO" })
           setLerpFactor(0.5)
           setImgSrc("")
         }
@@ -115,33 +109,16 @@ function Video({
   }
 
   useEffect(() => {
-    FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm").then(
+    FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15/wasm").then(
       async (vision) => {
-        poseDetectorRef.current = await PoseLandmarker.createFromOptions(vision, {
+        holisticLandmarkerRef.current = await HolisticLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
-            delegate: "GPU",
-          },
-          runningMode: "VIDEO",
-          minPosePresenceConfidence: 0.5,
-          minPoseDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-          outputSegmentationMasks: false,
-        })
-
-        faceDetectorRef.current = await FaceLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+              "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task",
             delegate: "GPU",
           },
 
           runningMode: "VIDEO",
-          outputFaceBlendshapes: true,
-          numFaces: 1,
-          minFacePresenceConfidence: 0.2,
-          minFaceDetectionConfidence: 0.2,
         })
 
         let lastTime = performance.now()
@@ -149,24 +126,18 @@ function Video({
         const detect = () => {
           if (videoRef.current && lastTime != videoRef.current.currentTime && videoRef.current.videoWidth > 0) {
             lastTime = videoRef.current.currentTime
-            if (isPoseDetectionEnabled.current) {
-              poseDetectorRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
-                setPose(result.worldLandmarks[0])
-              })
-            } else {
-              setPose([])
-            }
-
-            if (isFaceDetectionEnabled.current) {
-              const faceResult = faceDetectorRef.current!.detectForVideo(videoRef.current, performance.now(), {})
-              if (faceResult?.faceLandmarks.length) {
-                setFace(faceResult.faceLandmarks[0])
+            holisticLandmarkerRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
+              if (isPoseDetectionEnabled.current && result.poseWorldLandmarks[0]) {
+                setPose(result.poseWorldLandmarks[0])
+              } else {
+                setPose([])
+              }
+              if (isFaceDetectionEnabled.current && result.faceLandmarks && result.faceLandmarks.length > 0) {
+                setFace(result.faceLandmarks[0])
               } else {
                 setFace([])
               }
-            } else {
-              setFace([])
-            }
+            })
           } else if (
             imgRef.current &&
             imgRef.current.src.length > 0 &&
@@ -174,18 +145,16 @@ function Video({
             imgRef.current.complete
           ) {
             lastImgSrc = imgRef.current.src
-            if (isPoseDetectionEnabled.current) {
-              poseDetectorRef.current!.detect(imgRef.current, (result) => {
-                setPose(result.worldLandmarks[0])
-              })
-            }
-
-            if (isFaceDetectionEnabled.current) {
-              const faceResult = faceDetectorRef.current!.detect(imgRef.current, {})
-              if (faceResult?.faceLandmarks.length) {
-                setFace(faceResult.faceLandmarks[0])
+            holisticLandmarkerRef.current!.detect(imgRef.current, (result) => {
+              if (isPoseDetectionEnabled.current && result.poseLandmarks[0]) {
+                setPose(result.poseLandmarks[0])
+              } else {
+                setPose([])
               }
-            }
+              if (isFaceDetectionEnabled.current && result.faceLandmarks && result.faceLandmarks.length > 0) {
+                setFace(result.faceLandmarks[0])
+              }
+            })
           }
           requestAnimationFrame(detect)
         }
