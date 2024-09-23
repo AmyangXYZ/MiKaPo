@@ -6,8 +6,8 @@ import {
   HolisticLandmarker,
   HolisticLandmarkerResult,
 } from "@mediapipe/tasks-vision"
-import { FormControlLabel, IconButton, Switch, Tooltip } from "@mui/material"
-import { Videocam, CloudUpload, Replay } from "@mui/icons-material"
+import { IconButton, Tooltip } from "@mui/material"
+import { Videocam, CloudUpload, Replay, RadioButtonChecked, StopCircle } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
 
 const defaultVideoSrc = "./video/flash.mp4"
@@ -38,8 +38,8 @@ function Video({
   const [videoSrc, setVideoSrc] = useState<string>(defaultVideoSrc)
   const [imgSrc, setImgSrc] = useState<string>("")
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false)
-  const isPoseDetectionEnabled = useRef<boolean>(true)
-  const isFaceDetectionEnabled = useRef<boolean>(true)
+  const [isRecording, setIsRecording] = useState<boolean>(true)
+  const isRecordingRef = useRef<boolean>(true)
   const holisticLandmarkerRef = useRef<HolisticLandmarker | null>(null)
   const [lastMedia, setLastMedia] = useState<string>("VIDEO")
 
@@ -82,7 +82,6 @@ function Video({
   }
 
   const toggleCamera = async () => {
-    landmarkHistoryRef.current = []
     if (isCameraActive) {
       if (videoRef.current && videoRef.current.srcObject) {
         const tracks = (videoRef.current.srcObject as MediaStream).getTracks()
@@ -115,6 +114,14 @@ function Video({
     }
   }
 
+  const toggleRecording = () => {
+    if (isRecording) {
+      setIsRecording(false)
+    } else {
+      setIsRecording(true)
+    }
+  }
+
   useEffect(() => {
     FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15/wasm").then(
       async (vision) => {
@@ -134,16 +141,16 @@ function Video({
           if (videoRef.current && lastTime != videoRef.current.currentTime && videoRef.current.videoWidth > 0) {
             lastTime = videoRef.current.currentTime
             holisticLandmarkerRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
-              if (!isCameraActive) {
+              if (isRecordingRef.current) {
                 landmarkHistoryRef.current.push(result)
               }
 
-              if (isPoseDetectionEnabled.current && result.poseWorldLandmarks[0]) {
+              if (result.poseWorldLandmarks[0]) {
                 setPose(result.poseWorldLandmarks[0])
               } else {
                 setPose([])
               }
-              if (isFaceDetectionEnabled.current && result.faceLandmarks && result.faceLandmarks.length > 0) {
+              if (result.faceLandmarks && result.faceLandmarks.length > 0) {
                 setFace(result.faceLandmarks[0])
               } else {
                 setFace([])
@@ -157,12 +164,12 @@ function Video({
           ) {
             lastImgSrc = imgRef.current.src
             holisticLandmarkerRef.current!.detect(imgRef.current, (result) => {
-              if (isPoseDetectionEnabled.current && result.poseLandmarks[0]) {
+              if (result.poseLandmarks[0]) {
                 setPose(result.poseLandmarks[0])
               } else {
                 setPose([])
               }
-              if (isFaceDetectionEnabled.current && result.faceLandmarks && result.faceLandmarks.length > 0) {
+              if (result.faceLandmarks && result.faceLandmarks.length > 0) {
                 setFace(result.faceLandmarks[0])
               }
             })
@@ -172,7 +179,7 @@ function Video({
         detect()
       }
     )
-  }, [setPose, setFace, imgRef, videoRef, isCameraActive])
+  }, [setPose, setFace, imgRef, videoRef, isRecordingRef])
 
   const replayCallback = () => {
     let currentIndex = 0
@@ -182,13 +189,13 @@ function Video({
       if (currentIndex < landmarkHistoryRef.current.length) {
         const result = landmarkHistoryRef.current[currentIndex]
 
-        if (isPoseDetectionEnabled.current && result.poseWorldLandmarks && result.poseWorldLandmarks[0]) {
+        if (result.poseWorldLandmarks && result.poseWorldLandmarks[0]) {
           setPose(result.poseWorldLandmarks[0])
         } else {
           setPose([])
         }
 
-        if (isFaceDetectionEnabled.current && result.faceLandmarks && result.faceLandmarks.length > 0) {
+        if (result.faceLandmarks && result.faceLandmarks.length > 0) {
           setFace(result.faceLandmarks[0])
         } else {
           setFace([])
@@ -203,18 +210,14 @@ function Video({
   }
 
   useEffect(() => {
-    const clearLandmarkHistory = () => {
+    if (isRecording) {
       landmarkHistoryRef.current = []
+      isRecordingRef.current = true
+    } else {
+      isRecordingRef.current = false
+      // save recorded
     }
-
-    const videoElement = videoRef.current
-    if (videoElement) {
-      videoElement.addEventListener("play", clearLandmarkHistory)
-      return () => {
-        videoElement.removeEventListener("play", clearLandmarkHistory)
-      }
-    }
-  }, [])
+  }, [isRecording, isRecordingRef])
 
   return (
     <>
@@ -235,35 +238,22 @@ function Video({
             <Videocam />
           </IconButton>
         </Tooltip>
-        <Tooltip title="Replay last captured motion">
-          <IconButton className="toolbar-item" onClick={replayCallback} color="secondary" size="small">
+        <Tooltip title={isRecording ? "Stop recording" : "Record motion capture"}>
+          <IconButton className="toolbar-item" onClick={toggleRecording} color="secondary" size="small">
+            {isRecording ? <StopCircle /> : <RadioButtonChecked />}
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Replay last capture">
+          <IconButton
+            className="toolbar-item"
+            onClick={replayCallback}
+            color="secondary"
+            size="small"
+            disabled={isCameraActive}
+          >
             <Replay />
           </IconButton>
         </Tooltip>
-        <FormControlLabel
-          className="toolbar-item"
-          control={
-            <Switch
-              checked={isPoseDetectionEnabled.current}
-              onChange={(e) => (isPoseDetectionEnabled.current = e.target.checked)}
-              color="secondary"
-              size="small"
-            />
-          }
-          label="Pose"
-        />
-        <FormControlLabel
-          className="toolbar-item"
-          control={
-            <Switch
-              checked={isFaceDetectionEnabled.current}
-              onChange={(e) => (isFaceDetectionEnabled.current = e.target.checked)}
-              color="secondary"
-              size="small"
-            />
-          }
-          label="Face"
-        />
       </div>
       <div className="video-player">
         {videoSrc || isCameraActive ? (
