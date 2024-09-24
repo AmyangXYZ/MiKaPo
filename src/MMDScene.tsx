@@ -31,11 +31,15 @@ const availableModels = ["深空之眼-托特", "深空之眼-托特2", "鸣潮-
 function MMDScene({
   pose,
   face,
+  leftHand,
+  rightHand,
   lerpFactor,
   setFps,
 }: {
   pose: NormalizedLandmark[] | null
   face: NormalizedLandmark[] | null
+  leftHand: NormalizedLandmark[] | null
+  rightHand: NormalizedLandmark[] | null
   lerpFactor: number
   setFps: (fps: number) => void
 }): JSX.Element {
@@ -656,6 +660,8 @@ function MMDScene({
       updateMMDFace(mmdModelRef.current, face)
     }
   }, [face])
+
+  useEffect(() => {}, [leftHand, rightHand])
   return (
     <>
       <canvas ref={canvasRef} className="scene"></canvas>
