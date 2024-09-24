@@ -88,15 +88,11 @@ function Video({
         }
         setLastMedia("VIDEO")
       } else if (file.type.includes("image")) {
-        if (lastMedia === "VIDEO") {
-          setLerpFactor(1)
-          holisticLandmarkerRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
-            setVideoSrc("")
-            setImgSrc(url)
-          })
-        } else {
+        setLerpFactor(1)
+        holisticLandmarkerRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
+          setVideoSrc("")
           setImgSrc(url)
-        }
+        })
         setLastMedia("IMAGE")
       }
     }
@@ -235,10 +231,12 @@ function Video({
             imgRef.current &&
             imgRef.current.src.length > 0 &&
             imgRef.current.src != lastImgSrc &&
-            imgRef.current.complete
+            imgRef.current.complete &&
+            imgRef.current.naturalWidth > 0
           ) {
             lastImgSrc = imgRef.current.src
-            holisticLandmarkerRef.current!.detect(imgRef.current, (result) => {
+
+            holisticLandmarkerRef.current!.detect(imgRef.current!, (result) => {
               if (result.poseWorldLandmarks[0]) {
                 setPose(result.poseWorldLandmarks[0])
               } else {
