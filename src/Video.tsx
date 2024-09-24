@@ -202,7 +202,7 @@ function Video({
           ) {
             lastTime = videoRef.current.currentTime
             holisticLandmarkerRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
-              if (isRecordingRef.current) {
+              if (isRecordingRef.current && result.poseWorldLandmarks[0]) {
                 landmarkHistoryRef.current.push(result)
               }
 
