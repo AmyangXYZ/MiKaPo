@@ -299,7 +299,12 @@ function Video({
           </IconButton>
         </Tooltip>
         <Tooltip title={isOfflineProcessingRef.current ? "Stop processing" : "Process video offline at 60 FPS"}>
-          <IconButton className="toolbar-item" onClick={toggleProcessCurrentVideoOffline} color="error">
+          <IconButton
+            className="toolbar-item"
+            onClick={toggleProcessCurrentVideoOffline}
+            color="error"
+            disabled={isCameraActive}
+          >
             {!isOfflineProcessingRef.current ? (
               <LocalFireDepartment />
             ) : (
