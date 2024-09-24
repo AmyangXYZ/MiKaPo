@@ -55,7 +55,7 @@ function Video({
   const [isReplaying, setIsReplaying] = useState<boolean>(false)
   const holisticLandmarkerRef = useRef<HolisticLandmarker | null>(null)
   const [lastMedia, setLastMedia] = useState<string>("VIDEO")
-  const [isOfflineProcessing, setIsOfflineProcessing] = useState<boolean>(false)
+  const isOfflineProcessingRef = useRef<boolean>(false)
   const offlineProcessingProgressRef = useRef<number>(0)
   const landmarkHistoryRef = useRef<HolisticLandmarkerResult[]>([])
 
@@ -143,29 +143,29 @@ function Video({
   }
 
   const toggleProcessCurrentVideoOffline = async () => {
-    if (!videoRef.current || isOfflineProcessing) return
+    if (!videoRef.current) return
+    if (isOfflineProcessingRef.current) {
+      isOfflineProcessingRef.current = false
+      return
+    }
     const videoElement = videoRef.current
+    videoElement.currentTime = 0
+    videoElement.controls = false
 
-    // Clone the video element
-    const clonedVideoElement = document.createElement("video")
-    clonedVideoElement.src = videoElement.src
-    clonedVideoElement.style.display = "none"
-    document.body.appendChild(clonedVideoElement)
-    await clonedVideoElement.play()
-
-    clonedVideoElement.currentTime = 0
     landmarkHistoryRef.current = []
-
+    isOfflineProcessingRef.current = true
     const processFrame = async () => {
-      setIsOfflineProcessing(true)
-      if (clonedVideoElement.currentTime < clonedVideoElement.duration) {
-        offlineProcessingProgressRef.current = clonedVideoElement.currentTime / clonedVideoElement.duration
-        holisticLandmarkerRef.current!.detectForVideo(clonedVideoElement, performance.now(), (result) => {
+      if (!isOfflineProcessingRef.current) {
+        return
+      }
+      if (videoElement.currentTime < videoElement.duration) {
+        offlineProcessingProgressRef.current = videoElement.currentTime / videoElement.duration
+        holisticLandmarkerRef.current!.detectForVideo(videoElement, performance.now(), (result) => {
           landmarkHistoryRef.current.push(result)
         })
-        clonedVideoElement.currentTime += 1 / 60 // Process at 60 FPS
+        videoElement.currentTime += 1 / 60 // Process at 60 FPS
         await new Promise((resolve) => {
-          clonedVideoElement.onseeked = () => {
+          videoElement.onseeked = () => {
             resolve(null)
           }
         })
@@ -174,9 +174,8 @@ function Video({
     }
 
     await processFrame()
-    replayCallback(60)
-    setIsOfflineProcessing(false)
-    document.body.removeChild(clonedVideoElement)
+    // replayCallback(60)
+    isOfflineProcessingRef.current = false
   }
 
   useEffect(() => {
@@ -195,7 +194,12 @@ function Video({
         let lastTime = performance.now()
         let lastImgSrc = ""
         const detect = () => {
-          if (videoRef.current && lastTime != videoRef.current.currentTime && videoRef.current.videoWidth > 0) {
+          if (
+            videoRef.current &&
+            lastTime != videoRef.current.currentTime &&
+            videoRef.current.videoWidth > 0 &&
+            !isOfflineProcessingRef.current
+          ) {
             lastTime = videoRef.current.currentTime
             holisticLandmarkerRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
               if (isRecordingRef.current) {
@@ -277,7 +281,7 @@ function Video({
             className="toolbar-item"
             color="primary"
             component="label"
-            disabled={isCameraActive || isOfflineProcessing}
+            disabled={isCameraActive || isOfflineProcessingRef.current}
             size="small"
           >
             <CloudUpload />
@@ -289,14 +293,14 @@ function Video({
             className="toolbar-item"
             onClick={toggleCamera}
             color={isCameraActive ? "error" : "success"}
-            disabled={isOfflineProcessing}
+            disabled={isOfflineProcessingRef.current}
           >
             <Videocam />
           </IconButton>
         </Tooltip>
-        <Tooltip title="Process video offline at 60 FPS">
+        <Tooltip title={isOfflineProcessingRef.current ? "Stop processing" : "Process video offline at 60 FPS"}>
           <IconButton className="toolbar-item" onClick={toggleProcessCurrentVideoOffline} color="error">
-            {!isOfflineProcessing ? (
+            {!isOfflineProcessingRef.current ? (
               <LocalFireDepartment />
             ) : (
               <p style={{ fontSize: ".7rem" }}>{Math.round(offlineProcessingProgressRef.current * 100) + "%"}</p>
@@ -310,7 +314,7 @@ function Video({
             onClick={toggleRecording}
             color="secondary"
             size="small"
-            disabled={isOfflineProcessing}
+            disabled={isOfflineProcessingRef.current}
           >
             {isRecording ? (
               <>
@@ -330,10 +334,10 @@ function Video({
         <Tooltip title="Replay last capture">
           <IconButton
             className="toolbar-item"
-            onClick={() => replayCallback(30)}
+            onClick={() => replayCallback(60)}
             color="secondary"
             size="small"
-            disabled={isCameraActive || isReplaying || isOfflineProcessing}
+            disabled={isCameraActive || isReplaying || isOfflineProcessingRef.current}
           >
             <Replay />
           </IconButton>
