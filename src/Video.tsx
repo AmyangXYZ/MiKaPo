@@ -7,7 +7,7 @@ import {
   HolisticLandmarkerResult,
 } from "@mediapipe/tasks-vision"
 import { Badge, BadgeProps, IconButton, Tooltip } from "@mui/material"
-import { Videocam, CloudUpload, Replay, RadioButtonChecked, StopCircle } from "@mui/icons-material"
+import { Videocam, CloudUpload, Replay, RadioButtonChecked, StopCircle, LocalFireDepartment } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
 
 const defaultVideoSrc = "./video/flash.mp4"
@@ -55,7 +55,8 @@ function Video({
   const [isReplaying, setIsReplaying] = useState<boolean>(false)
   const holisticLandmarkerRef = useRef<HolisticLandmarker | null>(null)
   const [lastMedia, setLastMedia] = useState<string>("VIDEO")
-
+  const [isOfflineProcessing, setIsOfflineProcessing] = useState<boolean>(false)
+  const offlineProcessingProgressRef = useRef<number>(0)
   const landmarkHistoryRef = useRef<HolisticLandmarkerResult[]>([])
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -141,6 +142,43 @@ function Video({
     }
   }
 
+  const toggleProcessCurrentVideoOffline = async () => {
+    if (!videoRef.current || isOfflineProcessing) return
+    const videoElement = videoRef.current
+
+    // Clone the video element
+    const clonedVideoElement = document.createElement("video")
+    clonedVideoElement.src = videoElement.src
+    clonedVideoElement.style.display = "none"
+    document.body.appendChild(clonedVideoElement)
+    await clonedVideoElement.play()
+
+    clonedVideoElement.currentTime = 0
+    landmarkHistoryRef.current = []
+
+    const processFrame = async () => {
+      setIsOfflineProcessing(true)
+      if (clonedVideoElement.currentTime < clonedVideoElement.duration) {
+        offlineProcessingProgressRef.current = clonedVideoElement.currentTime / clonedVideoElement.duration
+        holisticLandmarkerRef.current!.detectForVideo(clonedVideoElement, performance.now(), (result) => {
+          landmarkHistoryRef.current.push(result)
+        })
+        clonedVideoElement.currentTime += 1 / 60 // Process at 60 FPS
+        await new Promise((resolve) => {
+          clonedVideoElement.onseeked = () => {
+            resolve(null)
+          }
+        })
+        await processFrame()
+      }
+    }
+
+    await processFrame()
+    replayCallback(60)
+    setIsOfflineProcessing(false)
+    document.body.removeChild(clonedVideoElement)
+  }
+
   useEffect(() => {
     FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15/wasm").then(
       async (vision) => {
@@ -200,10 +238,10 @@ function Video({
     )
   }, [setPose, setFace, imgRef, videoRef, isRecordingRef])
 
-  const replayCallback = () => {
+  const replayCallback = (fps: number) => {
     setIsReplaying(true)
     let currentIndex = 0
-    const frameInterval = 1000 / 30 // 30 FPS
+    const frameInterval = 1000 / fps
 
     const playNextFrame = () => {
       if (currentIndex < landmarkHistoryRef.current.length) {
@@ -235,23 +273,45 @@ function Video({
     <>
       <div className="toolbar">
         <Tooltip title="Upload a video or image">
-          <IconButton className="toolbar-item" color="primary" component="label" disabled={isCameraActive} size="small">
+          <IconButton
+            className="toolbar-item"
+            color="primary"
+            component="label"
+            disabled={isCameraActive || isOfflineProcessing}
+            size="small"
+          >
             <CloudUpload />
-            <VisuallyHiddenInput
-              type="file"
-              onChange={handleFileUpload}
-              accept="video/*, image/*"
-              disabled={isCameraActive}
-            />
+            <VisuallyHiddenInput type="file" onChange={handleFileUpload} accept="video/*, image/*" />
           </IconButton>
         </Tooltip>
         <Tooltip title="Use your camera">
-          <IconButton className="toolbar-item" onClick={toggleCamera} color={isCameraActive ? "error" : "success"}>
+          <IconButton
+            className="toolbar-item"
+            onClick={toggleCamera}
+            color={isCameraActive ? "error" : "success"}
+            disabled={isOfflineProcessing}
+          >
             <Videocam />
           </IconButton>
         </Tooltip>
+        <Tooltip title="Process video offline at 60 FPS">
+          <IconButton className="toolbar-item" onClick={toggleProcessCurrentVideoOffline} color="error">
+            {!isOfflineProcessing ? (
+              <LocalFireDepartment />
+            ) : (
+              <p style={{ fontSize: ".7rem" }}>{Math.round(offlineProcessingProgressRef.current * 100) + "%"}</p>
+            )}
+          </IconButton>
+        </Tooltip>
+
         <Tooltip title={isRecording ? "Stop recording" : "Record motion capture"}>
-          <IconButton className="toolbar-item" onClick={toggleRecording} color="secondary" size="small">
+          <IconButton
+            className="toolbar-item"
+            onClick={toggleRecording}
+            color="secondary"
+            size="small"
+            disabled={isOfflineProcessing}
+          >
             {isRecording ? (
               <>
                 <StyledBadge badgeContent={landmarkHistoryRef.current.length} color="secondary" max={999}>
@@ -270,10 +330,10 @@ function Video({
         <Tooltip title="Replay last capture">
           <IconButton
             className="toolbar-item"
-            onClick={replayCallback}
+            onClick={() => replayCallback(30)}
             color="secondary"
             size="small"
-            disabled={isCameraActive || isReplaying}
+            disabled={isCameraActive || isReplaying || isOfflineProcessing}
           >
             <Replay />
           </IconButton>
