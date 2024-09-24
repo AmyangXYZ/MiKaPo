@@ -6,11 +6,23 @@ import {
   HolisticLandmarker,
   HolisticLandmarkerResult,
 } from "@mediapipe/tasks-vision"
-import { IconButton, Tooltip } from "@mui/material"
+import { Badge, BadgeProps, IconButton, Tooltip } from "@mui/material"
 import { Videocam, CloudUpload, Replay, RadioButtonChecked, StopCircle } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
 
 const defaultVideoSrc = "./video/flash.mp4"
+
+const StyledBadge = styled(Badge)<BadgeProps>(({ theme }) => ({
+  "& .MuiBadge-badge": {
+    right: -3,
+    top: 4,
+    fontSize: ".66rem",
+    minWidth: "12px",
+    height: "12px",
+    border: `1px solid ${theme.palette.background.paper}`,
+    padding: "2px",
+  },
+}))
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",
@@ -40,12 +52,16 @@ function Video({
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false)
   const [isRecording, setIsRecording] = useState<boolean>(true)
   const isRecordingRef = useRef<boolean>(true)
+  const [isReplaying, setIsReplaying] = useState<boolean>(false)
   const holisticLandmarkerRef = useRef<HolisticLandmarker | null>(null)
   const [lastMedia, setLastMedia] = useState<string>("VIDEO")
 
   const landmarkHistoryRef = useRef<HolisticLandmarkerResult[]>([])
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (landmarkHistoryRef.current) {
+      landmarkHistoryRef.current = []
+    }
     const file = event.target.files?.[0]
     if (file) {
       const url = URL.createObjectURL(file)
@@ -117,8 +133,11 @@ function Video({
   const toggleRecording = () => {
     if (isRecording) {
       setIsRecording(false)
+      isRecordingRef.current = false
     } else {
+      landmarkHistoryRef.current = []
       setIsRecording(true)
+      isRecordingRef.current = true
     }
   }
 
@@ -182,8 +201,9 @@ function Video({
   }, [setPose, setFace, imgRef, videoRef, isRecordingRef])
 
   const replayCallback = () => {
+    setIsReplaying(true)
     let currentIndex = 0
-    const frameInterval = 1000 / 60 // 60 FPS
+    const frameInterval = 1000 / 30 // 30 FPS
 
     const playNextFrame = () => {
       if (currentIndex < landmarkHistoryRef.current.length) {
@@ -203,21 +223,13 @@ function Video({
 
         currentIndex++
         setTimeout(() => requestAnimationFrame(playNextFrame), frameInterval)
+      } else {
+        setIsReplaying(false)
       }
     }
 
     requestAnimationFrame(playNextFrame)
   }
-
-  useEffect(() => {
-    if (isRecording) {
-      landmarkHistoryRef.current = []
-      isRecordingRef.current = true
-    } else {
-      isRecordingRef.current = false
-      // save recorded
-    }
-  }, [isRecording, isRecordingRef])
 
   return (
     <>
@@ -240,7 +252,19 @@ function Video({
         </Tooltip>
         <Tooltip title={isRecording ? "Stop recording" : "Record motion capture"}>
           <IconButton className="toolbar-item" onClick={toggleRecording} color="secondary" size="small">
-            {isRecording ? <StopCircle /> : <RadioButtonChecked />}
+            {isRecording ? (
+              <>
+                <StyledBadge badgeContent={landmarkHistoryRef.current.length} color="secondary" max={999}>
+                  <StopCircle />
+                </StyledBadge>
+              </>
+            ) : (
+              <>
+                <StyledBadge badgeContent={landmarkHistoryRef.current.length} color="secondary" max={999}>
+                  <RadioButtonChecked />
+                </StyledBadge>
+              </>
+            )}
           </IconButton>
         </Tooltip>
         <Tooltip title="Replay last capture">
@@ -249,7 +273,7 @@ function Video({
             onClick={replayCallback}
             color="secondary"
             size="small"
-            disabled={isCameraActive}
+            disabled={isCameraActive || isReplaying}
           >
             <Replay />
           </IconButton>
