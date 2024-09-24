@@ -10,6 +10,8 @@ import { Download } from "@mui/icons-material"
 function App(): JSX.Element {
   const [pose, setPose] = useState<NormalizedLandmark[] | null>(null)
   const [face, setFace] = useState<NormalizedLandmark[] | null>(null)
+  const [leftHand, setLeftHand] = useState<NormalizedLandmark[] | null>(null)
+  const [rightHand, setRightHand] = useState<NormalizedLandmark[] | null>(null)
   const [lerpFactor, setLerpFactor] = useState<number>(0.5)
   const [fps, setFps] = useState<number>(0)
 
@@ -38,8 +40,21 @@ function App(): JSX.Element {
           </a>
         </div>
       </header>
-      <Video setPose={setPose} setFace={setFace} setLerpFactor={setLerpFactor}></Video>
-      <MMDScene pose={pose} face={face} lerpFactor={lerpFactor} setFps={setFps}></MMDScene>
+      <Video
+        setPose={setPose}
+        setFace={setFace}
+        setLeftHand={setLeftHand}
+        setRightHand={setRightHand}
+        setLerpFactor={setLerpFactor}
+      ></Video>
+      <MMDScene
+        pose={pose}
+        face={face}
+        leftHand={leftHand}
+        rightHand={rightHand}
+        lerpFactor={lerpFactor}
+        setFps={setFps}
+      ></MMDScene>
     </>
   )
 }
