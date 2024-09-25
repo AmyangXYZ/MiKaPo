@@ -38,6 +38,9 @@ function App(): JSX.Element {
               <Download sx={{ color: "white", fontSize: "1.5rem", marginTop: ".2rem" }} />
             </IconButton>
           </a>
+          <a href="https://www.buymeacoffee.com/amyang" target="_blank">
+            <img src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png" alt="Buy Me A Coffee" width={120} />
+          </a>
         </div>
       </header>
       <Video

@@ -34,8 +34,8 @@ body {
 .header {
   height: 2rem;
   width: 100%;
-  padding: 0 1rem;
-  top: 0;
+  padding: 0 0.5rem;
+  top: 0.5rem;
   left: 0;
   position: absolute;
   display: flex;
@@ -86,7 +86,7 @@ body {
 
 .video-player {
   position: absolute;
-  top: 4rem;
+  top: 4.5rem;
   left: 1rem;
   width: 400px;
   z-index: 1001;
@@ -99,7 +99,7 @@ video {
 
 .toolbar {
   position: absolute;
-  top: 2rem;
+  top: 2.5rem;
   left: 1rem;
   width: 400px;
   z-index: 1002;
