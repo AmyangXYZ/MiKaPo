@@ -26,7 +26,16 @@ import ammoPhysics from "./ammo/ammo.wasm"
 import { Box, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material"
 
 const defaultModel = "深空之眼-托特"
-const availableModels = ["深空之眼-托特", "深空之眼-大梵天", "深空之眼-芭丝特", "鸣潮-吟霖", "原神-荧"]
+const availableModels = [
+  "深空之眼-托特",
+  "深空之眼-大梵天",
+  "深空之眼-塞勒涅",
+  "深空之眼-英招",
+  "深空之眼-芭丝特",
+  "尘白禁区-里芙",
+  "鸣潮-吟霖",
+  "原神-荧",
+]
 
 function MMDScene({
   pose,
@@ -201,24 +210,26 @@ function MMDScene({
         const leftShoulder = getKeypoint("left_shoulder")
         const rightShoulder = getKeypoint("right_shoulder")
         const neckBone = getBone("首")
-        const upperBodyBone = getBone("上半身")
-        if (nose && leftShoulder && rightShoulder && neckBone && upperBodyBone) {
+        if (nose && leftShoulder && rightShoulder && neckBone) {
           const neckPos = leftShoulder.add(rightShoulder).scale(0.5)
           const headDir = nose.subtract(neckPos).normalize()
-          headDir.y = -headDir.y
 
-          const upperBodyRotation = Quaternion.Slerp(
-            upperBodyBone.rotationQuaternion || new Quaternion(),
-            Quaternion.FromLookDirectionLH(headDir, Vector3.Forward()),
-            lerpFactor
-          )
-          const upperBodyRotationMatrix = new Matrix()
-          Matrix.FromQuaternionToRef(upperBodyRotation, upperBodyRotationMatrix)
-          const localHeadDir = Vector3.TransformNormal(headDir, upperBodyRotationMatrix.invert())
-          const localHeadQuat = Quaternion.FromLookDirectionLH(localHeadDir, Vector3.Up())
+          const forwardDir = new Vector3(-headDir.x, 0, headDir.z).normalize()
+
+          const tiltAngle = Math.atan2(-headDir.y, forwardDir.length())
+
+          // Add a constant offset to the tilt angle to correct the head orientation
+          const tiltOffset = -Math.PI / 6 // Adjust this value as needed
+          const adjustedTiltAngle = tiltAngle + tiltOffset
+
+          const horizontalQuat = Quaternion.FromLookDirectionLH(forwardDir, Vector3.Up())
+
+          const tiltQuat = Quaternion.RotationAxis(Vector3.Right(), adjustedTiltAngle)
+
+          const combinedQuat = horizontalQuat.multiply(tiltQuat)
 
           neckBone.setRotationQuaternion(
-            Quaternion.Slerp(neckBone.rotationQuaternion || new Quaternion(), localHeadQuat, lerpFactor),
+            Quaternion.Slerp(neckBone.rotationQuaternion || new Quaternion(), combinedQuat, lerpFactor),
             Space.LOCAL
           )
         }
