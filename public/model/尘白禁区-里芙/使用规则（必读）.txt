@@ -1,0 +1,38 @@
+感谢下载该模型！
+Thanks for downloading!
+
+Model by 尘白禁区/神帝宇
+
+
+====【改造/Editing】====
+
+◆允许改造，适度更改衣装，添加spa、toon贴图等
+Allow to edit, change clothes, add spa and toon, etc.
+
+◆允许完善物理，修正模型权重、表情等bug
+Allow to improve physics and fix model weights, emoticons and other bugs.
+
+====【禁止事项/Forbidden】====
+
+◆不允许二次配布
+Not allowed to redistribute this model.
+
+◆不允许拆取部件、将部件挪用至其他模型
+Not allowed to remove parts or transfer parts to other models.
+
+◆不允许用于18禁（色情、血腥、暴力……）、宗教宣传、违反法律等的作品
+Not allowed for 18 prohibition (pornography, blood, violence...), religious propaganda, illegal works, etc.
+
+◆不允许用于商业、贩卖等涉及金钱交易的行为
+Not allowed to be used for business, selling and other activities involving money transactions.
+
+====【免责声明/Disclaimer】====
+
+◆请使用者自觉遵守相关规则，他人使用本模型所造成的一切不良后果，模型改造者和尘白禁区不承担任何责任
+Users are required to abide by the relevant rules consciously. The model editor and Seasun Games shall not bear any responsibility for any adverse consequences caused by the use of this model by others.
+
+◆模型提供：尘白禁区
+Models were provided by Snowbreak: Containment Zone.
+
+◆版权归属：尘白禁区
+COPYRIGHT©2024 Seasun Games
