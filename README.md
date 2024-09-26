@@ -2,7 +2,7 @@
 
 <img width="300px" alt="demo_pose" src="./logo.jpg" />
 
-[MiKaPo](https://mikapo.amyang.dev) is a **Web-based tool** that poses MMD models from video input in real-time.
+[MiKaPo](https://mikapo.amyang.dev) is a **Web-based tool** that poses MMD models from video input in real-time. Welcome feature requests and PRs!
 
 <img width="400px" alt="demo_pose" src="./demo1.gif" />
 <img width="400px" alt="demo_face" src="./demo2.gif" />
@@ -19,10 +19,12 @@
 - [x] Pose detection
 - [x] Face detection
 - [ ] Hand detection
-- [x] Video upload
+- [ ] Environment selection
+- [x] Video, image upload
 - [x] Camera input
-- [ ] Model selection
-- [ ] Ollama support (electron version)
+- [x] Model selection
+- [ ] Ollama support ([electron version](https://github.com/AmyangXYZ/MiKaPo-Electron))
+- [ ] VMD export
 
 ## Project Setup
 
