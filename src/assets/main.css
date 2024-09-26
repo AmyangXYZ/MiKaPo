@@ -129,6 +129,12 @@ video {
   height: 100vh;
 }
 
+.scene-selector {
+  position: absolute;
+  bottom: 5.5rem;
+  right: 1rem;
+}
+
 .model-selector {
   position: absolute;
   bottom: 0.5rem;
