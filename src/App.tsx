@@ -2,7 +2,7 @@ import { useState } from "react"
 import Video from "./Video"
 import MMDScene from "./MMDScene"
 import { NormalizedLandmark } from "@mediapipe/tasks-vision"
-import { IconButton } from "@mui/material"
+import { Avatar, IconButton } from "@mui/material"
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
 import { faGithub } from "@fortawesome/free-brands-svg-icons"
 import { Download } from "@mui/icons-material"
@@ -24,9 +24,26 @@ function App(): JSX.Element {
         </div>
       )}
       <header className="header">
-        <h3>MiKaPo</h3>
+        <div className="header-item">
+          <Avatar
+            alt="MiKaPo"
+            src="/logo.png"
+            sx={{
+              width: 36,
+              height: 36,
+              marginRight: ".5rem",
+              transition: "transform 2s ease-in-out",
+              "&:hover": {
+                transform: "rotate(360deg)",
+              },
+            }}
+          />
+          <h2>MiKaPo </h2>
+        </div>
 
-        <p>FPS: {fps}</p>
+        <div className="header-item" style={{ marginTop: "-.7rem" }}>
+          <p>FPS: {fps}</p>
+        </div>
         <div className="header-item">
           <a href="https://github.com/AmyangXYZ/MiKaPo" target="_blank">
             <IconButton>
@@ -42,8 +59,8 @@ function App(): JSX.Element {
             <img
               src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png"
               alt="Buy Me A Coffee"
-              width={120}
-              height={28}
+              width={140}
+              height={34}
             />
           </a>
         </div>
