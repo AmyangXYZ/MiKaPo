@@ -10,6 +10,7 @@ import {
   Matrix,
   Mesh,
   MeshBuilder,
+  PhotoDome,
   Quaternion,
   Scene,
   SceneLoader,
@@ -24,6 +25,9 @@ import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
 import ammoPhysics from "./ammo/ammo.wasm"
 import { Box, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material"
+
+const defaultScene = "Static"
+const availableScenes = ["Static", "Office", "Bedroom"]
 
 const defaultModel = "深空之眼-托特"
 const availableModels = [
@@ -55,10 +59,16 @@ function MMDScene({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sceneRef = useRef<Scene | null>(null)
   const [sceneRendered, setSceneRendered] = useState<boolean>(false)
+  const [selectedScene, setSelectedScene] = useState<string>(defaultScene)
   const [selectedModel, setSelectedModel] = useState<string>(defaultModel)
   const mmdModelRef = useRef<MmdModel | null>(null)
   const mmdRuntimeRef = useRef<MmdRuntime | null>(null)
   const shadowGeneratorRef = useRef<ShadowGenerator | null>(null)
+  const domeRef = useRef<PhotoDome | null>(null)
+
+  const handleSceneChange = (event: SelectChangeEvent): void => {
+    setSelectedScene(event.target.value)
+  }
 
   const handleModelChange = (event: SelectChangeEvent): void => {
     setSelectedModel(event.target.value)
@@ -127,6 +137,26 @@ function MMDScene({
       })
     }
   }, [setFps, setSceneRendered])
+
+  useEffect(() => {
+    if (domeRef.current) {
+      domeRef.current.dispose()
+    }
+    if (sceneRef.current && selectedScene !== "Static") {
+      domeRef.current = new PhotoDome(
+        "testdome",
+        `/textures/${selectedScene}.jpeg`,
+        {
+          resolution: 32,
+          size: 500,
+          useDirectMapping: false,
+        },
+        sceneRef.current
+      )
+      domeRef.current.imageMode = PhotoDome.MODE_MONOSCOPIC
+      domeRef.current.position.y = 0
+    }
+  }, [sceneRendered, sceneRef, selectedScene])
 
   useEffect(() => {
     const loadMMD = async (): Promise<void> => {
@@ -214,7 +244,7 @@ function MMDScene({
           const neckPos = leftShoulder.add(rightShoulder).scale(0.5)
           const headDir = nose.subtract(neckPos).normalize()
 
-          const forwardDir = new Vector3(-headDir.x, 0, headDir.z).normalize()
+          const forwardDir = new Vector3(headDir.x, 0, headDir.z).normalize()
 
           const tiltAngle = Math.atan2(-headDir.y, forwardDir.length())
 
@@ -678,6 +708,24 @@ function MMDScene({
   return (
     <>
       <canvas ref={canvasRef} className="scene"></canvas>
+      <Box className="scene-selector">
+        <FormControl sx={{ borderColor: "white" }}>
+          <InputLabel sx={{ color: "white", fontSize: ".9rem" }}>Scene</InputLabel>
+          <Select
+            label="Scene"
+            value={selectedScene}
+            onChange={handleSceneChange}
+            sx={{ color: "white", fontSize: ".9rem" }}
+            autoWidth
+          >
+            {availableScenes.map((scene) => (
+              <MenuItem sx={{ fontSize: ".8rem" }} key={scene} value={scene}>
+                {scene}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Box>
       <Box className="model-selector">
         <FormControl sx={{ borderColor: "white" }}>
           <InputLabel sx={{ color: "white", fontSize: ".9rem" }}>Model</InputLabel>
