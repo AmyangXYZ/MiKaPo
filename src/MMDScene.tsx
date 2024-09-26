@@ -191,6 +191,7 @@ function MMDScene({
         const point = pose[keypointIndexByName[name]]
         return point.visibility > visibilityThreshold ? new Vector3(point.x, point.y, point.z) : null
       }
+
       const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
         return mmdModel!.skeleton.bones.find((bone) => bone.name === name)
       }
@@ -204,10 +205,11 @@ function MMDScene({
         if (nose && leftShoulder && rightShoulder && neckBone && upperBodyBone) {
           const neckPos = leftShoulder.add(rightShoulder).scale(0.5)
           const headDir = nose.subtract(neckPos).normalize()
+          headDir.y = -headDir.y
 
           const upperBodyRotation = Quaternion.Slerp(
             upperBodyBone.rotationQuaternion || new Quaternion(),
-            Quaternion.FromLookDirectionLH(headDir, Vector3.Up()),
+            Quaternion.FromLookDirectionLH(headDir, Vector3.Forward()),
             lerpFactor
           )
           const upperBodyRotationMatrix = new Matrix()
