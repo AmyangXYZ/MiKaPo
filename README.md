@@ -19,7 +19,7 @@
 - [x] Pose detection
 - [x] Face detection
 - [ ] Hand detection
-- [ ] Environment selection
+- [x] Environment selection
 - [x] Video, image upload
 - [x] Camera input
 - [x] Model selection

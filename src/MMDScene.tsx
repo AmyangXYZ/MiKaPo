@@ -240,7 +240,7 @@ function MMDScene({
           const tiltAngle = Math.atan2(-headDir.y, forwardDir.length())
 
           // Add a constant offset to the tilt angle to correct the head orientation
-          const tiltOffset = -Math.PI / 6 // Adjust this value as needed
+          const tiltOffset = -Math.PI / 5 // Adjust this value as needed
           const adjustedTiltAngle = tiltAngle + tiltOffset
 
           const horizontalQuat = Quaternion.FromLookDirectionLH(forwardDir, Vector3.Up())
