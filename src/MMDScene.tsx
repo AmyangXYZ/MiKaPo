@@ -20,10 +20,16 @@ import {
   Vector3,
 } from "@babylonjs/core"
 import { NormalizedLandmark } from "@mediapipe/tasks-vision"
-import { MmdAmmoJSPlugin, MmdAmmoPhysics, MmdModel, MmdRuntime } from "babylon-mmd"
+import {
+  getMmdWasmInstance,
+  MmdWasmInstanceTypeMPD,
+  MmdWasmModel,
+  MmdWasmPhysics,
+  MmdWasmRuntime,
+  SdefInjector,
+} from "babylon-mmd"
 import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
-import ammoPhysics from "./ammo/ammo.wasm"
 import { Box, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material"
 
 const defaultScene = "Static"
@@ -52,8 +58,8 @@ function MMDScene({
   const [sceneRendered, setSceneRendered] = useState<boolean>(false)
   const [selectedScene, setSelectedScene] = useState<string>(defaultScene)
   const [selectedModel, setSelectedModel] = useState<string>(defaultModel)
-  const mmdModelRef = useRef<MmdModel | null>(null)
-  const mmdRuntimeRef = useRef<MmdRuntime | null>(null)
+  const mmdModelRef = useRef<MmdWasmModel | null>(null)
+  const mmdRuntimeRef = useRef<MmdWasmRuntime | null>(null)
   const shadowGeneratorRef = useRef<ShadowGenerator | null>(null)
   const domeRef = useRef<PhotoDome | null>(null)
 
@@ -68,14 +74,13 @@ function MMDScene({
   useEffect(() => {
     const createScene = async (canvas: HTMLCanvasElement): Promise<Scene> => {
       const engine = new Engine(canvas, true, {}, true)
+      SdefInjector.OverrideEngineCreateEffect(engine)
       const scene = new Scene(engine)
       scene.clearColor = new Color4(0, 0, 0, 0)
-      const physicsInstance = await ammoPhysics()
-      const physicsPlugin = new MmdAmmoJSPlugin(true, physicsInstance)
-      scene.enablePhysics(new Vector3(0, -98, 0), physicsPlugin)
-      mmdRuntimeRef.current = new MmdRuntime(scene, new MmdAmmoPhysics(scene))
+      const mmdWasmInstance = await getMmdWasmInstance(new MmdWasmInstanceTypeMPD(), 2)
+      mmdRuntimeRef.current = new MmdWasmRuntime(mmdWasmInstance, scene, new MmdWasmPhysics(scene))
       mmdRuntimeRef.current.register(scene)
-
+      mmdRuntimeRef.current.physics!.createGroundModel?.([0])
       const camera = new ArcRotateCamera("ArcRotateCamera", 0, 0, 45, new Vector3(0, 12, 0), scene)
       camera.setPosition(new Vector3(0, 15, -27))
       camera.attachControl(canvas, false)
@@ -156,19 +161,20 @@ function MMDScene({
         mmdRuntimeRef.current.destroyMmdModel(mmdModelRef.current)
         mmdModelRef.current.mesh.dispose()
       }
-      SceneLoader.ImportMeshAsync(
-        undefined,
-        `./model/${selectedModel}/`,
-        `${selectedModel}.pmx`,
-        sceneRef.current
-      ).then((result) => {
-        const mesh = result.meshes[0]
-        for (const m of mesh.metadata.meshes) {
-          m.receiveShadows = true
+      SceneLoader.ImportMeshAsync(undefined, `/model/${selectedModel}/`, `${selectedModel}.pmx`, sceneRef.current).then(
+        (result) => {
+          const mesh = result.meshes[0]
+          for (const m of mesh.metadata.meshes) {
+            m.receiveShadows = true
+          }
+          shadowGeneratorRef.current!.addShadowCaster(mesh)
+          mmdModelRef.current = mmdRuntimeRef.current!.createMmdModel(mesh as Mesh, {
+            buildPhysics: {
+              worldId: 0,
+            },
+          })
         }
-        shadowGeneratorRef.current!.addShadowCaster(mesh)
-        mmdModelRef.current = mmdRuntimeRef.current!.createMmdModel(mesh as Mesh)
-      })
+      )
     }
     loadMMD()
   }, [sceneRendered, sceneRef, mmdRuntimeRef, selectedModel])
@@ -212,7 +218,7 @@ function MMDScene({
       left_foot_index: 31,
       right_foot_index: 32,
     }
-    const updateMMDPose = (mmdModel: MmdModel | null, pose: NormalizedLandmark[] | null): void => {
+    const updateMMDPose = (mmdModel: MmdWasmModel | null, pose: NormalizedLandmark[] | null): void => {
       if (!pose || !mmdModel || pose.length === 0) {
         return
       }
@@ -508,7 +514,7 @@ function MMDScene({
   }, [pose, lerpFactor])
 
   useEffect(() => {
-    const updateMMDFace = (mmdModel: MmdModel | null, face: NormalizedLandmark[] | null): void => {
+    const updateMMDFace = (mmdModel: MmdWasmModel | null, face: NormalizedLandmark[] | null): void => {
       if (!face || !mmdModel || face.length === 0) {
         return
       }
