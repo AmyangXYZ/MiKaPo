@@ -146,6 +146,7 @@ function Video({
     if (!videoRef.current) return
     if (isOfflineProcessingRef.current) {
       isOfflineProcessingRef.current = false
+      videoRef.current.controls = true
       return
     }
     const videoElement = videoRef.current
@@ -176,6 +177,7 @@ function Video({
     await processFrame()
     // replayCallback(60)
     isOfflineProcessingRef.current = false
+    videoElement.controls = true
   }
 
   useEffect(() => {
@@ -266,6 +268,9 @@ function Video({
 
   const replayCallback = (fps: number) => {
     setIsReplaying(true)
+    if (videoRef.current) {
+      videoRef.current.controls = false
+    }
     let currentIndex = 0
     const frameInterval = 1000 / fps
 
@@ -289,6 +294,9 @@ function Video({
         setTimeout(() => requestAnimationFrame(playNextFrame), frameInterval)
       } else {
         setIsReplaying(false)
+        if (videoRef.current) {
+          videoRef.current.controls = true
+        }
       }
     }
 

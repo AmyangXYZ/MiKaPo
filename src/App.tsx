@@ -56,12 +56,7 @@ function App(): JSX.Element {
             </IconButton>
           </a>
           <a href="https://www.buymeacoffee.com/amyang" target="_blank">
-            <img
-              src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png"
-              alt="Buy Me A Coffee"
-              width={140}
-              height={34}
-            />
+            <img src="/coffee.png" alt="Buy Me A Coffee" width={140} height={34} />
           </a>
         </div>
       </header>
