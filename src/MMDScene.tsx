@@ -35,7 +35,6 @@ import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeL
 import { Box, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material"
 
 import "@babylonjs/core/Engines/shaderStore"
-import "@babylonjs/core/Materials/Textures/Loaders/tgaTextureLoader"
 
 registerSceneLoaderPlugin(new PmxLoader())
 
@@ -69,6 +68,7 @@ function MMDScene({
   const mmdRuntimeRef = useRef<MmdWasmRuntime | null>(null)
   const shadowGeneratorRef = useRef<ShadowGenerator | null>(null)
   const domeRef = useRef<PhotoDome | null>(null)
+  const groundRef = useRef<Mesh | null>(null)
 
   const handleSceneChange = (event: SelectChangeEvent): void => {
     setSelectedScene(event.target.value)
@@ -116,14 +116,15 @@ function MMDScene({
       backgroundMaterial.shadowLevel = 0.4
       backgroundMaterial.useRGBColor = false
       backgroundMaterial.primaryColor = Color3.Magenta()
-      const ground = MeshBuilder.CreateGround("Ground", {
-        width: 28,
-        height: 28,
+
+      groundRef.current = MeshBuilder.CreateGround("Ground", {
+        width: 32,
+        height: 32,
         subdivisions: 2,
         updatable: false,
       })
-      ground.material = backgroundMaterial
-      ground.receiveShadows = true
+      groundRef.current!.material = backgroundMaterial
+      groundRef.current!.receiveShadows = true
 
       engine.runRenderLoop(() => {
         setFps(Math.round(engine.getFps()))
@@ -145,19 +146,27 @@ function MMDScene({
     if (domeRef.current) {
       domeRef.current.dispose()
     }
-    if (sceneRef.current && selectedScene !== "Static") {
-      domeRef.current = new PhotoDome(
-        "testdome",
-        `/textures/${selectedScene}.jpeg`,
-        {
-          resolution: 32,
-          size: 500,
-          useDirectMapping: false,
-        },
-        sceneRef.current
-      )
-      domeRef.current.imageMode = PhotoDome.MODE_MONOSCOPIC
-      domeRef.current.position.y = 0
+
+    if (sceneRef.current) {
+      if (selectedScene !== "Static") {
+        if (groundRef.current) {
+          groundRef.current.material!.alpha = 0
+        }
+        domeRef.current = new PhotoDome(
+          "testdome",
+          `/textures/${selectedScene}.jpeg`,
+          {
+            resolution: 32,
+            size: 500,
+          },
+          sceneRef.current
+        )
+        domeRef.current!.rotation.y = Math.PI / 2
+      } else {
+        if (groundRef.current) {
+          groundRef.current.material!.alpha = 1
+        }
+      }
     }
   }, [sceneRendered, sceneRef, selectedScene])
 
