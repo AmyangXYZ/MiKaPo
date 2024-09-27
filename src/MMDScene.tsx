@@ -253,13 +253,23 @@ function MMDScene({
         const leftShoulder = getKeypoint("left_shoulder")
         const rightShoulder = getKeypoint("right_shoulder")
         const neckBone = getBone("首")
-        if (nose && leftShoulder && rightShoulder && neckBone) {
+        const upperBodyBone = getBone("上半身")
+
+        if (nose && leftShoulder && rightShoulder && neckBone && upperBodyBone) {
           const neckPos = leftShoulder.add(rightShoulder).scale(0.5)
           const headDir = nose.subtract(neckPos).normalize()
 
-          const forwardDir = new Vector3(headDir.x, 0, headDir.z).normalize()
+          // Get the upper body's current rotation
+          const upperBodyRotation = upperBodyBone.rotationQuaternion || new Quaternion()
+          const upperBodyRotationMatrix = new Matrix()
+          Matrix.FromQuaternionToRef(upperBodyRotation, upperBodyRotationMatrix)
 
-          const tiltAngle = Math.atan2(-headDir.y, forwardDir.length())
+          // Transform head direction to local space relative to upper body
+          const localHeadDir = Vector3.TransformNormal(headDir, upperBodyRotationMatrix.invert())
+
+          const forwardDir = new Vector3(localHeadDir.x, 0, localHeadDir.z).normalize()
+
+          const tiltAngle = Math.atan2(-localHeadDir.y, forwardDir.length())
 
           // Add a constant offset to the tilt angle to correct the head orientation
           const tiltOffset = -Math.PI / 5 // Adjust this value as needed
@@ -271,8 +281,16 @@ function MMDScene({
 
           const combinedQuat = horizontalQuat.multiply(tiltQuat)
 
+          // Apply rotation limits
+          const maxRotationAngle = Math.PI / 3 // 60 degrees
+          const clampedQuat = Quaternion.FromEulerAngles(
+            Math.max(-maxRotationAngle, Math.min(maxRotationAngle, combinedQuat.toEulerAngles().x)),
+            Math.max(-maxRotationAngle, Math.min(maxRotationAngle, combinedQuat.toEulerAngles().y)),
+            Math.max(-maxRotationAngle, Math.min(maxRotationAngle, combinedQuat.toEulerAngles().z))
+          )
+
           neckBone.setRotationQuaternion(
-            Quaternion.Slerp(neckBone.rotationQuaternion || new Quaternion(), combinedQuat, lerpFactor),
+            Quaternion.Slerp(neckBone.rotationQuaternion || new Quaternion(), clampedQuat, lerpFactor),
             Space.LOCAL
           )
         }
