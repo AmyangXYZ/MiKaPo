@@ -6,6 +6,7 @@
 
 <img width="400px" alt="demo_pose" src="./demo1.gif" />
 <img width="400px" alt="demo_face" src="./demo2.gif" />
+<img width="400px" alt="demo_img" src="./demo3.png" />
 
 ## Tech Stack
 
