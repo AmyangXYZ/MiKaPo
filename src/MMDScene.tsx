@@ -30,7 +30,7 @@ const defaultScene = "Static"
 const availableScenes = ["Static", "Office", "Beach", "Bedroom"]
 
 const defaultModel = "深空之眼-托特"
-const availableModels = ["深空之眼-托特", "深空之眼-大梵天", "鸣潮-吟霖", "原神-荧"]
+const availableModels = ["深空之眼-托特", "深空之眼-托特2", "深空之眼-大梵天", "鸣潮-吟霖", "原神-荧"]
 
 function MMDScene({
   pose,
