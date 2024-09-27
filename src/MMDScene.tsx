@@ -248,6 +248,18 @@ function MMDScene({
         return mmdModel!.skeleton.bones.find((bone) => bone.name === name)
       }
 
+      const moveCenter = (): void => {
+        const leftHip = getKeypoint("left_hip")
+        const rightHip = getKeypoint("right_hip")
+        const centerBone = getBone("センター")
+        if (leftHip && rightHip && centerBone) {
+          const hipCenter = leftHip.add(rightHip).scale(0.5)
+          hipCenter.scaleInPlace(scale)
+          hipCenter.y += yOffset
+          centerBone.position = Vector3.Lerp(centerBone.position, hipCenter, lerpFactor)
+        }
+      }
+
       const rotateHead = (): void => {
         const nose = getKeypoint("nose")
         const leftShoulder = getKeypoint("left_shoulder")
@@ -526,6 +538,7 @@ function MMDScene({
         }
       }
 
+      moveCenter()
       rotateHead()
       rotateUpperBody()
       rotateLowerBody()
