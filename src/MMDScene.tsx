@@ -12,6 +12,7 @@ import {
   MeshBuilder,
   PhotoDome,
   Quaternion,
+  registerSceneLoaderPlugin,
   Scene,
   SceneLoader,
   ShadowGenerator,
@@ -26,11 +27,17 @@ import {
   MmdWasmModel,
   MmdWasmPhysics,
   MmdWasmRuntime,
+  PmxLoader,
   SdefInjector,
 } from "babylon-mmd"
 import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
 import { Box, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material"
+
+import "@babylonjs/core/Engines/shaderStore"
+import "@babylonjs/core/Materials/Textures/Loaders/tgaTextureLoader"
+
+registerSceneLoaderPlugin(new PmxLoader())
 
 const defaultScene = "Static"
 const availableScenes = ["Static", "Office", "Beach", "Bedroom"]
