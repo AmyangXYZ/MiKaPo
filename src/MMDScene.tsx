@@ -481,7 +481,7 @@ function MMDScene({
           // Transform lower arm direction to local space relative to upper arm
           const localLowerArmDir = Vector3.TransformNormal(lowerArmDir, upperArmRotationMatrix.invert())
 
-          const defaultDir = new Vector3(side === "left" ? -1 : 1, 1, 0)
+          const defaultDir = new Vector3(side === "left" ? -1 : 1, 1, 0).normalize()
 
           // Calculate the rotation from default pose to current pose
           const rotationQuaternion = Quaternion.FromUnitVectorsToRef(defaultDir, localLowerArmDir, new Quaternion())
