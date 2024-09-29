@@ -7,8 +7,28 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      registerType: "autoUpdate",
+      devOptions: {
+        enabled: true,
+      },
+      manifest: {
+        name: "Mikapo",
+        short_name: "Mikapo",
+        description: "AI Pose Picker For MMD",
+        theme_color: "#000000",
+        start_url: "/",
+        display: "standalone",
+        icons: [
+          {
+            src: "/logo.png",
+            sizes: "192x192",
+            type: "image/png",
+          },
+        ],
+      },
       workbox: {
-        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024, // 5 MB
+        globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
+        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024, // 10 MB
       },
     }),
   ],
