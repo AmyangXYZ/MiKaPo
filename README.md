@@ -14,6 +14,7 @@
 - 3D scene: [Babylon.js](https://www.babylonjs.com/)
 - MMD model viewer: [babylon-mmd](https://github.com/noname0310/babylon-mmd)
 - Web framework: [Vite+React](https://vitejs.dev/)
+- Models are from [aplaybox](https://aplaybox.com/en/mmd-models/).
 
 ## Todo
 
@@ -24,7 +25,7 @@
 - [x] Video, image upload
 - [x] Camera input
 - [x] Model selection
-- [ ] Ollama support ([electron version](https://github.com/AmyangXYZ/MiKaPo-Electron))
+- [x] Ollama support ([electron version](https://github.com/AmyangXYZ/MiKaPo-Electron))
 - [ ] VMD export
 
 ## Project Setup

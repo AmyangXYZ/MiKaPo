@@ -44,6 +44,30 @@ const availableScenes = ["Static", "Office", "Beach", "Bedroom"]
 const defaultModel = "深空之眼-托特"
 const availableModels = ["深空之眼-托特", "深空之眼-托特2", "深空之眼-大梵天", "鸣潮-吟霖", "原神-荧"]
 
+const usedKeyBones: string[] = [
+  "センター",
+  "首",
+  "頭",
+  "上半身",
+  "下半身",
+  "左足",
+  "右足",
+  "左ひざ",
+  "右ひざ",
+  "左足首",
+  "右足首",
+  "左腕",
+  "右腕",
+  "左ひじ",
+  "右ひじ",
+  "左手首",
+  "右手首",
+  "左足ＩＫ",
+  "右足ＩＫ",
+  "左目",
+  "右目",
+]
+
 function MMDScene({
   pose,
   face,
@@ -69,6 +93,11 @@ function MMDScene({
   const shadowGeneratorRef = useRef<ShadowGenerator | null>(null)
   const domeRef = useRef<PhotoDome | null>(null)
   const groundRef = useRef<Mesh | null>(null)
+  const keyBones = useRef<{ [key: string]: IMmdRuntimeLinkedBone }>({})
+
+  const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
+    return keyBones.current[name]
+  }
 
   const handleSceneChange = (event: SelectChangeEvent): void => {
     setSelectedScene(event.target.value)
@@ -189,6 +218,11 @@ function MMDScene({
               worldId: 0,
             },
           })
+          for (const bone of mmdModelRef.current!.skeleton.bones) {
+            if (usedKeyBones.includes(bone.name)) {
+              keyBones.current[bone.name] = bone
+            }
+          }
         }
       )
     }
@@ -242,10 +276,6 @@ function MMDScene({
       const getKeypoint = (name: string): Vector3 | null => {
         const point = pose[keypointIndexByName[name]]
         return point.visibility > visibilityThreshold ? new Vector3(point.x, point.y, point.z) : null
-      }
-
-      const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
-        return mmdModel!.skeleton.bones.find((bone) => bone.name === name)
       }
 
       const moveCenter = (): void => {
@@ -643,34 +673,27 @@ function MMDScene({
         y: (leftEyeGaze.y + rightEyeGaze.y) / 2,
       }
 
-      // Directly control eye bones instead of using morph targets
-      const controlEyeBones = (scene: Scene, averageGaze: { x: number; y: number }) => {
-        const leftEyeBone = scene.getBoneByName("左目")
-        const rightEyeBone = scene.getBoneByName("右目")
+      const leftEyeBone = getBone("左目")
+      const rightEyeBone = getBone("右目")
 
-        if (leftEyeBone && rightEyeBone) {
-          const maxHorizontalRotation = Math.PI / 6 // 30 degrees max horizontal rotation
-          const maxVerticalRotation = Math.PI / 12 // 15 degrees max vertical rotation
+      if (leftEyeBone && rightEyeBone) {
+        const maxHorizontalRotation = Math.PI / 6 // 30 degrees max horizontal rotation
+        const maxVerticalRotation = Math.PI / 12 // 15 degrees max vertical rotation
 
-          const xRotation = averageGaze.y * maxVerticalRotation
-          const yRotation = -averageGaze.x * maxHorizontalRotation
+        const xRotation = averageGaze.y * maxVerticalRotation
+        const yRotation = -averageGaze.x * maxHorizontalRotation
 
-          // Apply rotation with smoothing
-          const smoothingFactor = 0.7
-          leftEyeBone.rotation = Vector3.Lerp(
-            leftEyeBone.rotation,
-            new Vector3(xRotation, yRotation, 0),
-            smoothingFactor
-          )
-          rightEyeBone.rotation = Vector3.Lerp(
-            rightEyeBone.rotation,
-            new Vector3(xRotation, yRotation, 0),
-            smoothingFactor
-          )
-        }
+        const targetQuaternion = Quaternion.RotationYawPitchRoll(yRotation, xRotation, 0)
+
+        leftEyeBone.setRotationQuaternion(
+          Quaternion.Slerp(leftEyeBone.rotationQuaternion || new Quaternion(), targetQuaternion, lerpFactor),
+          Space.LOCAL
+        )
+        rightEyeBone.setRotationQuaternion(
+          Quaternion.Slerp(rightEyeBone.rotationQuaternion || new Quaternion(), targetQuaternion, lerpFactor),
+          Space.LOCAL
+        )
       }
-
-      controlEyeBones(sceneRef.current!, averageGaze)
 
       // Mouth landmarks
       const upperLipTop = getKeypoint(13)
@@ -746,7 +769,7 @@ function MMDScene({
     if (sceneRef.current && mmdModelRef.current) {
       updateMMDFace(mmdModelRef.current, face)
     }
-  }, [face])
+  }, [face, lerpFactor])
 
   useEffect(() => {}, [leftHand, rightHand])
   return (
