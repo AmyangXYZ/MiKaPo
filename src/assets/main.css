@@ -45,8 +45,10 @@ body {
 }
 
 .header-item {
+  width: 30%;
   display: flex;
   align-items: center;
+  justify-content: center;
 }
 
 .header-item a {

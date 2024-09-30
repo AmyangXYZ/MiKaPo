@@ -24,7 +24,7 @@ function App(): JSX.Element {
         </div>
       )}
       <header className="header">
-        <div className="header-item">
+        <div className="header-item" style={{ justifyContent: "flex-start" }}>
           <Avatar
             alt="MiKaPo"
             src="/logo.png"
@@ -44,7 +44,7 @@ function App(): JSX.Element {
         <div className="header-item" style={{ marginTop: "-.7rem" }}>
           <p>FPS: {fps}</p>
         </div>
-        <div className="header-item">
+        <div className="header-item" style={{ justifyContent: "flex-end" }}>
           <a href="https://github.com/AmyangXYZ/MiKaPo" target="_blank">
             <IconButton>
               <FontAwesomeIcon icon={faGithub} color="white" size="sm" />
