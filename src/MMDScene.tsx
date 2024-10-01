@@ -66,6 +66,34 @@ const usedKeyBones: string[] = [
   "右足ＩＫ",
   "左目",
   "右目",
+  "右親指１",
+  "右親指２",
+  "右人指１",
+  "右人指２",
+  "右人指３",
+  "右中指１",
+  "右中指２",
+  "右中指３",
+  "右薬指１",
+  "右薬指２",
+  "右薬指３",
+  "右小指１",
+  "右小指２",
+  "右小指３",
+  "左親指１",
+  "左親指２",
+  "左人指１",
+  "左人指２",
+  "左人指３",
+  "左中指１",
+  "左中指２",
+  "左中指３",
+  "左薬指１",
+  "左薬指２",
+  "左薬指３",
+  "左小指１",
+  "左小指２",
+  "左小指３",
 ]
 
 function MMDScene({
@@ -278,18 +306,6 @@ function MMDScene({
         return point.visibility > visibilityThreshold ? new Vector3(point.x, point.y, point.z) : null
       }
 
-      const moveCenter = (): void => {
-        const leftHip = getKeypoint("left_hip")
-        const rightHip = getKeypoint("right_hip")
-        const centerBone = getBone("センター")
-        if (leftHip && rightHip && centerBone) {
-          const hipCenter = leftHip.add(rightHip).scale(0.5)
-          hipCenter.scaleInPlace(scale)
-          hipCenter.y += yOffset
-          centerBone.position = Vector3.Lerp(centerBone.position, hipCenter, lerpFactor)
-        }
-      }
-
       const rotateHead = (): void => {
         const nose = getKeypoint("nose")
         const leftShoulder = getKeypoint("left_shoulder")
@@ -429,7 +445,11 @@ function MMDScene({
         const ankle = getKeypoint(`${side}_ankle`)
         const bone = getBone(`${side === "right" ? "右" : "左"}足ＩＫ`)
         if (ankle && bone) {
-          const targetPosition = new Vector3(ankle.x! * scale, -ankle.y! * scale + yOffset, ankle.z! * scale)
+          const targetPosition = new Vector3(
+            ankle.x! * scale,
+            Math.max(0, -ankle.y! * scale + yOffset),
+            ankle.z! * scale
+          )
           bone.position = Vector3.Lerp(bone.position, targetPosition, lerpFactor)
         }
       }
@@ -441,7 +461,6 @@ function MMDScene({
 
         if (hip && ankle && footBone) {
           const footDir = ankle.subtract(hip).normalize()
-          footDir.y = 0 // Ensure the foot stays level with the ground
 
           const defaultDir = new Vector3(0, 0, 1) // Assuming default foot direction is forward
 
@@ -568,7 +587,6 @@ function MMDScene({
         }
       }
 
-      moveCenter()
       rotateHead()
       rotateUpperBody()
       rotateLowerBody()
@@ -771,7 +789,131 @@ function MMDScene({
     }
   }, [face, lerpFactor])
 
-  useEffect(() => {}, [leftHand, rightHand])
+  useEffect(() => {
+    const updateMMDFingers = (
+      mmdModel: MmdWasmModel | null,
+      hand: NormalizedLandmark[] | null,
+      side: "left" | "right"
+    ): void => {
+      if (!mmdModel || !hand) return
+
+      const fingerNames = ["親指", "人指", "中指", "薬指", "小指"]
+      const fingerJoints = ["", "１", "２", "３"]
+      const maxAngle = Math.PI / 2
+      const maxEndSegmentAngle = (Math.PI * 2) / 3 // 120 degrees for end segments
+      const fingerBaseIndices = [1, 5, 9, 13, 17]
+
+      fingerNames.forEach((fingerName, fingerIndex) => {
+        fingerJoints.forEach((joint, jointIndex) => {
+          const boneName = `${side === "left" ? "左" : "右"}${fingerName}${joint}`
+          const bone = getBone(boneName)
+
+          if (bone) {
+            const baseIndex = fingerBaseIndices[fingerIndex]
+            const currentIndex = baseIndex + jointIndex
+            const nextIndex = baseIndex + jointIndex + 1
+
+            let rotationAngle = 0
+
+            if (nextIndex < hand.length) {
+              const currentPoint = new Vector3(hand[currentIndex].x, hand[currentIndex].y, hand[currentIndex].z)
+              const nextPoint = new Vector3(hand[nextIndex].x, hand[nextIndex].y, hand[nextIndex].z)
+
+              // Calculate the angle between the current segment and the next segment
+              const segmentVector = nextPoint.subtract(currentPoint)
+              const defaultVector = new Vector3(0, -1, 0) // Assuming fingers point downwards when straight
+              rotationAngle = Vector3.GetAngleBetweenVectors(segmentVector, defaultVector, new Vector3(1, 0, 0))
+
+              // Determine the maximum angle based on whether it's the end segment
+              const isEndSegment = jointIndex === 3
+              const currentMaxAngle = isEndSegment ? maxEndSegmentAngle : maxAngle
+
+              // Limit the rotation angle
+              rotationAngle = Math.min(Math.max(rotationAngle, 0), currentMaxAngle)
+
+              // Force fix for end segments if the angle is too large
+              if (isEndSegment && rotationAngle > maxAngle) {
+                rotationAngle = maxAngle
+              }
+            }
+
+            let defaultDir: Vector3
+
+            if (boneName.includes("親指")) {
+              defaultDir = new Vector3(-1, side === "left" ? -1 : 1, 0).normalize()
+            } else {
+              defaultDir = new Vector3(0, 0, side === "left" ? -1 : 1).normalize()
+            }
+
+            const rotation = defaultDir.scale(rotationAngle)
+
+            bone.setRotationQuaternion(
+              Quaternion.Slerp(
+                bone.rotationQuaternion || new Quaternion(),
+                Quaternion.FromEulerAngles(rotation.x, rotation.y, rotation.z),
+                lerpFactor
+              ),
+              Space.LOCAL
+            )
+          }
+        })
+      })
+    }
+
+    if (sceneRef.current && mmdModelRef.current) {
+      updateMMDFingers(mmdModelRef.current, leftHand, "left")
+      updateMMDFingers(mmdModelRef.current, rightHand, "right")
+    }
+  }, [leftHand, rightHand, lerpFactor])
+
+  // useEffect(() => {
+  //   const updateMMDFingers = (
+  //     mmdModel: MmdWasmModel | null,
+  //     hand: NormalizedLandmark[] | null,
+  //     side: "left" | "right"
+  //   ): void => {
+  //     if (!mmdModel) return
+
+  //     const fingerNames = ["親指", "人指", "中指", "薬指", "小指"]
+  //     const fingerJoints = ["", "１", "２", "３"]
+  //     const maxAngle = Math.PI / 2
+
+  //     fingerNames.forEach((fingerName, fingerIndex) => {
+  //       fingerJoints.forEach((joint, jointIndex) => {
+  //         const boneName = `${side === "left" ? "左" : "右"}${fingerName}${joint}`
+  //         const bone = getBone(boneName)
+
+  //         if (bone) {
+  //           // Rotate around X-axis
+  //           const rotationAngle = Math.min(Math.PI / 2, maxAngle)
+  //           let defaultDir: Vector3
+
+  //           if (boneName.includes("親指")) {
+  //             defaultDir = new Vector3(-1, side === "left" ? -1 : 1, 0).normalize()
+  //           } else {
+  //             defaultDir = new Vector3(0, 0, side === "left" ? -1 : 1).normalize()
+  //           }
+
+  //           const rotation = defaultDir.scale(rotationAngle)
+
+  //           bone.setRotationQuaternion(
+  //             Quaternion.Slerp(
+  //               bone.rotationQuaternion || new Quaternion(),
+  //               Quaternion.FromEulerAngles(rotation.x, rotation.y, rotation.z),
+  //               lerpFactor
+  //             ),
+  //             Space.LOCAL
+  //           )
+  //         }
+  //       })
+  //     })
+  //   }
+  //   if (sceneRef.current && mmdModelRef.current) {
+  //     updateMMDFingers(mmdModelRef.current, leftHand, "left")
+  //     updateMMDFingers(mmdModelRef.current, rightHand, "right")
+  //   }
+  // }, [leftHand, rightHand, lerpFactor])
+
   return (
     <>
       <canvas ref={canvasRef} className="scene"></canvas>
