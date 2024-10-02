@@ -97,6 +97,7 @@ const usedKeyBones: string[] = [
 ]
 
 function MMDScene({
+  setIsInitializedMMD,
   pose,
   face,
   leftHand,
@@ -104,6 +105,7 @@ function MMDScene({
   lerpFactor,
   setFps,
 }: {
+  setIsInitializedMMD: (isInitializedMMD: boolean) => void
   pose: NormalizedLandmark[] | null
   face: NormalizedLandmark[] | null
   leftHand: NormalizedLandmark[] | null
@@ -251,11 +253,12 @@ function MMDScene({
               keyBones.current[bone.name] = bone
             }
           }
+          setIsInitializedMMD(true)
         }
       )
     }
     loadMMD()
-  }, [sceneRendered, sceneRef, mmdRuntimeRef, selectedModel])
+  }, [sceneRendered, sceneRef, mmdRuntimeRef, selectedModel, setIsInitializedMMD])
 
   useEffect(() => {
     const scale = 10
@@ -821,7 +824,13 @@ function MMDScene({
 
               // Calculate the angle between the current segment and the next segment
               const segmentVector = nextPoint.subtract(currentPoint)
-              const defaultVector = new Vector3(0, -1, 0) // Assuming fingers point downwards when straight
+
+              let defaultVector: Vector3
+              if (fingerName === "親指") {
+                defaultVector = new Vector3(side === "left" ? -1 : 1, 1, 0) // Pointing inward
+              } else {
+                defaultVector = new Vector3(0, -1, 0) // Other fingers point downwards when straight
+              }
               rotationAngle = Vector3.GetAngleBetweenVectors(segmentVector, defaultVector, new Vector3(1, 0, 0))
 
               // Determine the maximum angle based on whether it's the end segment
@@ -833,7 +842,7 @@ function MMDScene({
 
               // Force fix for end segments if the angle is too large
               if (isEndSegment && rotationAngle > maxAngle) {
-                rotationAngle = maxAngle
+                rotationAngle = 0
               }
             }
 
