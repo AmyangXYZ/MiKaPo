@@ -37,12 +37,14 @@ const VisuallyHiddenInput = styled("input")({
 })
 
 function Video({
+  setIsInitializedAI,
   setPose,
   setFace,
   setLeftHand,
   setRightHand,
   setLerpFactor,
 }: {
+  setIsInitializedAI: (isInitializedAI: boolean) => void
   setPose: (pose: NormalizedLandmark[]) => void
   setFace: (face: NormalizedLandmark[]) => void
   setLeftHand: (leftHand: NormalizedLandmark[]) => void
@@ -192,7 +194,7 @@ function Video({
 
           runningMode: "VIDEO",
         })
-
+        setIsInitializedAI(true)
         let lastTime = performance.now()
         let lastImgSrc = ""
         const detect = () => {
@@ -246,6 +248,8 @@ function Video({
               }
               if (result.faceLandmarks && result.faceLandmarks.length > 0) {
                 setFace(result.faceLandmarks[0])
+              } else {
+                setFace([])
               }
               if (result.leftHandWorldLandmarks && result.leftHandWorldLandmarks.length > 0) {
                 setLeftHand(result.leftHandWorldLandmarks[0])
@@ -264,7 +268,7 @@ function Video({
         detect()
       }
     )
-  }, [setPose, setFace, setLeftHand, setRightHand, imgRef, videoRef, isRecordingRef])
+  }, [setPose, setFace, setLeftHand, setRightHand, imgRef, videoRef, isRecordingRef, setIsInitializedAI])
 
   const replayCallback = (fps: number) => {
     setIsReplaying(true)

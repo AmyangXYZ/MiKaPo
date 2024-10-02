@@ -14,10 +14,11 @@ function App(): JSX.Element {
   const [rightHand, setRightHand] = useState<NormalizedLandmark[] | null>(null)
   const [lerpFactor, setLerpFactor] = useState<number>(0.5)
   const [fps, setFps] = useState<number>(0)
-
+  const [isInitializedAI, setIsInitializedAI] = useState<boolean>(false)
+  const [isInitializedMMD, setIsInitializedMMD] = useState<boolean>(false)
   return (
     <>
-      {pose === null && (
+      {(!isInitializedAI || !isInitializedMMD) && (
         <div className="loading-overlay">
           <div className="loader"></div>
           <h3>Initializing AI and MMD...</h3>
@@ -61,6 +62,7 @@ function App(): JSX.Element {
         </div>
       </header>
       <Video
+        setIsInitializedAI={setIsInitializedAI}
         setPose={setPose}
         setFace={setFace}
         setLeftHand={setLeftHand}
@@ -68,6 +70,7 @@ function App(): JSX.Element {
         setLerpFactor={setLerpFactor}
       ></Video>
       <MMDScene
+        setIsInitializedMMD={setIsInitializedMMD}
         pose={pose}
         face={face}
         leftHand={leftHand}
