@@ -68,7 +68,7 @@ function App(): JSX.Element {
           style={{ display: activeTab === "motion" ? "block" : "none" }}
         ></Motion>
         {activeTab === "outfit" && <Outfit></Outfit>}
-        {activeTab === "skeleton" && <Skeleton boneRotation={boneRotation}></Skeleton>}
+        {activeTab === "skeleton" && <Skeleton></Skeleton>}
         {activeTab === "animation" && (
           <Animation selectedAnimation={selectedAnimation} setSelectedAnimation={setSelectedAnimation}></Animation>
         )}
