@@ -26,8 +26,6 @@ function App(): JSX.Element {
   const [selectedBackground, setSelectedBackground] = useState<string>("Static")
   const [selectedAnimation, setSelectedAnimation] = useState<string>("")
 
-  const [boneRotation] = useState<Record<string, { x: number; y: number; z: number }>>({})
-
   return (
     <>
       <Header fps={fps}></Header>
