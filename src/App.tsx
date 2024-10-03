@@ -1,11 +1,16 @@
 import { useState } from "react"
-import Video from "./Video"
-import MMDScene from "./MMDScene"
+import Motion from "./Motion"
+import MMD from "./MMD"
+import Outfit from "./Outfit"
+import Model from "./Model"
+import Animation from "./Animation"
+import Header from "./Header"
+import Footer from "./Footer"
+import Skeleton from "./Skeleton"
+import Background from "./Background"
 import { NormalizedLandmark } from "@mediapipe/tasks-vision"
-import { Avatar, IconButton } from "@mui/material"
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
-import { faGithub } from "@fortawesome/free-brands-svg-icons"
-import { Download } from "@mui/icons-material"
+import { Drawer, IconButton } from "@mui/material"
+import { KeyboardBackspace } from "@mui/icons-material"
 
 function App(): JSX.Element {
   const [pose, setPose] = useState<NormalizedLandmark[] | null>(null)
@@ -14,70 +19,64 @@ function App(): JSX.Element {
   const [rightHand, setRightHand] = useState<NormalizedLandmark[] | null>(null)
   const [lerpFactor, setLerpFactor] = useState<number>(0.5)
   const [fps, setFps] = useState<number>(0)
-  const [isInitializedAI, setIsInitializedAI] = useState<boolean>(false)
-  const [isInitializedMMD, setIsInitializedMMD] = useState<boolean>(false)
+  const [openDrawer, setOpenDrawer] = useState<boolean>(false)
+  const [activeTab, setActiveTab] = useState<string>("motion")
+
+  const [selectedModel, setSelectedModel] = useState<string>("深空之眼-托特")
+  const [selectedBackground, setSelectedBackground] = useState<string>("Static")
+
   return (
     <>
-      {(!isInitializedAI || !isInitializedMMD) && (
-        <div className="loading-overlay">
-          <div className="loader"></div>
-          <h3>Initializing AI and MMD...</h3>
-        </div>
-      )}
-      <header className="header">
-        <div className="header-item" style={{ justifyContent: "flex-start" }}>
-          <Avatar
-            alt="MiKaPo"
-            src="/logo.png"
-            sx={{
-              width: 36,
-              height: 36,
-              marginRight: ".5rem",
-              transition: "transform 2s ease-in-out",
-              "&:hover": {
-                transform: "rotate(360deg)",
-              },
-            }}
-          />
-          <h2>MiKaPo </h2>
-        </div>
+      <Header fps={fps}></Header>
 
-        <div className="header-item" style={{ marginTop: "-.7rem" }}>
-          <p>FPS: {fps}</p>
-        </div>
-        <div className="header-item" style={{ justifyContent: "flex-end" }}>
-          <a href="https://github.com/AmyangXYZ/MiKaPo" target="_blank">
-            <IconButton>
-              <FontAwesomeIcon icon={faGithub} color="white" size="sm" />
-            </IconButton>
-          </a>
-          <a href="https://github.com/AmyangXYZ/MiKaPo-Electron" target="_blank">
-            <IconButton size="small" color="inherit">
-              <Download sx={{ color: "white", fontSize: "1.5rem", marginTop: ".2rem" }} />
-            </IconButton>
-          </a>
-          <a href="https://www.buymeacoffee.com/amyang" target="_blank">
-            <img src="/coffee.png" alt="Buy Me A Coffee" width={140} height={34} />
-          </a>
-        </div>
-      </header>
-      <Video
-        setIsInitializedAI={setIsInitializedAI}
-        setPose={setPose}
-        setFace={setFace}
-        setLeftHand={setLeftHand}
-        setRightHand={setRightHand}
-        setLerpFactor={setLerpFactor}
-      ></Video>
-      <MMDScene
-        setIsInitializedMMD={setIsInitializedMMD}
+      <MMD
+        selectedModel={selectedModel}
+        selectedBackground={selectedBackground}
         pose={pose}
         face={face}
         leftHand={leftHand}
         rightHand={rightHand}
         lerpFactor={lerpFactor}
         setFps={setFps}
-      ></MMDScene>
+      ></MMD>
+      <Drawer
+        variant="persistent"
+        open={openDrawer}
+        onClose={() => setOpenDrawer(false)}
+        sx={{
+          [`& .MuiDrawer-paper`]: {
+            width: "calc(400px + 2rem)",
+            backgroundColor: "rgba(0, 0, 0, 0.8)",
+          },
+        }}
+      >
+        <IconButton onClick={() => setOpenDrawer(false)} sx={{ position: "absolute", top: 0, right: ".5rem" }}>
+          <KeyboardBackspace sx={{ color: "white" }} />
+        </IconButton>
+
+        <Motion
+          setPose={setPose}
+          setFace={setFace}
+          setLeftHand={setLeftHand}
+          setRightHand={setRightHand}
+          setLerpFactor={setLerpFactor}
+          style={{ display: activeTab === "motion" ? "block" : "none" }}
+        ></Motion>
+        <Outfit style={{ display: activeTab === "outfit" ? "block" : "none" }}></Outfit>
+        <Skeleton style={{ display: activeTab === "skeleton" ? "block" : "none" }}></Skeleton>
+        <Animation style={{ display: activeTab === "animation" ? "block" : "none" }}></Animation>
+        <Model
+          selectedModel={selectedModel}
+          setSelectedModel={setSelectedModel}
+          style={{ display: activeTab === "model" ? "block" : "none" }}
+        ></Model>
+        <Background
+          selectedBackground={selectedBackground}
+          setSelectedBackground={setSelectedBackground}
+          style={{ display: activeTab === "background" ? "block" : "none" }}
+        ></Background>
+      </Drawer>
+      <Footer setOpenDrawer={setOpenDrawer} setActiveTab={setActiveTab}></Footer>
     </>
   )
 }
