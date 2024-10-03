@@ -1,9 +1,5 @@
-function Outfit({ style }: { style: React.CSSProperties }): JSX.Element {
-  return (
-    <div className="outfit" style={style}>
-      Outfit
-    </div>
-  )
+function Outfit(): JSX.Element {
+  return <div className="outfit">Outfit</div>
 }
 
 export default Outfit

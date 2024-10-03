@@ -5,18 +5,16 @@ const availableModels = ["深空之眼-托特", "深空之眼-托特2", "深空�
 function Model({
   selectedModel,
   setSelectedModel,
-  style,
 }: {
   selectedModel: string
   setSelectedModel: (model: string) => void
-  style: React.CSSProperties
 }): JSX.Element {
   const handleModelChange = (event: SelectChangeEvent): void => {
     setSelectedModel(event.target.value)
   }
 
   return (
-    <div className="model" style={style}>
+    <div className="model">
       <Box className="model-selector">
         <FormControl sx={{ borderColor: "white" }}>
           <InputLabel sx={{ color: "white", fontSize: ".9rem" }}>Model</InputLabel>

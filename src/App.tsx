@@ -26,6 +26,8 @@ function App(): JSX.Element {
   const [selectedBackground, setSelectedBackground] = useState<string>("Static")
   const [selectedAnimation, setSelectedAnimation] = useState<string>("")
 
+  const [boneRotation] = useState<Record<string, { x: number; y: number; z: number }>>({})
+
   return (
     <>
       <Header fps={fps}></Header>
@@ -65,23 +67,18 @@ function App(): JSX.Element {
           setLerpFactor={setLerpFactor}
           style={{ display: activeTab === "motion" ? "block" : "none" }}
         ></Motion>
-        <Outfit style={{ display: activeTab === "outfit" ? "block" : "none" }}></Outfit>
-        <Skeleton style={{ display: activeTab === "skeleton" ? "block" : "none" }}></Skeleton>
-        <Animation
-          selectedAnimation={selectedAnimation}
-          setSelectedAnimation={setSelectedAnimation}
-          style={{ display: activeTab === "animation" ? "block" : "none" }}
-        ></Animation>
-        <Model
-          selectedModel={selectedModel}
-          setSelectedModel={setSelectedModel}
-          style={{ display: activeTab === "model" ? "block" : "none" }}
-        ></Model>
-        <Background
-          selectedBackground={selectedBackground}
-          setSelectedBackground={setSelectedBackground}
-          style={{ display: activeTab === "background" ? "block" : "none" }}
-        ></Background>
+        {activeTab === "outfit" && <Outfit></Outfit>}
+        {activeTab === "skeleton" && <Skeleton boneRotation={boneRotation}></Skeleton>}
+        {activeTab === "animation" && (
+          <Animation selectedAnimation={selectedAnimation} setSelectedAnimation={setSelectedAnimation}></Animation>
+        )}
+        {activeTab === "model" && <Model selectedModel={selectedModel} setSelectedModel={setSelectedModel}></Model>}
+        {activeTab === "background" && (
+          <Background
+            selectedBackground={selectedBackground}
+            setSelectedBackground={setSelectedBackground}
+          ></Background>
+        )}
       </Drawer>
       <Footer setOpenDrawer={setOpenDrawer} setActiveTab={setActiveTab}></Footer>
     </>
