@@ -54,6 +54,26 @@ body {
 .header-item a {
   display: flex;
 }
+
+.footer {
+  width: 100%;
+  padding: 0 1rem;
+  bottom: 0.5rem;
+  left: 0;
+  position: absolute;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 1010;
+}
+
+.footer-item {
+  width: 30%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .loading-overlay {
   position: absolute;
   top: 0;
@@ -77,6 +97,10 @@ body {
   animation: spin 1s linear infinite;
 }
 
+.motion {
+  width: 100%;
+}
+
 @keyframes spin {
   0% {
     transform: rotate(0deg);
@@ -88,7 +112,7 @@ body {
 
 .video-player {
   position: absolute;
-  top: 5rem;
+  top: 6rem;
   left: 1rem;
   width: 400px;
   z-index: 1001;
@@ -101,7 +125,7 @@ video {
 
 .toolbar {
   position: absolute;
-  top: 3rem;
+  top: 4rem;
   left: 1rem;
   width: 400px;
   z-index: 1002;
@@ -131,17 +155,18 @@ video {
   height: 100vh;
 }
 
-.scene-selector {
+.model,
+.outfit,
+.animation,
+.skeleton,
+.background {
   position: absolute;
-  bottom: 5.5rem;
-  right: 1rem;
-}
-
-.model-selector {
-  position: absolute;
-  bottom: 0.5rem;
-  right: 1rem;
-  z-index: 1002;
+  top: 4rem;
+  left: 0;
+  width: 100%;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  color: white;
 }
 
 a {

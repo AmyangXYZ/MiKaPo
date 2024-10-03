@@ -32,17 +32,10 @@ import {
 } from "babylon-mmd"
 import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
-import { Box, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material"
 
 import "@babylonjs/core/Engines/shaderStore"
 
 registerSceneLoaderPlugin(new PmxLoader())
-
-const defaultScene = "Static"
-const availableScenes = ["Static", "Office", "Beach", "Bedroom"]
-
-const defaultModel = "深空之眼-托特"
-const availableModels = ["深空之眼-托特", "深空之眼-托特2", "深空之眼-大梵天", "鸣潮-吟霖", "原神-荧"]
 
 const usedKeyBones: string[] = [
   "センター",
@@ -96,28 +89,29 @@ const usedKeyBones: string[] = [
   "左小指３",
 ]
 
-function MMDScene({
-  setIsInitializedMMD,
+function Viewport({
   pose,
   face,
   leftHand,
   rightHand,
   lerpFactor,
   setFps,
+  selectedModel,
+  selectedBackground,
 }: {
-  setIsInitializedMMD: (isInitializedMMD: boolean) => void
   pose: NormalizedLandmark[] | null
   face: NormalizedLandmark[] | null
   leftHand: NormalizedLandmark[] | null
   rightHand: NormalizedLandmark[] | null
   lerpFactor: number
   setFps: (fps: number) => void
+  selectedModel: string
+  selectedBackground: string
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sceneRef = useRef<Scene | null>(null)
   const [sceneRendered, setSceneRendered] = useState<boolean>(false)
-  const [selectedScene, setSelectedScene] = useState<string>(defaultScene)
-  const [selectedModel, setSelectedModel] = useState<string>(defaultModel)
+
   const mmdModelRef = useRef<MmdWasmModel | null>(null)
   const mmdRuntimeRef = useRef<MmdWasmRuntime | null>(null)
   const shadowGeneratorRef = useRef<ShadowGenerator | null>(null)
@@ -127,14 +121,6 @@ function MMDScene({
 
   const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
     return keyBones.current[name]
-  }
-
-  const handleSceneChange = (event: SelectChangeEvent): void => {
-    setSelectedScene(event.target.value)
-  }
-
-  const handleModelChange = (event: SelectChangeEvent): void => {
-    setSelectedModel(event.target.value)
   }
 
   useEffect(() => {
@@ -207,13 +193,13 @@ function MMDScene({
     }
 
     if (sceneRef.current) {
-      if (selectedScene !== "Static") {
+      if (selectedBackground !== "Static") {
         if (groundRef.current) {
           groundRef.current.material!.alpha = 0
         }
         domeRef.current = new PhotoDome(
           "testdome",
-          `/textures/${selectedScene}.jpeg`,
+          `/textures/${selectedBackground}.jpeg`,
           {
             resolution: 32,
             size: 500,
@@ -227,7 +213,7 @@ function MMDScene({
         }
       }
     }
-  }, [sceneRendered, sceneRef, selectedScene])
+  }, [sceneRendered, sceneRef, selectedBackground])
 
   useEffect(() => {
     const loadMMD = async (): Promise<void> => {
@@ -253,12 +239,11 @@ function MMDScene({
               keyBones.current[bone.name] = bone
             }
           }
-          setIsInitializedMMD(true)
         }
       )
     }
     loadMMD()
-  }, [sceneRendered, sceneRef, mmdRuntimeRef, selectedModel, setIsInitializedMMD])
+  }, [sceneRendered, sceneRef, mmdRuntimeRef, selectedModel])
 
   useEffect(() => {
     const scale = 10
@@ -875,95 +860,11 @@ function MMDScene({
     }
   }, [leftHand, rightHand, lerpFactor])
 
-  // useEffect(() => {
-  //   const updateMMDFingers = (
-  //     mmdModel: MmdWasmModel | null,
-  //     hand: NormalizedLandmark[] | null,
-  //     side: "left" | "right"
-  //   ): void => {
-  //     if (!mmdModel) return
-
-  //     const fingerNames = ["親指", "人指", "中指", "薬指", "小指"]
-  //     const fingerJoints = ["", "１", "２", "３"]
-  //     const maxAngle = Math.PI / 2
-
-  //     fingerNames.forEach((fingerName, fingerIndex) => {
-  //       fingerJoints.forEach((joint, jointIndex) => {
-  //         const boneName = `${side === "left" ? "左" : "右"}${fingerName}${joint}`
-  //         const bone = getBone(boneName)
-
-  //         if (bone) {
-  //           // Rotate around X-axis
-  //           const rotationAngle = Math.min(Math.PI / 2, maxAngle)
-  //           let defaultDir: Vector3
-
-  //           if (boneName.includes("親指")) {
-  //             defaultDir = new Vector3(-1, side === "left" ? -1 : 1, 0).normalize()
-  //           } else {
-  //             defaultDir = new Vector3(0, 0, side === "left" ? -1 : 1).normalize()
-  //           }
-
-  //           const rotation = defaultDir.scale(rotationAngle)
-
-  //           bone.setRotationQuaternion(
-  //             Quaternion.Slerp(
-  //               bone.rotationQuaternion || new Quaternion(),
-  //               Quaternion.FromEulerAngles(rotation.x, rotation.y, rotation.z),
-  //               lerpFactor
-  //             ),
-  //             Space.LOCAL
-  //           )
-  //         }
-  //       })
-  //     })
-  //   }
-  //   if (sceneRef.current && mmdModelRef.current) {
-  //     updateMMDFingers(mmdModelRef.current, leftHand, "left")
-  //     updateMMDFingers(mmdModelRef.current, rightHand, "right")
-  //   }
-  // }, [leftHand, rightHand, lerpFactor])
-
   return (
     <>
       <canvas ref={canvasRef} className="scene"></canvas>
-      <Box className="scene-selector">
-        <FormControl sx={{ borderColor: "white" }}>
-          <InputLabel sx={{ color: "white", fontSize: ".9rem" }}>Scene</InputLabel>
-          <Select
-            label="Scene"
-            value={selectedScene}
-            onChange={handleSceneChange}
-            sx={{ color: "white", fontSize: ".9rem" }}
-            autoWidth
-          >
-            {availableScenes.map((scene) => (
-              <MenuItem sx={{ fontSize: ".8rem" }} key={scene} value={scene}>
-                {scene}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Box>
-      <Box className="model-selector">
-        <FormControl sx={{ borderColor: "white" }}>
-          <InputLabel sx={{ color: "white", fontSize: ".9rem" }}>Model</InputLabel>
-          <Select
-            label="Model"
-            value={selectedModel}
-            onChange={handleModelChange}
-            sx={{ color: "white", fontSize: ".9rem" }}
-            autoWidth
-          >
-            {availableModels.map((model) => (
-              <MenuItem sx={{ fontSize: ".8rem" }} key={model} value={model}>
-                {model}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Box>
     </>
   )
 }
 
-export default MMDScene
+export default Viewport

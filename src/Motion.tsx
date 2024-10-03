@@ -37,19 +37,19 @@ const VisuallyHiddenInput = styled("input")({
 })
 
 function Video({
-  setIsInitializedAI,
   setPose,
   setFace,
   setLeftHand,
   setRightHand,
   setLerpFactor,
+  style,
 }: {
-  setIsInitializedAI: (isInitializedAI: boolean) => void
   setPose: (pose: NormalizedLandmark[]) => void
   setFace: (face: NormalizedLandmark[]) => void
   setLeftHand: (leftHand: NormalizedLandmark[]) => void
   setRightHand: (rightHand: NormalizedLandmark[]) => void
   setLerpFactor: (lerpFactor: number) => void
+  style: React.CSSProperties
 }): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
@@ -194,7 +194,7 @@ function Video({
 
           runningMode: "VIDEO",
         })
-        setIsInitializedAI(true)
+
         let lastTime = performance.now()
         let lastImgSrc = ""
         const detect = () => {
@@ -268,7 +268,7 @@ function Video({
         detect()
       }
     )
-  }, [setPose, setFace, setLeftHand, setRightHand, imgRef, videoRef, isRecordingRef, setIsInitializedAI])
+  }, [setPose, setFace, setLeftHand, setRightHand, imgRef, videoRef, isRecordingRef])
 
   const replayCallback = (fps: number) => {
     setIsReplaying(true)
@@ -308,7 +308,7 @@ function Video({
   }
 
   return (
-    <>
+    <div className="motion" style={style}>
       <div className="toolbar">
         <Tooltip title="Upload a video or image">
           <IconButton
@@ -396,7 +396,7 @@ function Video({
           <img ref={imgRef} src={imgSrc} style={{ width: "100%", height: "auto" }} />
         )}
       </div>
-    </>
+    </div>
   )
 }
 
