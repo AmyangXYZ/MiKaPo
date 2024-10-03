@@ -1,6 +1,6 @@
 import { Box, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material"
 
-const availableAnimations = ["Stand", "Zyy", "Miku", "iKun1"]
+const availableAnimations = ["Stand", "Zyy", "Miku", "iKun1", "0-540"]
 
 function Animation({
   selectedAnimation,
