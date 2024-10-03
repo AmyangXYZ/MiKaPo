@@ -23,12 +23,15 @@ import {
 import { NormalizedLandmark } from "@mediapipe/tasks-vision"
 import {
   getMmdWasmInstance,
+  MmdWasmAnimation,
+  MmdWasmInstance,
   MmdWasmInstanceTypeMPD,
   MmdWasmModel,
   MmdWasmPhysics,
   MmdWasmRuntime,
   PmxLoader,
   SdefInjector,
+  VmdLoader,
 } from "babylon-mmd"
 import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
@@ -89,7 +92,7 @@ const usedKeyBones: string[] = [
   "左小指３",
 ]
 
-function Viewport({
+function MMDScene({
   pose,
   face,
   leftHand,
@@ -98,6 +101,8 @@ function Viewport({
   setFps,
   selectedModel,
   selectedBackground,
+  selectedAnimation,
+  setSelectedAnimation,
 }: {
   pose: NormalizedLandmark[] | null
   face: NormalizedLandmark[] | null
@@ -107,11 +112,13 @@ function Viewport({
   setFps: (fps: number) => void
   selectedModel: string
   selectedBackground: string
+  selectedAnimation: string
+  setSelectedAnimation: (animation: string) => void
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sceneRef = useRef<Scene | null>(null)
   const [sceneRendered, setSceneRendered] = useState<boolean>(false)
-
+  const mmdWasmInstanceRef = useRef<MmdWasmInstance | null>(null)
   const mmdModelRef = useRef<MmdWasmModel | null>(null)
   const mmdRuntimeRef = useRef<MmdWasmRuntime | null>(null)
   const shadowGeneratorRef = useRef<ShadowGenerator | null>(null)
@@ -129,10 +136,16 @@ function Viewport({
       SdefInjector.OverrideEngineCreateEffect(engine)
       const scene = new Scene(engine)
       scene.clearColor = new Color4(0, 0, 0, 0)
-      const mmdWasmInstance = await getMmdWasmInstance(new MmdWasmInstanceTypeMPD(), 2)
-      mmdRuntimeRef.current = new MmdWasmRuntime(mmdWasmInstance, scene, new MmdWasmPhysics(scene))
+      mmdWasmInstanceRef.current = await getMmdWasmInstance(new MmdWasmInstanceTypeMPD(), 2)
+      mmdRuntimeRef.current = new MmdWasmRuntime(mmdWasmInstanceRef.current, scene, new MmdWasmPhysics(scene))
       mmdRuntimeRef.current.register(scene)
-      mmdRuntimeRef.current.physics!.createGroundModel?.([0])
+      mmdRuntimeRef.current!.onPauseAnimationObservable.add(() => {
+        if (mmdRuntimeRef.current!.currentTime == mmdRuntimeRef.current!.animationDuration) {
+          mmdRuntimeRef.current!.seekAnimation(0, true)
+          mmdRuntimeRef.current!.playAnimation()
+        }
+      })
+
       const camera = new ArcRotateCamera("ArcRotateCamera", 0, 0, 45, new Vector3(0, 12, 0), scene)
       camera.setPosition(new Vector3(0, 15, -27))
       camera.attachControl(canvas, false)
@@ -199,7 +212,7 @@ function Viewport({
         }
         domeRef.current = new PhotoDome(
           "testdome",
-          `/textures/${selectedBackground}.jpeg`,
+          `/background/${selectedBackground}.jpeg`,
           {
             resolution: 32,
             size: 500,
@@ -217,11 +230,12 @@ function Viewport({
 
   useEffect(() => {
     const loadMMD = async (): Promise<void> => {
-      if (!sceneRendered || !selectedModel || !mmdRuntimeRef.current) return
+      if (!sceneRendered || !selectedModel || !mmdWasmInstanceRef.current || !mmdRuntimeRef.current) return
       if (mmdModelRef.current) {
         mmdRuntimeRef.current.destroyMmdModel(mmdModelRef.current)
         mmdModelRef.current.mesh.dispose()
       }
+      setSelectedAnimation("")
       SceneLoader.ImportMeshAsync(undefined, `/model/${selectedModel}/`, `${selectedModel}.pmx`, sceneRef.current).then(
         (result) => {
           const mesh = result.meshes[0]
@@ -243,9 +257,34 @@ function Viewport({
       )
     }
     loadMMD()
-  }, [sceneRendered, sceneRef, mmdRuntimeRef, selectedModel])
+  }, [sceneRendered, sceneRef, mmdWasmInstanceRef, mmdRuntimeRef, selectedModel, setSelectedAnimation])
 
   useEffect(() => {
+    if (
+      !sceneRef.current ||
+      !mmdWasmInstanceRef.current ||
+      !mmdRuntimeRef.current ||
+      !mmdModelRef.current ||
+      selectedAnimation === ""
+    )
+      return
+
+    const loadAnimation = async (): Promise<void> => {
+      const vmd = await new VmdLoader(sceneRef.current!).loadAsync("vmd", `/animation/${selectedAnimation}.vmd`)
+      const animation = new MmdWasmAnimation(vmd, mmdWasmInstanceRef.current!, sceneRef.current!)
+      mmdModelRef.current?.addAnimation(animation)
+      mmdModelRef.current?.setAnimation("vmd")
+      mmdRuntimeRef.current!.seekAnimation(0, true)
+      mmdRuntimeRef.current!.playAnimation()
+    }
+    loadAnimation()
+  }, [sceneRef, mmdWasmInstanceRef, mmdRuntimeRef, mmdModelRef, selectedAnimation])
+
+  useEffect(() => {
+    if (mmdRuntimeRef.current && mmdRuntimeRef.current.isAnimationPlaying) {
+      mmdRuntimeRef.current.pauseAnimation()
+      mmdModelRef.current!.removeAnimation(0)
+    }
     const scale = 10
     const yOffset = 7
     const visibilityThreshold = 0.1
@@ -867,4 +906,4 @@ function Viewport({
   )
 }
 
-export default Viewport
+export default MMDScene

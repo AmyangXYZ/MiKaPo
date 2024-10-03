@@ -1,6 +1,6 @@
 import { useState } from "react"
 import Motion from "./Motion"
-import MMD from "./MMD"
+import MMDScene from "./MMDScene"
 import Outfit from "./Outfit"
 import Model from "./Model"
 import Animation from "./Animation"
@@ -24,29 +24,32 @@ function App(): JSX.Element {
 
   const [selectedModel, setSelectedModel] = useState<string>("深空之眼-托特")
   const [selectedBackground, setSelectedBackground] = useState<string>("Static")
+  const [selectedAnimation, setSelectedAnimation] = useState<string>("")
 
   return (
     <>
       <Header fps={fps}></Header>
 
-      <MMD
+      <MMDScene
         selectedModel={selectedModel}
         selectedBackground={selectedBackground}
+        selectedAnimation={selectedAnimation}
+        setSelectedAnimation={setSelectedAnimation}
         pose={pose}
         face={face}
         leftHand={leftHand}
         rightHand={rightHand}
         lerpFactor={lerpFactor}
         setFps={setFps}
-      ></MMD>
+      ></MMDScene>
       <Drawer
         variant="persistent"
         open={openDrawer}
         onClose={() => setOpenDrawer(false)}
         sx={{
           [`& .MuiDrawer-paper`]: {
+            backgroundColor: "rgba(0, 0, 0, 0.7)",
             width: "calc(400px + 2rem)",
-            backgroundColor: "rgba(0, 0, 0, 0.8)",
           },
         }}
       >
@@ -64,7 +67,11 @@ function App(): JSX.Element {
         ></Motion>
         <Outfit style={{ display: activeTab === "outfit" ? "block" : "none" }}></Outfit>
         <Skeleton style={{ display: activeTab === "skeleton" ? "block" : "none" }}></Skeleton>
-        <Animation style={{ display: activeTab === "animation" ? "block" : "none" }}></Animation>
+        <Animation
+          selectedAnimation={selectedAnimation}
+          setSelectedAnimation={setSelectedAnimation}
+          style={{ display: activeTab === "animation" ? "block" : "none" }}
+        ></Animation>
         <Model
           selectedModel={selectedModel}
           setSelectedModel={setSelectedModel}

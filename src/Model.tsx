@@ -24,7 +24,19 @@ function Model({
             label="Model"
             value={selectedModel}
             onChange={handleModelChange}
-            sx={{ color: "white", fontSize: ".9rem" }}
+            sx={{
+              color: "white",
+              fontSize: ".9rem",
+              "& .MuiOutlinedInput-notchedOutline": {
+                borderColor: "white",
+              },
+              "&:hover .MuiOutlinedInput-notchedOutline": {
+                borderColor: "lightgray",
+              },
+              "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                borderColor: "cyan",
+              },
+            }}
             autoWidth
           >
             {availableModels.map((model) => (

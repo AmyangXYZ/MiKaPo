@@ -24,7 +24,19 @@ function Background({
             label="Background"
             value={selectedBackground}
             onChange={handleBackgroundChange}
-            sx={{ color: "white", fontSize: ".9rem" }}
+            sx={{
+              color: "white",
+              fontSize: ".9rem",
+              "& .MuiOutlinedInput-notchedOutline": {
+                borderColor: "white",
+              },
+              "&:hover .MuiOutlinedInput-notchedOutline": {
+                borderColor: "lightgray",
+              },
+              "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                borderColor: "cyan",
+              },
+            }}
             autoWidth
           >
             {availableBackgrounds.map((background) => (
