@@ -5,18 +5,16 @@ const availableBackgrounds = ["Static", "Office", "Beach", "Bedroom"]
 function Background({
   selectedBackground,
   setSelectedBackground,
-  style,
 }: {
   selectedBackground: string
   setSelectedBackground: (background: string) => void
-  style: React.CSSProperties
 }): JSX.Element {
   const handleBackgroundChange = (event: SelectChangeEvent): void => {
     setSelectedBackground(event.target.value)
   }
 
   return (
-    <div className="background" style={style}>
+    <div className="background">
       <Box className="background-selector">
         <FormControl sx={{ borderColor: "white" }}>
           <InputLabel sx={{ color: "white", fontSize: ".9rem" }}>Background</InputLabel>
