@@ -1,7 +1,7 @@
 import { FormControl, FormControlLabel, Radio, RadioGroup, Avatar, Typography } from "@mui/material"
 import { Box } from "@mui/system"
 
-const availableModels = ["深空之眼-托特", "深空之眼-托特2", "深空之眼-梵天", "鸣潮-吟霖", "原神-荧"]
+const availableModels = ["深空之眼-托特", "深空之眼-托特2", "深空之眼-梵天", "深空之眼-塞勒涅", "鸣潮-吟霖", "原神-荧"]
 
 function Model({ setSelectedModel }: { setSelectedModel: (model: string) => void }): JSX.Element {
   return (
