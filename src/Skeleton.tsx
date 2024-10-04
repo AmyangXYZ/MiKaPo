@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { Dispatch, SetStateAction, useState } from "react"
 import { List, ListItem, ListItemText, Collapse, IconButton, Slider, Typography, ListItemButton } from "@mui/material"
 import { ExpandLess, ExpandMore } from "@mui/icons-material"
 
@@ -91,7 +91,11 @@ const categories = {
   ],
 }
 
-function Skeleton(): JSX.Element {
+function Skeleton({
+  setBoneRotation,
+}: {
+  setBoneRotation: Dispatch<SetStateAction<{ name: string; axis: string; value: number } | null>>
+}): JSX.Element {
   const [openCategory, setOpenCategory] = useState<string | null>(null)
   const [openBones, setOpenBones] = useState<Record<string, boolean>>({})
 
@@ -143,11 +147,19 @@ function Skeleton(): JSX.Element {
                             <Slider
                               size="small"
                               defaultValue={0}
+                              onChange={(_, newValue) => {
+                                setBoneRotation({
+                                  name: bone.name_jp,
+                                  axis: axis,
+                                  value: newValue as number,
+                                })
+                              }}
                               aria-label={`${axis} axis`}
                               valueLabelDisplay="auto"
-                              step={0.1}
-                              min={-180}
-                              max={180}
+                              valueLabelFormat={(value) => `${((value * 180) / Math.PI).toFixed(0)}°`}
+                              step={0.001}
+                              min={-Math.PI}
+                              max={Math.PI}
                               sx={{ ml: 2, width: "80%" }}
                             />
                           </ListItem>

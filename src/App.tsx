@@ -26,6 +26,8 @@ function App(): JSX.Element {
   const [selectedBackground, setSelectedBackground] = useState<string>("Static")
   const [selectedAnimation, setSelectedAnimation] = useState<string>("")
 
+  const [boneRotation, setBoneRotation] = useState<{ name: string; axis: string; value: number } | null>(null)
+
   return (
     <>
       <Header fps={fps}></Header>
@@ -41,6 +43,7 @@ function App(): JSX.Element {
         rightHand={rightHand}
         lerpFactor={lerpFactor}
         setFps={setFps}
+        boneRotation={boneRotation}
       ></MMDScene>
       <Drawer
         variant="persistent"
@@ -66,7 +69,7 @@ function App(): JSX.Element {
           style={{ display: activeTab === "motion" ? "block" : "none" }}
         ></Motion>
         {activeTab === "outfit" && <Outfit></Outfit>}
-        {activeTab === "skeleton" && <Skeleton></Skeleton>}
+        {activeTab === "skeleton" && <Skeleton setBoneRotation={setBoneRotation}></Skeleton>}
         {activeTab === "animation" && (
           <Animation selectedAnimation={selectedAnimation} setSelectedAnimation={setSelectedAnimation}></Animation>
         )}

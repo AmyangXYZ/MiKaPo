@@ -103,6 +103,7 @@ function MMDScene({
   selectedBackground,
   selectedAnimation,
   setSelectedAnimation,
+  boneRotation,
 }: {
   pose: NormalizedLandmark[] | null
   face: NormalizedLandmark[] | null
@@ -114,6 +115,7 @@ function MMDScene({
   selectedBackground: string
   selectedAnimation: string
   setSelectedAnimation: (animation: string) => void
+  boneRotation: { name: string; axis: string; value: number } | null
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sceneRef = useRef<Scene | null>(null)
@@ -129,6 +131,22 @@ function MMDScene({
   const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
     return keyBones.current[name]
   }
+
+  useEffect(() => {
+    if (mmdModelRef.current && boneRotation) {
+      const bone = getBone(boneRotation.name)
+      if (bone) {
+        bone.setRotationQuaternion(
+          Quaternion.FromEulerAngles(
+            boneRotation.axis === "x" ? boneRotation.value : 0,
+            boneRotation.axis === "y" ? boneRotation.value : 0,
+            boneRotation.axis === "z" ? boneRotation.value : 0
+          ),
+          Space.LOCAL
+        )
+      }
+    }
+  }, [boneRotation])
 
   useEffect(() => {
     const createScene = async (canvas: HTMLCanvasElement): Promise<Scene> => {
