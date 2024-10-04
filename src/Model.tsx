@@ -1,51 +1,33 @@
-import { Box, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material"
+import { FormControl, FormControlLabel, Radio, RadioGroup, Avatar, Typography } from "@mui/material"
+import { Box } from "@mui/system"
 
-const availableModels = ["深空之眼-托特", "深空之眼-托特2", "深空之眼-大梵天", "鸣潮-吟霖", "原神-荧"]
+const availableModels = ["深空之眼-托特", "深空之眼-托特2", "深空之眼-梵天", "鸣潮-吟霖", "原神-荧"]
 
-function Model({
-  selectedModel,
-  setSelectedModel,
-}: {
-  selectedModel: string
-  setSelectedModel: (model: string) => void
-}): JSX.Element {
-  const handleModelChange = (event: SelectChangeEvent): void => {
-    setSelectedModel(event.target.value)
-  }
-
+function Model({ setSelectedModel }: { setSelectedModel: (model: string) => void }): JSX.Element {
   return (
-    <div className="model">
-      <Box className="model-selector">
-        <FormControl sx={{ borderColor: "white" }}>
-          <InputLabel sx={{ color: "white", fontSize: ".9rem" }}>Model</InputLabel>
-          <Select
-            label="Model"
-            value={selectedModel}
-            onChange={handleModelChange}
-            sx={{
-              color: "white",
-              fontSize: ".9rem",
-              "& .MuiOutlinedInput-notchedOutline": {
-                borderColor: "white",
-              },
-              "&:hover .MuiOutlinedInput-notchedOutline": {
-                borderColor: "lightgray",
-              },
-              "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                borderColor: "cyan",
-              },
-            }}
-            autoWidth
-          >
-            {availableModels.map((model) => (
-              <MenuItem sx={{ fontSize: ".8rem" }} key={model} value={model}>
-                {model}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Box>
-    </div>
+    <FormControl className="model">
+      <RadioGroup
+        aria-labelledby="demo-radio-buttons-group-label"
+        defaultValue=""
+        name="radio-buttons-group"
+        onChange={(e) => setSelectedModel(e.target.value)}
+        sx={{ display: "flex", margin: "auto" }}
+      >
+        {availableModels.map((model) => (
+          <FormControlLabel
+            key={model}
+            value={model}
+            control={<Radio sx={{ color: "lightgray", marginLeft: 2, marginBottom: 2 }} size="small" />}
+            label={
+              <Box sx={{ display: "flex", alignItems: "center", marginBottom: 2 }}>
+                <Avatar src={`/avatar/${model}.png`} alt={model} sx={{ width: 64, height: 64, marginRight: 1 }} />
+                <Typography sx={{ fontSize: ".9rem" }}>{model}</Typography>
+              </Box>
+            }
+          />
+        ))}
+      </RadioGroup>
+    </FormControl>
   )
 }
 
