@@ -1,7 +1,7 @@
 import { useState } from "react"
 import Motion from "./Motion"
 import MMDScene from "./MMDScene"
-import Outfit from "./Outfit"
+import Materials from "./Materials"
 import Model from "./Model"
 import Animation from "./Animation"
 import Header from "./Header"
@@ -27,7 +27,8 @@ function App(): JSX.Element {
   const [selectedAnimation, setSelectedAnimation] = useState<string>("")
 
   const [boneRotation, setBoneRotation] = useState<{ name: string; axis: string; value: number } | null>(null)
-
+  const [materials, setMaterials] = useState<string[]>([])
+  const [materialVisible, setMaterialVisible] = useState<{ name: string; visible: boolean } | null>(null)
   return (
     <>
       <Header fps={fps}></Header>
@@ -44,6 +45,8 @@ function App(): JSX.Element {
         lerpFactor={lerpFactor}
         setFps={setFps}
         boneRotation={boneRotation}
+        setMaterials={setMaterials}
+        materialVisible={materialVisible}
       ></MMDScene>
       <Drawer
         variant="persistent"
@@ -68,7 +71,9 @@ function App(): JSX.Element {
           setLerpFactor={setLerpFactor}
           style={{ display: activeTab === "motion" ? "block" : "none" }}
         ></Motion>
-        {activeTab === "outfit" && <Outfit></Outfit>}
+        {activeTab === "material" && (
+          <Materials materials={materials} setMaterialVisible={setMaterialVisible}></Materials>
+        )}
         {activeTab === "skeleton" && <Skeleton setBoneRotation={setBoneRotation}></Skeleton>}
         {activeTab === "animation" && <Animation setSelectedAnimation={setSelectedAnimation}></Animation>}
         {activeTab === "model" && <Model setSelectedModel={setSelectedModel}></Model>}

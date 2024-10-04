@@ -7,6 +7,7 @@ import {
   DirectionalLight,
   Engine,
   HemisphericLight,
+  Material,
   Matrix,
   Mesh,
   MeshBuilder,
@@ -104,6 +105,8 @@ function MMDScene({
   selectedAnimation,
   setSelectedAnimation,
   boneRotation,
+  setMaterials,
+  materialVisible,
 }: {
   pose: NormalizedLandmark[] | null
   face: NormalizedLandmark[] | null
@@ -116,6 +119,8 @@ function MMDScene({
   selectedAnimation: string
   setSelectedAnimation: (animation: string) => void
   boneRotation: { name: string; axis: string; value: number } | null
+  setMaterials: (materials: string[]) => void
+  materialVisible: { name: string; visible: boolean } | null
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sceneRef = useRef<Scene | null>(null)
@@ -147,6 +152,19 @@ function MMDScene({
       }
     }
   }, [boneRotation])
+
+  useEffect(() => {
+    if (materialVisible) {
+      const material = mmdModelRef.current!.mesh.metadata.materials.find(
+        (m: Material) => m.name === materialVisible.name
+      )
+      const mesh = mmdModelRef.current!.mesh.metadata.meshes.find((m: Mesh) => m.name === materialVisible.name)
+      if (material && mesh) {
+        material.alpha = materialVisible.visible ? 1 : 0
+        mesh.visibility = materialVisible.visible ? 1 : 0
+      }
+    }
+  }, [materialVisible])
 
   useEffect(() => {
     const createScene = async (canvas: HTMLCanvasElement): Promise<Scene> => {
@@ -260,6 +278,7 @@ function MMDScene({
           for (const m of mesh.metadata.meshes) {
             m.receiveShadows = true
           }
+          setMaterials(mesh.metadata.materials.map((m: Material) => m.name))
           shadowGeneratorRef.current!.addShadowCaster(mesh)
           mmdModelRef.current = mmdRuntimeRef.current!.createMmdModel(mesh as Mesh, {
             buildPhysics: {
@@ -275,7 +294,7 @@ function MMDScene({
       )
     }
     loadMMD()
-  }, [sceneRendered, sceneRef, mmdWasmInstanceRef, mmdRuntimeRef, selectedModel, setSelectedAnimation])
+  }, [sceneRendered, sceneRef, mmdWasmInstanceRef, mmdRuntimeRef, selectedModel, setSelectedAnimation, setMaterials])
 
   useEffect(() => {
     if (

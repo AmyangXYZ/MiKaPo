@@ -17,7 +17,12 @@ function Model({ setSelectedModel }: { setSelectedModel: (model: string) => void
           <FormControlLabel
             key={model}
             value={model}
-            control={<Radio sx={{ color: "lightgray", marginLeft: 2, marginBottom: 2 }} size="small" />}
+            control={
+              <Radio
+                sx={{ color: "#a2c9f5", "&.Mui-checked": { color: "#a2c9f5" }, marginLeft: 2, marginBottom: 2 }}
+                size="small"
+              />
+            }
             label={
               <Box sx={{ display: "flex", alignItems: "center", marginBottom: 2 }}>
                 <Avatar src={`/avatar/${model}.png`} alt={model} sx={{ width: 64, height: 64, marginRight: 1 }} />
