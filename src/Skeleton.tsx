@@ -1,4 +1,4 @@
-import React, { Dispatch, SetStateAction, useState } from "react"
+import React, { useState } from "react"
 import { List, ListItem, ListItemText, Collapse, IconButton, Slider, Typography, ListItemButton } from "@mui/material"
 import { ExpandLess, ExpandMore } from "@mui/icons-material"
 
@@ -94,7 +94,7 @@ const categories = {
 function Skeleton({
   setBoneRotation,
 }: {
-  setBoneRotation: Dispatch<SetStateAction<{ name: string; axis: string; value: number } | null>>
+  setBoneRotation: (boneRotation: { name: string; axis: string; value: number }) => void
 }): JSX.Element {
   const [openCategory, setOpenCategory] = useState<string | null>(null)
   const [openBones, setOpenBones] = useState<Record<string, boolean>>({})
@@ -160,7 +160,7 @@ function Skeleton({
                               step={0.001}
                               min={-Math.PI}
                               max={Math.PI}
-                              sx={{ ml: 2, width: "80%" }}
+                              sx={{ ml: 2, width: "80%", color: "#a2c9f5" }}
                             />
                           </ListItem>
                         ))}

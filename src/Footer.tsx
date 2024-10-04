@@ -2,15 +2,21 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
 import { faBone, faFilm, faPanorama, faRunning, faShirt, faUser } from "@fortawesome/free-solid-svg-icons"
 import { Fab, Tooltip } from "@mui/material"
 
-function Footer({ setOpenDrawer, setActiveTab }: { setOpenDrawer: (open: boolean) => void, setActiveTab: (tab: string) => void }): JSX.Element {
+function Footer({
+  setOpenDrawer,
+  setActiveTab,
+}: {
+  setOpenDrawer: (open: boolean) => void
+  setActiveTab: (tab: string) => void
+}): JSX.Element {
   const colorPalette = {
-    motion: "#4A90E2",    // Soft Blue
-    skeleton: "#3498DB",  // Peter River Blue
-    outfit: "#2ECC71",    // Emerald Green
+    motion: "#4A90E2", // Soft Blue
+    skeleton: "#3498DB", // Peter River Blue
+    material: "#2ECC71", // Emerald Green
     background: "#9B59B6", // Amethyst
-    model: "#FF8C00",       // Dark Orange
-    animation: "#E74C3C"  // Alizarin Red
-  };
+    model: "#FF8C00", // Dark Orange
+    animation: "#E74C3C", // Alizarin Red
+  }
 
   return (
     <div className="footer">
@@ -24,14 +30,17 @@ function Footer({ setOpenDrawer, setActiveTab }: { setOpenDrawer: (open: boolean
             height: "106px",
             backgroundColor: colorPalette.motion,
           }}
-          onClick={() => { setActiveTab("motion"); setOpenDrawer(true) }}
+          onClick={() => {
+            setActiveTab("motion")
+            setOpenDrawer(true)
+          }}
         >
           <FontAwesomeIcon icon={faRunning} color="white" size="6x" />
         </Fab>
       </Tooltip>
       {[
         { name: "Model", icon: faUser, angle: -20, color: colorPalette.model },
-        { name: "Outfit", icon: faShirt, angle: 10, color: colorPalette.outfit },
+        { name: "Material", icon: faShirt, angle: 10, color: colorPalette.material },
         { name: "Background", icon: faPanorama, angle: 40, color: colorPalette.background },
         { name: "Skeleton", icon: faBone, angle: 70, color: colorPalette.skeleton },
         { name: "Animation", icon: faFilm, angle: 100, color: colorPalette.animation },
@@ -46,7 +55,10 @@ function Footer({ setOpenDrawer, setActiveTab }: { setOpenDrawer: (open: boolean
               height: "36px",
               backgroundColor: color,
             }}
-            onClick={() => { setActiveTab(name.toLowerCase()); setOpenDrawer(true) }}
+            onClick={() => {
+              setActiveTab(name.toLowerCase())
+              setOpenDrawer(true)
+            }}
           >
             <FontAwesomeIcon icon={icon} color="white" size="lg" />
           </Fab>

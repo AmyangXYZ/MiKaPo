@@ -27,6 +27,9 @@
 - [x] Model selection
 - [x] Ollama support ([electron version](https://github.com/AmyangXYZ/MiKaPo-Electron))
 - [ ] VMD export
+- [x] MMD editor: bone, material, mesh edit
+- [ ] Custom model, vmd import
+- [ ] Multi-user co-editing
 
 ## Project Setup
 

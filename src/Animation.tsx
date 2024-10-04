@@ -14,8 +14,9 @@ function Animation({ setSelectedAnimation }: { setSelectedAnimation: (animation:
       >
         {availableAnimations.map((animation) => (
           <FormControlLabel
+            key={animation}
             value={animation}
-            control={<Radio sx={{ color: "lightgray" }} size="small" />}
+            control={<Radio sx={{ color: "#a2c9f5", "&.Mui-checked": { color: "#a2c9f5" } }} size="small" />}
             label={<Typography sx={{ fontSize: ".9rem" }}>{animation}</Typography>}
           />
         ))}
