@@ -51,8 +51,8 @@ function App(): JSX.Element {
         onClose={() => setOpenDrawer(false)}
         sx={{
           [`& .MuiDrawer-paper`]: {
-            backgroundColor: "rgba(0, 0, 0, 0.7)",
-            width: "calc(400px + 2rem)",
+            backgroundColor: "rgba(0, 0, 0, 0.6)",
+            minWidth: "210px",
           },
         }}
       >
@@ -70,10 +70,8 @@ function App(): JSX.Element {
         ></Motion>
         {activeTab === "outfit" && <Outfit></Outfit>}
         {activeTab === "skeleton" && <Skeleton setBoneRotation={setBoneRotation}></Skeleton>}
-        {activeTab === "animation" && (
-          <Animation selectedAnimation={selectedAnimation} setSelectedAnimation={setSelectedAnimation}></Animation>
-        )}
-        {activeTab === "model" && <Model selectedModel={selectedModel} setSelectedModel={setSelectedModel}></Model>}
+        {activeTab === "animation" && <Animation setSelectedAnimation={setSelectedAnimation}></Animation>}
+        {activeTab === "model" && <Model setSelectedModel={setSelectedModel}></Model>}
         {activeTab === "background" && (
           <Background
             selectedBackground={selectedBackground}

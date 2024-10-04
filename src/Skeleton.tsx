@@ -8,8 +8,8 @@ const importantBones = [
   { name_jp: "頭", name_en: "head" },
   { name_jp: "上半身", name_en: "upperBody" },
   { name_jp: "下半身", name_en: "lowerBody" },
-  { name_jp: "左足", name_en: "leftFoot" },
-  { name_jp: "右足", name_en: "rightFoot" },
+  { name_jp: "左足", name_en: "leftLeg" },
+  { name_jp: "右足", name_en: "rightLeg" },
   { name_jp: "左ひざ", name_en: "leftKnee" },
   { name_jp: "右ひざ", name_en: "rightKnee" },
   { name_jp: "左足首", name_en: "leftAnkle" },
@@ -56,7 +56,7 @@ const importantBones = [
 
 const categories = {
   Body: ["center", "neck", "head", "upperBody", "lowerBody"],
-  Legs: ["leftFoot", "rightFoot", "leftKnee", "rightKnee", "leftAnkle", "rightAnkle", "leftFootIK", "rightFootIK"],
+  Legs: ["leftLeg", "rightLeg", "leftKnee", "rightKnee", "leftAnkle", "rightAnkle", "leftFootIK", "rightFootIK"],
   Arms: ["leftForearm", "rightForearm", "leftElbow", "rightElbow", "leftWrist", "rightWrist"],
   Eyes: ["leftEye", "rightEye"],
   Fingers: [
