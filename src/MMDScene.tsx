@@ -143,9 +143,9 @@ function MMDScene({
       if (bone) {
         bone.setRotationQuaternion(
           Quaternion.FromEulerAngles(
-            boneRotation.axis === "x" ? boneRotation.value : 0,
-            boneRotation.axis === "y" ? boneRotation.value : 0,
-            boneRotation.axis === "z" ? boneRotation.value : 0
+            boneRotation.axis === "x" ? boneRotation.value : bone.rotationQuaternion!.toEulerAngles().x,
+            boneRotation.axis === "y" ? boneRotation.value : bone.rotationQuaternion!.toEulerAngles().y,
+            boneRotation.axis === "z" ? boneRotation.value : bone.rotationQuaternion!.toEulerAngles().z
           ),
           Space.LOCAL
         )
