@@ -4,6 +4,7 @@ import {
   BackgroundMaterial,
   Color3,
   Color4,
+  CreateScreenshotAsync,
   DirectionalLight,
   Engine,
   HemisphericLight,
@@ -38,6 +39,8 @@ import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
 
 import "@babylonjs/core/Engines/shaderStore"
+import { IconButton, Tooltip } from "@mui/material"
+import { Camera } from "@mui/icons-material"
 
 registerSceneLoaderPlugin(new PmxLoader())
 
@@ -107,6 +110,11 @@ function MMDScene({
   boneRotation,
   setMaterials,
   materialVisible,
+  isPlaying,
+  setIsPlaying,
+  setCurrentAnimationTime,
+  animationSeekTime,
+  setAnimationDuration,
 }: {
   pose: NormalizedLandmark[] | null
   face: NormalizedLandmark[] | null
@@ -121,16 +129,24 @@ function MMDScene({
   boneRotation: { name: string; axis: string; value: number } | null
   setMaterials: (materials: string[]) => void
   materialVisible: { name: string; visible: boolean } | null
+  isPlaying: boolean
+  setIsPlaying: (isPlaying: boolean) => void
+  setCurrentAnimationTime: (time: number) => void
+  setAnimationDuration: (duration: number) => void
+  animationSeekTime: number
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sceneRef = useRef<Scene | null>(null)
+  const engineRef = useRef<Engine | null>(null)
+  const cameraRef = useRef<ArcRotateCamera | null>(null)
   const [sceneRendered, setSceneRendered] = useState<boolean>(false)
-  const mmdWasmInstanceRef = useRef<MmdWasmInstance | null>(null)
-  const mmdModelRef = useRef<MmdWasmModel | null>(null)
-  const mmdRuntimeRef = useRef<MmdWasmRuntime | null>(null)
   const shadowGeneratorRef = useRef<ShadowGenerator | null>(null)
   const domeRef = useRef<PhotoDome | null>(null)
   const groundRef = useRef<Mesh | null>(null)
+
+  const mmdWasmInstanceRef = useRef<MmdWasmInstance | null>(null)
+  const mmdModelRef = useRef<MmdWasmModel | null>(null)
+  const mmdRuntimeRef = useRef<MmdWasmRuntime | null>(null)
   const keyBones = useRef<{ [key: string]: IMmdRuntimeLinkedBone }>({})
 
   const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
@@ -167,14 +183,34 @@ function MMDScene({
   }, [materialVisible])
 
   useEffect(() => {
+    if (mmdRuntimeRef.current) {
+      if (isPlaying) {
+        mmdRuntimeRef.current.playAnimation()
+      } else {
+        mmdRuntimeRef.current.pauseAnimation()
+      }
+    }
+  }, [isPlaying])
+
+  useEffect(() => {
+    if (mmdRuntimeRef.current) {
+      mmdRuntimeRef.current.seekAnimation(animationSeekTime * 30, true)
+    }
+  }, [animationSeekTime])
+
+  useEffect(() => {
     const createScene = async (canvas: HTMLCanvasElement): Promise<Scene> => {
       const engine = new Engine(canvas, true, {}, true)
+      engineRef.current = engine
       SdefInjector.OverrideEngineCreateEffect(engine)
       const scene = new Scene(engine)
       scene.clearColor = new Color4(0, 0, 0, 0)
       mmdWasmInstanceRef.current = await getMmdWasmInstance(new MmdWasmInstanceTypeMPD(), 2)
       mmdRuntimeRef.current = new MmdWasmRuntime(mmdWasmInstanceRef.current, scene, new MmdWasmPhysics(scene))
       mmdRuntimeRef.current.register(scene)
+      mmdRuntimeRef.current!.onAnimationTickObservable.add(() => {
+        setCurrentAnimationTime(mmdRuntimeRef.current!.currentTime)
+      })
       mmdRuntimeRef.current!.onPauseAnimationObservable.add(() => {
         if (mmdRuntimeRef.current!.currentTime == mmdRuntimeRef.current!.animationDuration) {
           mmdRuntimeRef.current!.seekAnimation(0, true)
@@ -187,6 +223,7 @@ function MMDScene({
       camera.attachControl(canvas, false)
       camera.inertia = 0.8
       camera.speed = 10
+      cameraRef.current = camera
 
       const hemisphericLight = new HemisphericLight("HemisphericLight", new Vector3(0, 1, 0), scene)
       hemisphericLight.intensity = 0.4
@@ -234,7 +271,7 @@ function MMDScene({
         setSceneRendered(true)
       })
     }
-  }, [setFps, setSceneRendered])
+  }, [setFps, setSceneRendered, setCurrentAnimationTime])
 
   useEffect(() => {
     if (domeRef.current) {
@@ -313,9 +350,11 @@ function MMDScene({
       mmdModelRef.current?.setAnimation("vmd")
       mmdRuntimeRef.current!.seekAnimation(0, true)
       mmdRuntimeRef.current!.playAnimation()
+      setIsPlaying(true)
+      setAnimationDuration(mmdRuntimeRef.current!.animationDuration)
     }
     loadAnimation()
-  }, [sceneRef, mmdWasmInstanceRef, mmdRuntimeRef, mmdModelRef, selectedAnimation])
+  }, [sceneRef, mmdWasmInstanceRef, mmdRuntimeRef, mmdModelRef, selectedAnimation, setAnimationDuration, setIsPlaying])
 
   useEffect(() => {
     if (mmdRuntimeRef.current && mmdRuntimeRef.current.isAnimationPlaying) {
@@ -936,9 +975,29 @@ function MMDScene({
     }
   }, [leftHand, rightHand, lerpFactor])
 
+  const handleCaptureScreenshot = () => {
+    CreateScreenshotAsync(engineRef.current!, cameraRef.current!, { precision: 1 }).then((b64) => {
+      const link = document.createElement("a")
+      link.href = b64
+      link.download = "mikapo_screenshot.png"
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    })
+  }
   return (
     <>
       <canvas ref={canvasRef} className="scene"></canvas>
+      <Tooltip title="Capture screenshot">
+        <IconButton
+          style={{ position: "absolute", top: "10rem", right: ".5rem" }}
+          color="error"
+          size="large"
+          onClick={handleCaptureScreenshot}
+        >
+          <Camera sx={{ width: "32px", height: "32px" }} />
+        </IconButton>
+      </Tooltip>
     </>
   )
 }
