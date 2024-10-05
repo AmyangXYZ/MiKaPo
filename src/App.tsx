@@ -24,7 +24,12 @@ function App(): JSX.Element {
 
   const [selectedModel, setSelectedModel] = useState<string>("深空之眼-托特")
   const [selectedBackground, setSelectedBackground] = useState<string>("Static")
+
+  const [isPlaying, setIsPlaying] = useState<boolean>(false)
   const [selectedAnimation, setSelectedAnimation] = useState<string>("")
+  const [currentAnimationTime, setCurrentAnimationTime] = useState<number>(0)
+  const [animationSeekTime, setAnimationSeekTime] = useState<number>(0)
+  const [animationDuration, setAnimationDuration] = useState<number>(0)
 
   const [boneRotation, setBoneRotation] = useState<{ name: string; axis: string; value: number } | null>(null)
   const [materials, setMaterials] = useState<string[]>([])
@@ -47,6 +52,11 @@ function App(): JSX.Element {
         boneRotation={boneRotation}
         setMaterials={setMaterials}
         materialVisible={materialVisible}
+        setCurrentAnimationTime={setCurrentAnimationTime}
+        setAnimationDuration={setAnimationDuration}
+        animationSeekTime={animationSeekTime}
+        isPlaying={isPlaying}
+        setIsPlaying={setIsPlaying}
       ></MMDScene>
       <Drawer
         variant="persistent"
@@ -75,7 +85,16 @@ function App(): JSX.Element {
           <Materials materials={materials} setMaterialVisible={setMaterialVisible}></Materials>
         )}
         {activeTab === "skeleton" && <Skeleton setBoneRotation={setBoneRotation}></Skeleton>}
-        {activeTab === "animation" && <Animation setSelectedAnimation={setSelectedAnimation}></Animation>}
+        {activeTab === "animation" && (
+          <Animation
+            isPlaying={isPlaying}
+            setIsPlaying={setIsPlaying}
+            setSelectedAnimation={setSelectedAnimation}
+            currentAnimationTime={currentAnimationTime}
+            setAnimationSeekTime={setAnimationSeekTime}
+            animationDuration={animationDuration}
+          ></Animation>
+        )}
         {activeTab === "model" && <Model setSelectedModel={setSelectedModel}></Model>}
         {activeTab === "background" && (
           <Background
