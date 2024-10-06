@@ -22,7 +22,7 @@ import {
   Texture,
   Vector3,
 } from "@babylonjs/core"
-import { NormalizedLandmark } from "@mediapipe/tasks-vision"
+import { HolisticLandmarker, NormalizedLandmark } from "@mediapipe/tasks-vision"
 import {
   getMmdWasmInstance,
   MmdWasmAnimation,
@@ -586,11 +586,10 @@ function MMDScene({
           // Calculate arm direction (from shoulder to elbow)
           const armDir = elbow.subtract(shoulder).normalize()
 
-          // Ensure Y-axis is always aligned (pointing downwards)
-          armDir.y = -Math.abs(armDir.y)
+          armDir.y *= -1
 
           // Correct X-axis direction based on the side
-          armDir.x = side === "left" ? Math.abs(armDir.x) : -Math.abs(armDir.x)
+          // armDir.x *= -1
 
           const upperBodyRotation = upperBodyBone.rotationQuaternion || new Quaternion()
           const upperBodyRotationMatrix = new Matrix()
@@ -623,7 +622,7 @@ function MMDScene({
           const lowerArmDir = wrist.subtract(elbow).normalize()
 
           // Ensure Z-axis is always pointing forward
-          lowerArmDir.z = Math.abs(lowerArmDir.z)
+          lowerArmDir.z = -lowerArmDir.z
           lowerArmDir.x = -lowerArmDir.x
 
           const upperArmRotation = upperArmBone.rotationQuaternion || new Quaternion()
@@ -985,17 +984,64 @@ function MMDScene({
       document.body.removeChild(link)
     })
   }
+
+  const debug = false
+  useEffect(() => {
+    const drawDebug = (): void => {
+      const scene = sceneRef.current
+      const scale = 12
+      const yOffset = 9
+
+      const drawConnections = (
+        landmarks: NormalizedLandmark[] | null,
+        connections: { start: number; end: number }[],
+        color: Color3,
+        meshNamePrefix: string
+      ): void => {
+        if (!landmarks || landmarks.length === 0) return
+        const points = landmarks.map((lm) => new Vector3(lm.x * scale + 10, -lm.y * scale + yOffset, lm.z * scale))
+        connections.forEach((connection, index) => {
+          // skip hand connections from pose landmarks
+          if (meshNamePrefix === "pose") {
+            if ((connection.start >= 17 && connection.start <= 22) || (connection.end >= 17 && connection.end <= 22))
+              return
+          }
+
+          const start = points[connection.start]
+          const end = points[connection.end]
+          const lineMesh = MeshBuilder.CreateLines(
+            `debug_lines_${meshNamePrefix}_${index}`,
+            { points: [start, end] },
+            scene
+          )
+          lineMesh.color = color
+        })
+      }
+
+      // Remove previous debug lines
+      scene!.meshes.filter((mesh) => mesh.name.startsWith("debug_lines")).forEach((mesh) => mesh.dispose())
+
+      // Draw new debug lines
+      drawConnections(pose, HolisticLandmarker.POSE_CONNECTIONS, new Color3(1, 1, 1), "pose")
+      drawConnections(leftHand, HolisticLandmarker.HAND_CONNECTIONS, new Color3(1, 1, 1), "left_hand")
+      drawConnections(rightHand, HolisticLandmarker.HAND_CONNECTIONS, new Color3(1, 1, 1), "right_hand")
+    }
+
+    if (sceneRef.current && debug) {
+      drawDebug()
+    }
+  }, [pose, leftHand, rightHand, debug])
   return (
     <>
       <canvas ref={canvasRef} className="scene"></canvas>
       <Tooltip title="Capture screenshot">
         <IconButton
           style={{ position: "absolute", top: "10rem", right: ".5rem" }}
-          color="error"
+          color="secondary"
           size="large"
           onClick={handleCaptureScreenshot}
         >
-          <Camera sx={{ width: "32px", height: "32px" }} />
+          <Camera sx={{ width: "28px", height: "28px" }} />
         </IconButton>
       </Tooltip>
     </>
