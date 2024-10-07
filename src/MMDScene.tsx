@@ -47,9 +47,11 @@ registerSceneLoaderPlugin(new PmxLoader())
 ArcRotateCamera.prototype.spinTo = function (
   this: ArcRotateCamera,
   targetPosition: Vector3,
+  targetTarget: Vector3 = new Vector3(0, 12, 0),
   duration: number = 1000
 ): void {
   const startPosition = this.position.clone()
+  const startTarget = this.target.clone()
   const startTime = performance.now()
 
   const smoothStep = (x: number): number => {
@@ -64,7 +66,10 @@ ArcRotateCamera.prototype.spinTo = function (
     const easedProgress = smoothStep(progress)
 
     const newPosition = Vector3.Lerp(startPosition, targetPosition, easedProgress)
+    const newTarget = Vector3.Lerp(startTarget, targetTarget, easedProgress)
+
     this.position = newPosition
+    this.setTarget(newTarget)
 
     if (progress < 1) {
       requestAnimationFrame(animate)
@@ -77,7 +82,7 @@ ArcRotateCamera.prototype.spinTo = function (
 // Declare the spinTo method on the ArcRotateCamera interface
 declare module "@babylonjs/core/Cameras/arcRotateCamera" {
   interface ArcRotateCamera {
-    spinTo(targetPosition: Vector3, speed?: number): void
+    spinTo(targetPosition: Vector3, targetTarget?: Vector3, duration?: number): void
   }
 }
 
@@ -1047,7 +1052,7 @@ function MMDScene({
           style={{ position: "absolute", top: "8rem", right: ".5rem" }}
           color="secondary"
           onClick={() => {
-            cameraRef.current!.spinTo(new Vector3(0, 19, -25))
+            cameraRef.current!.spinTo(new Vector3(0, 19, -25), new Vector3(0, 12, 0), 1000)
           }}
         >
           <CenterFocusWeak sx={{ width: "28px", height: "28px" }} />
