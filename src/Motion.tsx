@@ -39,7 +39,6 @@ const VisuallyHiddenInput = styled("input")({
 
 function Video({
   pose,
-  face,
   leftHand,
   rightHand,
   setPose,
@@ -50,7 +49,6 @@ function Video({
   style,
 }: {
   pose: NormalizedLandmark[] | null
-  face: NormalizedLandmark[] | null
   leftHand: NormalizedLandmark[] | null
   rightHand: NormalizedLandmark[] | null
   setPose: (pose: NormalizedLandmark[]) => void
@@ -405,7 +403,7 @@ function Video({
         )}
       </div>
 
-      {style.display == "block" && <DebugScene pose={pose} face={face} leftHand={leftHand} rightHand={rightHand} />}
+      {style.display == "block" && <DebugScene pose={pose} leftHand={leftHand} rightHand={rightHand} />}
     </div>
   )
 }
