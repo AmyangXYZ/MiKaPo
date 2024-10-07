@@ -28,7 +28,10 @@ function Animation({
   const marks = useMemo(() => {
     return [
       { value: 0, label: formatTime(currentAnimationTime) },
-      { value: animationDuration, label: "-" + formatTime(animationDuration - currentAnimationTime) },
+      {
+        value: animationDuration,
+        label: "-" + formatTime(Math.round(animationDuration) - Math.round(currentAnimationTime)),
+      },
     ]
   }, [currentAnimationTime, animationDuration])
 
