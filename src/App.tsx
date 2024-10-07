@@ -74,6 +74,10 @@ function App(): JSX.Element {
         </IconButton>
 
         <Motion
+          pose={pose}
+          face={face}
+          leftHand={leftHand}
+          rightHand={rightHand}
           setPose={setPose}
           setFace={setFace}
           setLeftHand={setLeftHand}

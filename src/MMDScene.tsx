@@ -22,7 +22,7 @@ import {
   Texture,
   Vector3,
 } from "@babylonjs/core"
-import { HolisticLandmarker, NormalizedLandmark } from "@mediapipe/tasks-vision"
+import { NormalizedLandmark } from "@mediapipe/tasks-vision"
 import {
   getMmdWasmInstance,
   MmdWasmAnimation,
@@ -149,6 +149,8 @@ function MMDScene({
   const mmdRuntimeRef = useRef<MmdWasmRuntime | null>(null)
   const keyBones = useRef<{ [key: string]: IMmdRuntimeLinkedBone }>({})
 
+  const [modelLegLength, setModelLegLength] = useState<number>(8)
+
   const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
     return keyBones.current[name]
   }
@@ -248,12 +250,16 @@ function MMDScene({
       backgroundMaterial.useRGBColor = false
       backgroundMaterial.primaryColor = Color3.Magenta()
 
-      groundRef.current = MeshBuilder.CreateGround("Ground", {
-        width: 32,
-        height: 32,
-        subdivisions: 2,
-        updatable: false,
-      })
+      groundRef.current = MeshBuilder.CreateGround(
+        "Ground11",
+        {
+          width: 32,
+          height: 32,
+          subdivisions: 2,
+          updatable: false,
+        },
+        scene
+      )
       groundRef.current!.material = backgroundMaterial
       groundRef.current!.receiveShadows = true
 
@@ -322,6 +328,11 @@ function MMDScene({
               worldId: 0,
             },
           })
+
+          setTimeout(() => {
+            setModelLegLength(mmdModelRef.current!.runtimeBones.find((b) => b.name === "下半身")!.worldMatrix[13])
+          }, 10)
+
           for (const bone of mmdModelRef.current!.skeleton.bones) {
             if (usedKeyBones.includes(bone.name)) {
               keyBones.current[bone.name] = bone
@@ -331,7 +342,16 @@ function MMDScene({
       )
     }
     loadMMD()
-  }, [sceneRendered, sceneRef, mmdWasmInstanceRef, mmdRuntimeRef, selectedModel, setSelectedAnimation, setMaterials])
+  }, [
+    sceneRendered,
+    sceneRef,
+    mmdWasmInstanceRef,
+    mmdRuntimeRef,
+    selectedModel,
+    setSelectedAnimation,
+    setMaterials,
+    setModelLegLength,
+  ])
 
   useEffect(() => {
     if (
@@ -546,13 +566,12 @@ function MMDScene({
 
       const moveFoot = (side: "right" | "left"): void => {
         const ankle = getKeypoint(`${side}_ankle`)
+        const hip = getKeypoint(`${side}_hip`)
         const bone = getBone(`${side === "right" ? "右" : "左"}足ＩＫ`)
-        if (ankle && bone) {
-          const targetPosition = new Vector3(
-            ankle.x! * scale,
-            Math.max(0, -ankle.y! * scale + yOffset),
-            ankle.z! * scale
-          )
+
+        if (ankle && hip && bone) {
+          const targetPosition = new Vector3(ankle.x * scale, -ankle.y * scale + yOffset, ankle.z * scale)
+
           bone.position = Vector3.Lerp(bone.position, targetPosition, lerpFactor)
         }
       }
@@ -587,9 +606,6 @@ function MMDScene({
           const armDir = elbow.subtract(shoulder).normalize()
 
           armDir.y *= -1
-
-          // Correct X-axis direction based on the side
-          // armDir.x *= -1
 
           const upperBodyRotation = upperBodyBone.rotationQuaternion || new Quaternion()
           const upperBodyRotationMatrix = new Matrix()
@@ -689,15 +705,16 @@ function MMDScene({
         }
       }
 
-      rotateHead()
       rotateUpperBody()
+      rotateHead()
       rotateLowerBody()
-      rotateHip("right")
-      rotateHip("left")
       moveFoot("right")
       moveFoot("left")
       rotateFoot("right")
       rotateFoot("left")
+      rotateHip("right")
+      rotateHip("left")
+
       rotateUpperArm("right")
       rotateUpperArm("left")
       rotateLowerArm("right")
@@ -708,7 +725,7 @@ function MMDScene({
     if (sceneRef.current && mmdModelRef.current) {
       updateMMDPose(mmdModelRef.current, pose)
     }
-  }, [pose, lerpFactor])
+  }, [pose, lerpFactor, modelLegLength])
 
   useEffect(() => {
     const updateMMDFace = (mmdModel: MmdWasmModel | null, face: NormalizedLandmark[] | null): void => {
@@ -985,52 +1002,6 @@ function MMDScene({
     })
   }
 
-  const debug = false
-  useEffect(() => {
-    const drawDebug = (): void => {
-      const scene = sceneRef.current
-      const scale = 12
-      const yOffset = 9
-
-      const drawConnections = (
-        landmarks: NormalizedLandmark[] | null,
-        connections: { start: number; end: number }[],
-        color: Color3,
-        meshNamePrefix: string
-      ): void => {
-        if (!landmarks || landmarks.length === 0) return
-        const points = landmarks.map((lm) => new Vector3(lm.x * scale + 10, -lm.y * scale + yOffset, lm.z * scale))
-        connections.forEach((connection, index) => {
-          // skip hand connections from pose landmarks
-          if (meshNamePrefix === "pose") {
-            if ((connection.start >= 17 && connection.start <= 22) || (connection.end >= 17 && connection.end <= 22))
-              return
-          }
-
-          const start = points[connection.start]
-          const end = points[connection.end]
-          const lineMesh = MeshBuilder.CreateLines(
-            `debug_lines_${meshNamePrefix}_${index}`,
-            { points: [start, end] },
-            scene
-          )
-          lineMesh.color = color
-        })
-      }
-
-      // Remove previous debug lines
-      scene!.meshes.filter((mesh) => mesh.name.startsWith("debug_lines")).forEach((mesh) => mesh.dispose())
-
-      // Draw new debug lines
-      drawConnections(pose, HolisticLandmarker.POSE_CONNECTIONS, new Color3(1, 1, 1), "pose")
-      drawConnections(leftHand, HolisticLandmarker.HAND_CONNECTIONS, new Color3(1, 1, 1), "left_hand")
-      drawConnections(rightHand, HolisticLandmarker.HAND_CONNECTIONS, new Color3(1, 1, 1), "right_hand")
-    }
-
-    if (sceneRef.current && debug) {
-      drawDebug()
-    }
-  }, [pose, leftHand, rightHand, debug])
   return (
     <>
       <canvas ref={canvasRef} className="scene"></canvas>

@@ -74,29 +74,6 @@ body {
   justify-content: center;
 }
 
-.loading-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100vh;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1010;
-}
-
-.loader {
-  width: 28px;
-  height: 28px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
-  margin-right: 0.5rem;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
 .motion {
   width: calc(400px + 2rem);
 }
@@ -111,21 +88,20 @@ body {
 }
 
 .video-player {
-  position: absolute;
-  top: 6rem;
-  left: 1rem;
-  width: 400px;
+  width: 100%;
   z-index: 1001;
 }
 
 video {
+  position: relative;
+  left: 1rem;
   width: 400px;
   height: 100%;
 }
 
 .toolbar {
-  position: absolute;
-  top: 4rem;
+  position: relative;
+  margin-top: 4rem;
   left: 1rem;
   width: 400px;
   z-index: 1002;
@@ -171,6 +147,13 @@ video {
   color: white;
 }
 
+.debug-scene {
+  position: relative;
+  width: 400px;
+  height: 400px;
+  margin-left: 1rem;
+}
+
 a {
   color: inherit;
 }
@@ -180,7 +163,7 @@ a {
     position: relative;
     top: auto;
     width: 100%;
-    height: calc(100vh - 4rem - 200px);
+    height: calc(100vh - 4rem);
   }
 
   .toolbar {
