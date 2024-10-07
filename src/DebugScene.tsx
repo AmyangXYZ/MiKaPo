@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 import { ArcRotateCamera, Color3, Color4, Engine, MeshBuilder, Scene, Vector3 } from "@babylonjs/core"
-import { GridMaterial } from "@babylonjs/materials/Grid"
+import { GridMaterial } from "@babylonjs/materials"
 import { HolisticLandmarker, NormalizedLandmark } from "@mediapipe/tasks-vision"
 
 import "@babylonjs/core/Engines/shaderStore"
