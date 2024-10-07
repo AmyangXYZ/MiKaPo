@@ -75,7 +75,6 @@ function App(): JSX.Element {
 
         <Motion
           pose={pose}
-          face={face}
           leftHand={leftHand}
           rightHand={rightHand}
           setPose={setPose}

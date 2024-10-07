@@ -40,9 +40,46 @@ import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeL
 
 import "@babylonjs/core/Engines/shaderStore"
 import { IconButton, Tooltip } from "@mui/material"
-import { Camera } from "@mui/icons-material"
+import { Camera, CenterFocusWeak } from "@mui/icons-material"
 
 registerSceneLoaderPlugin(new PmxLoader())
+
+ArcRotateCamera.prototype.spinTo = function (
+  this: ArcRotateCamera,
+  targetPosition: Vector3,
+  duration: number = 1000
+): void {
+  const startPosition = this.position.clone()
+  const startTime = performance.now()
+
+  const smoothStep = (x: number): number => {
+    return x * x * (3 - 2 * x)
+  }
+
+  const animate = (currentTime: number) => {
+    const elapsedTime = currentTime - startTime
+    const progress = Math.min(elapsedTime / duration, 1)
+
+    // Use a smooth easing function
+    const easedProgress = smoothStep(progress)
+
+    const newPosition = Vector3.Lerp(startPosition, targetPosition, easedProgress)
+    this.position = newPosition
+
+    if (progress < 1) {
+      requestAnimationFrame(animate)
+    }
+  }
+
+  requestAnimationFrame(animate)
+}
+
+// Declare the spinTo method on the ArcRotateCamera interface
+declare module "@babylonjs/core/Cameras/arcRotateCamera" {
+  interface ArcRotateCamera {
+    spinTo(targetPosition: Vector3, speed?: number): void
+  }
+}
 
 const usedKeyBones: string[] = [
   "センター",
@@ -221,7 +258,7 @@ function MMDScene({
       })
 
       const camera = new ArcRotateCamera("ArcRotateCamera", 0, 0, 45, new Vector3(0, 12, 0), scene)
-      camera.setPosition(new Vector3(0, 15, -27))
+      camera.setPosition(new Vector3(0, 19, -25))
       camera.attachControl(canvas, false)
       camera.inertia = 0.8
       camera.speed = 10
@@ -1005,11 +1042,21 @@ function MMDScene({
   return (
     <>
       <canvas ref={canvasRef} className="scene"></canvas>
+      <Tooltip title="Reset camera">
+        <IconButton
+          style={{ position: "absolute", top: "8rem", right: ".5rem" }}
+          color="secondary"
+          onClick={() => {
+            cameraRef.current!.spinTo(new Vector3(0, 19, -25))
+          }}
+        >
+          <CenterFocusWeak sx={{ width: "28px", height: "28px" }} />
+        </IconButton>
+      </Tooltip>
       <Tooltip title="Capture screenshot">
         <IconButton
           style={{ position: "absolute", top: "10rem", right: ".5rem" }}
           color="secondary"
-          size="large"
           onClick={handleCaptureScreenshot}
         >
           <Camera sx={{ width: "28px", height: "28px" }} />

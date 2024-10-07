@@ -11,7 +11,6 @@ function DebugScene({
   rightHand,
 }: {
   pose: NormalizedLandmark[] | null
-  face: NormalizedLandmark[] | null
   leftHand: NormalizedLandmark[] | null
   rightHand: NormalizedLandmark[] | null
 }): JSX.Element {
