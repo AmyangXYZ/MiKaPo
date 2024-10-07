@@ -9,6 +9,7 @@ import {
 import { Badge, BadgeProps, IconButton, Tooltip } from "@mui/material"
 import { Videocam, CloudUpload, Replay, RadioButtonChecked, StopCircle, LocalFireDepartment } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
+import DebugScene from "./DebugScene"
 
 const defaultVideoSrc = "./video/flash.mp4"
 
@@ -37,6 +38,10 @@ const VisuallyHiddenInput = styled("input")({
 })
 
 function Video({
+  pose,
+  face,
+  leftHand,
+  rightHand,
   setPose,
   setFace,
   setLeftHand,
@@ -44,6 +49,10 @@ function Video({
   setLerpFactor,
   style,
 }: {
+  pose: NormalizedLandmark[] | null
+  face: NormalizedLandmark[] | null
+  leftHand: NormalizedLandmark[] | null
+  rightHand: NormalizedLandmark[] | null
   setPose: (pose: NormalizedLandmark[]) => void
   setFace: (face: NormalizedLandmark[]) => void
   setLeftHand: (leftHand: NormalizedLandmark[]) => void
@@ -316,7 +325,6 @@ function Video({
             color="primary"
             component="label"
             disabled={isCameraActive || isOfflineProcessingRef.current}
-            size="small"
           >
             <CloudUpload />
             <VisuallyHiddenInput type="file" onChange={handleFileUpload} accept="video/*, image/*" />
@@ -396,6 +404,8 @@ function Video({
           <img ref={imgRef} src={imgSrc} style={{ width: "100%", height: "auto" }} />
         )}
       </div>
+
+      {style.display == "block" && <DebugScene pose={pose} face={face} leftHand={leftHand} rightHand={rightHand} />}
     </div>
   )
 }
