@@ -273,18 +273,20 @@ function MMDScene({
       camera.speed = 10
       cameraRef.current = camera
 
+      // scene.ambientColor = new Color3(0.5, 0.5, 0.5)
+
       const hemisphericLight = new HemisphericLight("HemisphericLight", new Vector3(0, 1, 0), scene)
-      hemisphericLight.intensity = 0.4
+      hemisphericLight.intensity = 0.3
       hemisphericLight.specular = new Color3(0, 0, 0)
       hemisphericLight.groundColor = new Color3(1, 1, 1)
 
       const directionalLight = new DirectionalLight("DirectionalLight", new Vector3(8, -15, 10), scene)
-      directionalLight.intensity = 0.8
+      directionalLight.intensity = 0.7
 
       shadowGeneratorRef.current = new ShadowGenerator(1024, directionalLight, true)
       shadowGeneratorRef.current.usePercentageCloserFiltering = true
       shadowGeneratorRef.current.forceBackFacesOnly = true
-      shadowGeneratorRef.current.filteringQuality = ShadowGenerator.QUALITY_MEDIUM
+      shadowGeneratorRef.current.filteringQuality = ShadowGenerator.QUALITY_HIGH
       shadowGeneratorRef.current.frustumEdgeFalloff = 0.1
       shadowGeneratorRef.current.transparencyShadow = true
 
