@@ -301,6 +301,18 @@ function Video({
           setFace([])
         }
 
+        if (result.leftHandWorldLandmarks && result.leftHandWorldLandmarks.length > 0) {
+          setLeftHand(result.leftHandWorldLandmarks[0])
+        } else {
+          setLeftHand([])
+        }
+
+        if (result.rightHandWorldLandmarks && result.rightHandWorldLandmarks.length > 0) {
+          setRightHand(result.rightHandWorldLandmarks[0])
+        } else {
+          setRightHand([])
+        }
+
         currentIndex++
         setTimeout(() => requestAnimationFrame(playNextFrame), frameInterval)
       } else {
