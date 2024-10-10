@@ -1,6 +1,7 @@
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
-import { faBone, faFilm, faPanorama, faRunning, faShirt, faUser } from "@fortawesome/free-solid-svg-icons"
+import { faBone, faFilm, faPanorama, faShirt, faUser } from "@fortawesome/free-solid-svg-icons"
 import { Fab, Tooltip } from "@mui/material"
+import { SportsMartialArts } from "@mui/icons-material"
 
 function Footer({
   setOpenDrawer,
@@ -35,7 +36,7 @@ function Footer({
             setOpenDrawer(true)
           }}
         >
-          <FontAwesomeIcon icon={faRunning} color="white" size="6x" />
+          <SportsMartialArts sx={{ fontSize: "96px", color: "white", marginTop: "10px" }} />
         </Fab>
       </Tooltip>
       {[
