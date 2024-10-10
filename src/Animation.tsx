@@ -2,7 +2,7 @@ import { Pause, PlayArrow } from "@mui/icons-material"
 import { FormControl, FormControlLabel, IconButton, Radio, RadioGroup, Slider, Typography } from "@mui/material"
 import { useMemo } from "react"
 
-const availableAnimations = ["Stand", "Zyy", "Miku", "iKun1", "0-540"]
+const availableAnimations = ["Stand", "Zyy", "Miku", "iKun1", "Man", "0-540"]
 
 function Animation({
   isPlaying,
