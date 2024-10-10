@@ -199,6 +199,10 @@ function MMDScene({
 
   useEffect(() => {
     if (mmdModelRef.current && boneRotation) {
+      if (mmdRuntimeRef.current && mmdRuntimeRef.current.isAnimationPlaying) {
+        mmdRuntimeRef.current.pauseAnimation()
+        mmdModelRef.current.removeAnimation(0)
+      }
       const bone = getBone(boneRotation.name)
       if (bone) {
         bone.setRotationQuaternion(
