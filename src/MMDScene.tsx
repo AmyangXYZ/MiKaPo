@@ -248,7 +248,22 @@ function MMDScene({
 
   useEffect(() => {
     const createScene = async (canvas: HTMLCanvasElement): Promise<Scene> => {
-      const engine = new Engine(canvas, true, {}, true)
+      const engine = new Engine(
+        canvas,
+        true,
+        {
+          preserveDrawingBuffer: false,
+          stencil: false,
+          antialias: false,
+          alpha: true,
+          premultipliedAlpha: false,
+          powerPreference: "high-performance",
+          doNotHandleTouchAction: false,
+          doNotHandleContextLost: true,
+          audioEngine: false,
+        },
+        true
+      )
       engineRef.current = engine
       SdefInjector.OverrideEngineCreateEffect(engine)
       const scene = new Scene(engine)
@@ -299,8 +314,8 @@ function MMDScene({
       groundRef.current = MeshBuilder.CreateGround(
         "Ground11",
         {
-          width: 32,
-          height: 32,
+          width: 48,
+          height: 48,
           subdivisions: 2,
           updatable: false,
         },
