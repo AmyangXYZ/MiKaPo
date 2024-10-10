@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Motion from "./Motion"
 import MMDScene from "./MMDScene"
 import Materials from "./Materials"
@@ -20,7 +20,7 @@ function App(): JSX.Element {
   const [lerpFactor, setLerpFactor] = useState<number>(0.5)
   const [fps, setFps] = useState<number>(0)
   const [openDrawer, setOpenDrawer] = useState<boolean>(false)
-  const [activeTab, setActiveTab] = useState<string>("motion")
+  const [activeTab, setActiveTab] = useState<string>("")
 
   const [selectedModel, setSelectedModel] = useState<string>("深空之眼-托特")
   const [selectedBackground, setSelectedBackground] = useState<string>("Static")
@@ -34,6 +34,14 @@ function App(): JSX.Element {
   const [boneRotation, setBoneRotation] = useState<{ name: string; axis: string; value: number } | null>(null)
   const [materials, setMaterials] = useState<string[]>([])
   const [materialVisible, setMaterialVisible] = useState<{ name: string; visible: boolean } | null>(null)
+
+  const [motionMounted, setMotionMounted] = useState(false)
+  useEffect(() => {
+    if (activeTab === "motion" && !motionMounted) {
+      setMotionMounted(true)
+    }
+  }, [activeTab, motionMounted])
+
   return (
     <>
       <Header fps={fps}></Header>
@@ -73,17 +81,19 @@ function App(): JSX.Element {
           <KeyboardBackspace sx={{ color: "white" }} />
         </IconButton>
 
-        <Motion
-          pose={pose}
-          leftHand={leftHand}
-          rightHand={rightHand}
-          setPose={setPose}
-          setFace={setFace}
-          setLeftHand={setLeftHand}
-          setRightHand={setRightHand}
-          setLerpFactor={setLerpFactor}
-          style={{ display: activeTab === "motion" ? "block" : "none" }}
-        ></Motion>
+        {motionMounted && (
+          <Motion
+            pose={pose}
+            leftHand={leftHand}
+            rightHand={rightHand}
+            setPose={setPose}
+            setFace={setFace}
+            setLeftHand={setLeftHand}
+            setRightHand={setRightHand}
+            setLerpFactor={setLerpFactor}
+            style={{ display: activeTab === "motion" ? "block" : "none" }}
+          ></Motion>
+        )}
         {activeTab === "material" && (
           <Materials materials={materials} setMaterialVisible={setMaterialVisible}></Materials>
         )}
