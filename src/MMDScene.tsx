@@ -21,6 +21,7 @@ import {
   Space,
   Texture,
   Vector3,
+  Viewport,
 } from "@babylonjs/core"
 import { NormalizedLandmark } from "@mediapipe/tasks-vision"
 import {
@@ -40,7 +41,7 @@ import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeL
 
 import "@babylonjs/core/Engines/shaderStore"
 import { IconButton, Tooltip } from "@mui/material"
-import { Camera, CenterFocusWeak } from "@mui/icons-material"
+import { BorderAll, Camera, CenterFocusWeak } from "@mui/icons-material"
 
 registerSceneLoaderPlugin(new PmxLoader())
 
@@ -193,6 +194,8 @@ function MMDScene({
 
   const [modelLegLength, setModelLegLength] = useState<number>(8)
 
+  const [enableSplitView, setEnableSplitView] = useState<boolean>(false)
+
   const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
     return keyBones.current[name]
   }
@@ -247,6 +250,61 @@ function MMDScene({
   }, [animationSeekTime])
 
   useEffect(() => {
+    if (sceneRef.current) {
+      if (enableSplitView) {
+        const topCamera = new ArcRotateCamera(
+          "TopCamera",
+          -Math.PI / 2,
+          -Math.PI,
+          30,
+          new Vector3(0, 10, 0),
+          sceneRef.current!
+        )
+
+        const sideCamera = new ArcRotateCamera(
+          "SideCamera",
+          Math.PI,
+          Math.PI / 2,
+          30,
+          new Vector3(0, 10, 0),
+          sceneRef.current!
+        )
+        const frontCamera = new ArcRotateCamera(
+          "FrontCamera",
+          -Math.PI / 2,
+          Math.PI / 2,
+          30,
+          new Vector3(0, 10, 0),
+          sceneRef.current!
+        )
+
+        topCamera.inputs.clear()
+        topCamera.inputs.addMouseWheel()
+        topCamera.attachControl(canvasRef.current!, false)
+
+        sideCamera.inputs.clear()
+        sideCamera.inputs.addMouseWheel()
+        sideCamera.attachControl(canvasRef.current!, false)
+
+        frontCamera.inputs.clear()
+        frontCamera.inputs.addMouseWheel()
+        frontCamera.attachControl(canvasRef.current!, false)
+
+        // Set camera viewports
+        cameraRef.current!.viewport = new Viewport(0, 0.5, 0.5, 0.5)
+        topCamera.viewport = new Viewport(0.5, 0.5, 0.5, 0.5)
+        sideCamera.viewport = new Viewport(0, 0, 0.5, 0.5)
+        frontCamera.viewport = new Viewport(0.5, 0, 0.5, 0.5)
+
+        sceneRef.current.activeCameras = [cameraRef.current!, topCamera, sideCamera, frontCamera]
+      } else {
+        cameraRef.current!.viewport = new Viewport(0, 0, 1, 1)
+        sceneRef.current.activeCameras = [cameraRef.current!]
+      }
+    }
+  }, [enableSplitView])
+
+  useEffect(() => {
     const createScene = async (canvas: HTMLCanvasElement): Promise<Scene> => {
       const engine = new Engine(
         canvas,
@@ -287,6 +345,7 @@ function MMDScene({
       camera.inertia = 0.8
       camera.speed = 10
       cameraRef.current = camera
+      scene.activeCameras = [camera]
 
       const hemisphericLight = new HemisphericLight("HemisphericLight", new Vector3(0, 1, 0), scene)
       hemisphericLight.intensity = 0.3
@@ -1068,22 +1127,28 @@ function MMDScene({
       <canvas ref={canvasRef} className="scene"></canvas>
       <Tooltip title="Reset camera">
         <IconButton
-          style={{ position: "absolute", top: "8rem", right: ".5rem" }}
-          color="secondary"
+          style={{ position: "absolute", top: "8rem", right: ".5rem", color: "#f209f5" }}
           onClick={() => {
             cameraRef.current!.spinTo(new Vector3(0, 19, -25), new Vector3(0, 12, 0), 1000)
           }}
         >
-          <CenterFocusWeak sx={{ width: "28px", height: "28px" }} />
+          <CenterFocusWeak sx={{ width: "26px", height: "26px" }} />
+        </IconButton>
+      </Tooltip>
+      <Tooltip title="Split view">
+        <IconButton
+          style={{ position: "absolute", top: "10rem", right: ".5rem", color: "#f209f5" }}
+          onClick={() => setEnableSplitView(!enableSplitView)}
+        >
+          <BorderAll sx={{ width: "26px", height: "26px" }} />
         </IconButton>
       </Tooltip>
       <Tooltip title="Capture screenshot">
         <IconButton
-          style={{ position: "absolute", top: "10rem", right: ".5rem" }}
-          color="secondary"
+          style={{ position: "absolute", top: "12rem", right: ".5rem", color: "#f209f5" }}
           onClick={handleCaptureScreenshot}
         >
-          <Camera sx={{ width: "28px", height: "28px" }} />
+          <Camera sx={{ width: "26px", height: "26px" }} />
         </IconButton>
       </Tooltip>
     </>
