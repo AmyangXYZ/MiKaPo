@@ -139,6 +139,110 @@ const usedKeyBones: string[] = [
   "左小指３",
 ]
 
+const poseKeypoints: { [key: string]: number } = {
+  nose: 0,
+  left_eye_inner: 1,
+  left_eye: 2,
+  left_eye_outer: 3,
+  right_eye_inner: 4,
+  right_eye: 5,
+  right_eye_outer: 6,
+  left_ear: 7,
+  right_ear: 8,
+  mouth_left: 9,
+  mouth_right: 10,
+  left_shoulder: 11,
+  right_shoulder: 12,
+  left_elbow: 13,
+  right_elbow: 14,
+  left_wrist: 15,
+  right_wrist: 16,
+  left_pinky: 17,
+  right_pinky: 18,
+  left_index: 19,
+  right_index: 20,
+  left_thumb: 21,
+  right_thumb: 22,
+  left_hip: 23,
+  right_hip: 24,
+  left_knee: 25,
+  right_knee: 26,
+  left_ankle: 27,
+  right_ankle: 28,
+  left_heel: 29,
+  right_heel: 30,
+  left_foot_index: 31,
+  right_foot_index: 32,
+}
+
+const faceKeypoints: { [key: string]: number } = {
+  left_eye_upper: 159,
+  left_eye_lower: 145,
+  left_eye_left: 33,
+  left_eye_right: 133,
+  left_eye_iris: 468,
+  right_eye_upper: 386,
+  right_eye_lower: 374,
+  right_eye_left: 362,
+  right_eye_right: 263,
+  right_eye_iris: 473,
+  upper_lip_top: 13,
+  lower_lip_bottom: 14,
+  mouth_left: 61,
+  mouth_right: 291,
+  upper_lip_center: 0,
+  lower_lip_center: 17,
+  left_corner: 291,
+  right_corner: 61,
+  left_ear: 234,
+  right_ear: 454,
+}
+
+const handKeypoints: { [key: string]: number } = {
+  wrist: 0,
+  thumb_cmc: 1,
+  thumb_mcp: 2,
+  thumb_ip: 3,
+  thumb_tip: 4,
+  index_mcp: 5,
+  index_pip: 6,
+  index_dip: 7,
+  index_tip: 8,
+  middle_mcp: 9,
+  middle_pip: 10,
+  middle_dip: 11,
+  middle_tip: 12,
+  ring_mcp: 13,
+  ring_pip: 14,
+  ring_dip: 15,
+  ring_tip: 16,
+  pinky_mcp: 17,
+  pinky_pip: 18,
+  pinky_dip: 19,
+  pinky_tip: 20,
+}
+
+const getPoseKeypoint = (pose: NormalizedLandmark[] | null, name: string): Vector3 | null => {
+  if (!pose || pose.length === 0) return null
+  const point = pose[poseKeypoints[name]]
+  return point && point.visibility > 0.1 ? new Vector3(point.x, point.y, point.z) : null
+}
+
+const getFaceKeypoint = (face: NormalizedLandmark[] | null, name: string): Vector3 | null => {
+  if (!face || face.length === 0) return null
+  const point = face[faceKeypoints[name]]
+  const scaleX = 10 // Adjust these values to fit your MMD model's scale
+  const scaleY = 10
+  const scaleZ = 5
+  return point ? new Vector3(point.x * scaleX, point.y * scaleY, point.z * scaleZ) : null
+}
+
+const getHandKeypoint = (hand: NormalizedLandmark[] | null, name: string): Vector3 | null => {
+  if (!hand || hand.length === 0) return null
+  const point = hand[handKeypoints[name]]
+  return point ? new Vector3(point.x, point.y, point.z) : null
+}
+
 function MMDScene({
   pose,
   face,
@@ -503,56 +607,16 @@ function MMDScene({
     }
     const scale = 10
     const yOffset = 7
-    const visibilityThreshold = 0.1
-    const keypointIndexByName: { [key: string]: number } = {
-      nose: 0,
-      left_eye_inner: 1,
-      left_eye: 2,
-      left_eye_outer: 3,
-      right_eye_inner: 4,
-      right_eye: 5,
-      right_eye_outer: 6,
-      left_ear: 7,
-      right_ear: 8,
-      mouth_left: 9,
-      mouth_right: 10,
-      left_shoulder: 11,
-      right_shoulder: 12,
-      left_elbow: 13,
-      right_elbow: 14,
-      left_wrist: 15,
-      right_wrist: 16,
-      left_pinky: 17,
-      right_pinky: 18,
-      left_index: 19,
-      right_index: 20,
-      left_thumb: 21,
-      right_thumb: 22,
-      left_hip: 23,
-      right_hip: 24,
-      left_knee: 25,
-      right_knee: 26,
-      left_ankle: 27,
-      right_ankle: 28,
-      left_heel: 29,
-      right_heel: 30,
-      left_foot_index: 31,
-      right_foot_index: 32,
-    }
+
     const updateMMDPose = (mmdModel: MmdWasmModel | null, pose: NormalizedLandmark[] | null): void => {
       if (!pose || !mmdModel || pose.length === 0) {
         return
       }
 
-      const getKeypoint = (name: string): Vector3 | null => {
-        const point = pose[keypointIndexByName[name]]
-        return point.visibility > visibilityThreshold ? new Vector3(point.x, point.y, point.z) : null
-      }
-
       const rotateHead = (): void => {
-        const nose = getKeypoint("nose")
-        const leftShoulder = getKeypoint("left_shoulder")
-        const rightShoulder = getKeypoint("right_shoulder")
+        const nose = getPoseKeypoint(pose, "nose")
+        const leftShoulder = getPoseKeypoint(pose, "left_shoulder")
+        const rightShoulder = getPoseKeypoint(pose, "right_shoulder")
         const neckBone = getBone("首")
         const upperBodyBone = getBone("上半身")
 
@@ -598,8 +662,8 @@ function MMDScene({
       }
 
       const rotateUpperBody = (): void => {
-        const leftShoulder = getKeypoint("left_shoulder")
-        const rightShoulder = getKeypoint("right_shoulder")
+        const leftShoulder = getPoseKeypoint(pose, "left_shoulder")
+        const rightShoulder = getPoseKeypoint(pose, "right_shoulder")
         const upperBodyBone = getBone("上半身")
 
         if (leftShoulder && rightShoulder && upperBodyBone) {
@@ -615,8 +679,8 @@ function MMDScene({
           )
         }
 
-        const leftHip = getKeypoint("left_hip")
-        const rightHip = getKeypoint("right_hip")
+        const leftHip = getPoseKeypoint(pose, "left_hip")
+        const rightHip = getPoseKeypoint(pose, "right_hip")
 
         if (leftShoulder && rightShoulder && leftHip && rightHip && upperBodyBone) {
           // Bending calculation
@@ -639,8 +703,8 @@ function MMDScene({
       }
 
       const rotateLowerBody = (): void => {
-        const leftHip = getKeypoint("left_hip")
-        const rightHip = getKeypoint("right_hip")
+        const leftHip = getPoseKeypoint(pose, "left_hip")
+        const rightHip = getPoseKeypoint(pose, "right_hip")
         const lowerBodyBone = getBone("下半身")
         if (leftHip && rightHip && lowerBodyBone) {
           const hipDir = leftHip.subtract(rightHip).normalize()
@@ -655,8 +719,8 @@ function MMDScene({
       }
 
       const rotateHip = (side: "left" | "right"): void => {
-        const hip = getKeypoint(`${side}_hip`)
-        const knee = getKeypoint(`${side}_knee`)
+        const hip = getPoseKeypoint(pose, `${side}_hip`)
+        const knee = getPoseKeypoint(pose, `${side}_knee`)
         const hipBone = getBone(`${side === "left" ? "左" : "右"}足`)
         const lowerBodyBone = getBone("下半身")
 
@@ -685,8 +749,8 @@ function MMDScene({
       }
 
       const moveFoot = (side: "right" | "left"): void => {
-        const ankle = getKeypoint(`${side}_ankle`)
-        const hip = getKeypoint(`${side}_hip`)
+        const ankle = getPoseKeypoint(pose, `${side}_ankle`)
+        const hip = getPoseKeypoint(pose, `${side}_hip`)
         const bone = getBone(`${side === "right" ? "右" : "左"}足ＩＫ`)
 
         if (ankle && hip && bone) {
@@ -697,8 +761,8 @@ function MMDScene({
       }
 
       const rotateFoot = (side: "right" | "left"): void => {
-        const hip = getKeypoint(`${side}_hip`)
-        const ankle = getKeypoint(`${side}_ankle`)
+        const hip = getPoseKeypoint(pose, `${side}_hip`)
+        const ankle = getPoseKeypoint(pose, `${side}_ankle`)
         const footBone = getBone(`${side === "right" ? "右" : "左"}足首`)
 
         if (hip && ankle && footBone) {
@@ -716,8 +780,8 @@ function MMDScene({
       }
 
       const rotateUpperArm = (side: "left" | "right"): void => {
-        const shoulder = getKeypoint(`${side}_shoulder`)
-        const elbow = getKeypoint(`${side}_elbow`)
+        const shoulder = getPoseKeypoint(pose, `${side}_shoulder`)
+        const elbow = getPoseKeypoint(pose, `${side}_elbow`)
         const upperArmBone = getBone(`${side === "left" ? "左" : "右"}腕`)
         const upperBodyBone = getBone("上半身")
 
@@ -748,8 +812,8 @@ function MMDScene({
       }
 
       const rotateLowerArm = (side: "left" | "right"): void => {
-        const elbow = getKeypoint(`${side}_elbow`)
-        const wrist = getKeypoint(`${side}_wrist`)
+        const elbow = getPoseKeypoint(pose, `${side}_elbow`)
+        const wrist = getPoseKeypoint(pose, `${side}_wrist`)
         const lowerArmBone = getBone(`${side === "left" ? "左" : "右"}ひじ`)
         const upperArmBone = getBone(`${side === "left" ? "左" : "右"}腕`)
 
@@ -781,50 +845,6 @@ function MMDScene({
         }
       }
 
-      const rotateHand = (side: "left" | "right"): void => {
-        const wrist = getKeypoint(`${side}_wrist`)
-        const indexFinger = getKeypoint(`${side}_index`)
-        const handBone = getBone(`${side === "left" ? "左" : "右"}手首`)
-        const lowerArmBone = getBone(`${side === "left" ? "左" : "右"}ひじ`)
-
-        if (wrist && indexFinger && handBone && lowerArmBone) {
-          // Calculate hand direction
-          const handDir = indexFinger.subtract(wrist).normalize()
-
-          // Get lower arm rotation
-          const lowerArmRotation = lowerArmBone.rotationQuaternion || new Quaternion()
-          const lowerArmRotationMatrix = new Matrix()
-          Matrix.FromQuaternionToRef(lowerArmRotation, lowerArmRotationMatrix)
-
-          // Transform hand direction to local space relative to lower arm
-          const localHandDir = Vector3.TransformNormal(handDir, lowerArmRotationMatrix.invert())
-
-          // Define default direction (pointing along the arm)
-          const defaultDir = new Vector3(0, -1, 0)
-
-          // Calculate rotation from default to current hand direction
-          const rotationQuaternion = Quaternion.FromUnitVectorsToRef(defaultDir, localHandDir, new Quaternion())
-
-          // Decompose the rotation into Euler angles
-          const rotation = rotationQuaternion.toEulerAngles()
-
-          // Clamp each rotation axis
-          const maxAngle = Math.PI / 3 // 60 degrees
-          rotation.x = Math.max(-maxAngle, Math.min(maxAngle, rotation.x))
-          rotation.y = Math.max(-maxAngle, Math.min(maxAngle, rotation.y))
-          rotation.z = Math.max(-maxAngle, Math.min(maxAngle, rotation.z))
-
-          // Create a new quaternion from the clamped Euler angles
-          const clampedQuaternion = Quaternion.FromEulerAngles(rotation.x, rotation.y, rotation.z)
-
-          // Apply rotation with lerp for smooth transition
-          handBone.setRotationQuaternion(
-            Quaternion.Slerp(handBone.rotationQuaternion || new Quaternion(), clampedQuaternion, lerpFactor),
-            Space.LOCAL
-          )
-        }
-      }
-
       rotateUpperBody()
       rotateHead()
       rotateLowerBody()
@@ -834,13 +854,10 @@ function MMDScene({
       rotateFoot("left")
       rotateHip("right")
       rotateHip("left")
-
       rotateUpperArm("right")
       rotateUpperArm("left")
       rotateLowerArm("right")
       rotateLowerArm("left")
-      rotateHand("right")
-      rotateHand("left")
     }
     if (sceneRef.current && mmdModelRef.current) {
       updateMMDPose(mmdModelRef.current, pose)
@@ -853,27 +870,17 @@ function MMDScene({
         return
       }
 
-      // Scaling factors
-      const scaleX = 10 // Adjust these values to fit your MMD model's scale
-      const scaleY = 10
-      const scaleZ = 5
-
-      const getKeypoint = (index: number): Vector3 | null => {
-        const point = face[index]
-        return point ? new Vector3(point.x * scaleX, point.y * scaleY, point.z * scaleZ) : null
-      }
-
       // Eye landmarks
-      const leftEyeUpper = getKeypoint(159)
-      const leftEyeLower = getKeypoint(145)
-      const leftEyeLeft = getKeypoint(33)
-      const leftEyeRight = getKeypoint(133)
-      const leftEyeIris = getKeypoint(468)
-      const rightEyeUpper = getKeypoint(386)
-      const rightEyeLower = getKeypoint(374)
-      const rightEyeLeft = getKeypoint(362)
-      const rightEyeRight = getKeypoint(263)
-      const rightEyeIris = getKeypoint(473)
+      const leftEyeUpper = getFaceKeypoint(face, "left_eye_upper")
+      const leftEyeLower = getFaceKeypoint(face, "left_eye_lower")
+      const leftEyeLeft = getFaceKeypoint(face, "left_eye_left")
+      const leftEyeRight = getFaceKeypoint(face, "left_eye_right")
+      const leftEyeIris = getFaceKeypoint(face, "left_eye_iris")
+      const rightEyeUpper = getFaceKeypoint(face, "right_eye_upper")
+      const rightEyeLower = getFaceKeypoint(face, "right_eye_lower")
+      const rightEyeLeft = getFaceKeypoint(face, "right_eye_left")
+      const rightEyeRight = getFaceKeypoint(face, "right_eye_right")
+      const rightEyeIris = getFaceKeypoint(face, "right_eye_iris")
 
       // Calculate eye openness using relative distance
       const calculateEyeOpenness = (
@@ -953,14 +960,14 @@ function MMDScene({
       }
 
       // Mouth landmarks
-      const upperLipTop = getKeypoint(13)
-      const lowerLipBottom = getKeypoint(14)
-      const mouthLeft = getKeypoint(61)
-      const mouthRight = getKeypoint(291)
-      const upperLipCenter = getKeypoint(0)
-      const lowerLipCenter = getKeypoint(17)
-      const leftCorner = getKeypoint(291)
-      const rightCorner = getKeypoint(61)
+      const upperLipTop = getFaceKeypoint(face, "upper_lip_top")
+      const lowerLipBottom = getFaceKeypoint(face, "lower_lip_bottom")
+      const mouthLeft = getFaceKeypoint(face, "mouth_left")
+      const mouthRight = getFaceKeypoint(face, "mouth_right")
+      const upperLipCenter = getFaceKeypoint(face, "upper_lip_center")
+      const lowerLipCenter = getFaceKeypoint(face, "lower_lip_center")
+      const leftCorner = getFaceKeypoint(face, "left_corner")
+      const rightCorner = getFaceKeypoint(face, "right_corner")
 
       // Calculate mouth shapes using relative distances
       const calculateMouthShape = (): { openness: number; width: number; smile: number } => {
@@ -983,7 +990,7 @@ function MMDScene({
         const openness = Math.min(Math.max((mouthHeight / mouthWidth - 0.1) / 0.5, 0), 0.7)
 
         // Calculate mouth width relative to face width
-        const faceWidth = Vector3.Distance(getKeypoint(234)!, getKeypoint(454)!) // Distance between ears
+        const faceWidth = Vector3.Distance(getFaceKeypoint(face, "left_ear")!, getFaceKeypoint(face, "right_ear")!) // Distance between ears
         const relativeWidth = mouthWidth / faceWidth
         const neutralRelativeWidth = 0.45 // Adjust based on your model's neutral mouth width
         const width = Math.min(Math.max((relativeWidth - neutralRelativeWidth) / 0.1, -1), 1)
@@ -1029,12 +1036,45 @@ function MMDScene({
   }, [face, lerpFactor])
 
   useEffect(() => {
-    const updateMMDFingers = (
-      mmdModel: MmdWasmModel | null,
-      hand: NormalizedLandmark[] | null,
-      side: "left" | "right"
-    ): void => {
-      if (!mmdModel || !hand) return
+    const rotateWrist = (hand: NormalizedLandmark[] | null, side: "left" | "right"): void => {
+      if (!hand || hand.length === 0 || !pose || pose.length === 0) return
+
+      const wrist = getPoseKeypoint(pose, `${side}_wrist`)
+      const middleFinger = getHandKeypoint(hand, "pinky_dip")
+      const handBone = getBone(`${side === "left" ? "左" : "右"}手首`)
+      const lowerArmBone = getBone(`${side === "left" ? "左" : "右"}ひじ`)
+
+      if (wrist && middleFinger && handBone && lowerArmBone) {
+        // Calculate wrist direction (from wrist to middle finger base)
+        const wristDir = middleFinger.subtract(wrist).normalize()
+
+        // Ensure Z-axis is always pointing forward (similar to rotateLowerArm)
+        wristDir.z = -wristDir.z
+        wristDir.x = -wristDir.x
+
+        const lowerArmRotation = lowerArmBone.rotationQuaternion || new Quaternion()
+        const lowerArmRotationMatrix = new Matrix()
+        Matrix.FromQuaternionToRef(lowerArmRotation, lowerArmRotationMatrix)
+
+        // Transform wrist direction to local space relative to lower arm
+        const localWristDir = Vector3.TransformNormal(wristDir, lowerArmRotationMatrix.invert())
+
+        // Define the default direction (similar to rotateLowerArm)
+        const defaultDir = new Vector3(side === "left" ? -1 : 1, 1, 0).normalize()
+
+        // Calculate the rotation from default pose to current pose
+        const rotationQuaternion = Quaternion.FromUnitVectorsToRef(defaultDir, localWristDir, new Quaternion())
+
+        // Apply rotation with lerp for smooth transition
+        handBone.setRotationQuaternion(
+          Quaternion.Slerp(handBone.rotationQuaternion || new Quaternion(), rotationQuaternion, lerpFactor),
+          Space.LOCAL
+        )
+      }
+    }
+
+    const updateMMDFingers = (hand: NormalizedLandmark[] | null, side: "left" | "right"): void => {
+      if (!hand || hand.length === 0) return
 
       const fingerNames = ["親指", "人指", "中指", "薬指", "小指"]
       const fingerJoints = ["", "１", "２", "３"]
@@ -1106,10 +1146,12 @@ function MMDScene({
     }
 
     if (sceneRef.current && mmdModelRef.current) {
-      updateMMDFingers(mmdModelRef.current, leftHand, "left")
-      updateMMDFingers(mmdModelRef.current, rightHand, "right")
+      rotateWrist(leftHand, "left")
+      rotateWrist(rightHand, "right")
+      updateMMDFingers(leftHand, "left")
+      updateMMDFingers(rightHand, "right")
     }
-  }, [leftHand, rightHand, lerpFactor])
+  }, [leftHand, pose, rightHand, lerpFactor])
 
   const handleCaptureScreenshot = () => {
     CreateScreenshotAsync(engineRef.current!, cameraRef.current!, { precision: 1 }).then((b64) => {
