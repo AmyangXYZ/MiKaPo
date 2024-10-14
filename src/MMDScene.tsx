@@ -653,7 +653,7 @@ function MMDScene({
 
           const tiltAngle = Math.atan2(-localHeadDir.y, forwardDir.length())
 
-          const tiltOffset = -Math.PI / 10
+          const tiltOffset = -Math.PI / 9
           const adjustedTiltAngle = tiltAngle + tiltOffset
 
           const horizontalQuat = Quaternion.FromLookDirectionLH(forwardDir, Vector3.Up())
@@ -667,7 +667,7 @@ function MMDScene({
       }
 
       const setHeadRotation = (rotation: Quaternion): void => {
-        const neckBone = getBone("頭")
+        const neckBone = getBone("首")
         if (neckBone) {
           neckBone.setRotationQuaternion(
             Quaternion.Slerp(neckBone.rotationQuaternion || new Quaternion(), rotation, lerpFactor),
