@@ -597,18 +597,53 @@ function MMDScene({
         return
       }
 
-      const rotateHead = (): void => {
+      const calculateUpperBodyRotation = (): Quaternion => {
+        const leftShoulder = getPoseKeypoint(pose, "left_shoulder")
+        const rightShoulder = getPoseKeypoint(pose, "right_shoulder")
+        if (leftShoulder && rightShoulder) {
+          // Calculate spine direction
+          const spineDir = leftShoulder.subtract(rightShoulder).normalize()
+          spineDir.y *= -1
+          const defaultDir = new Vector3(1, 0, 0)
+
+          // Calculate rotation from default to spine direction
+          const spineRotation = Quaternion.FromUnitVectorsToRef(defaultDir, spineDir, new Quaternion())
+
+          // Calculate bend
+          const shoulderCenter = Vector3.Center(leftShoulder, rightShoulder)
+          const hipCenter = new Vector3(0, 0, 0)
+          const bendDir = shoulderCenter.subtract(hipCenter).normalize()
+          bendDir.y *= -1
+          const bendAngle = Math.acos(Vector3.Dot(bendDir, Vector3.Up()))
+          const bendAxis = Vector3.Cross(Vector3.Up(), bendDir).normalize()
+          const bendRotation = Quaternion.RotationAxis(bendAxis, bendAngle)
+
+          // Combine spine rotation and bend
+          return spineRotation.multiply(bendRotation)
+        }
+        return new Quaternion()
+      }
+
+      const setUpperBodyRotation = (rotation: Quaternion): void => {
+        const upperBodyBone = getBone("上半身")
+        if (upperBodyBone) {
+          upperBodyBone.setRotationQuaternion(
+            Quaternion.Slerp(upperBodyBone.rotationQuaternion || new Quaternion(), rotation, lerpFactor),
+            Space.LOCAL
+          )
+        }
+      }
+
+      const calculateHeadRotation = (upperBodyRotation: Quaternion): Quaternion => {
         const nose = getPoseKeypoint(pose, "nose")
         const leftShoulder = getPoseKeypoint(pose, "left_shoulder")
         const rightShoulder = getPoseKeypoint(pose, "right_shoulder")
         const neckBone = getBone("首")
-        const upperBodyBone = getBone("上半身")
 
-        if (nose && leftShoulder && rightShoulder && neckBone && upperBodyBone) {
+        if (nose && leftShoulder && rightShoulder && neckBone) {
           const neckPos = leftShoulder.add(rightShoulder).scale(0.5)
           const headDir = nose.subtract(neckPos).normalize()
 
-          const upperBodyRotation = upperBodyBone.rotationQuaternion || new Quaternion()
           const upperBodyRotationMatrix = new Matrix()
           Matrix.FromQuaternionToRef(upperBodyRotation, upperBodyRotationMatrix)
 
@@ -618,7 +653,7 @@ function MMDScene({
 
           const tiltAngle = Math.atan2(-localHeadDir.y, forwardDir.length())
 
-          const tiltOffset = -Math.PI / 5
+          const tiltOffset = -Math.PI / 10
           const adjustedTiltAngle = tiltAngle + tiltOffset
 
           const horizontalQuat = Quaternion.FromLookDirectionLH(forwardDir, Vector3.Up())
@@ -626,95 +661,73 @@ function MMDScene({
           const tiltQuat = Quaternion.RotationAxis(Vector3.Right(), adjustedTiltAngle)
 
           const combinedQuat = horizontalQuat.multiply(tiltQuat)
+          return combinedQuat
+        }
+        return new Quaternion()
+      }
 
-          const maxRotationAngle = Math.PI / 3
-          const clampedQuat = Quaternion.FromEulerAngles(
-            Math.max(-maxRotationAngle, Math.min(maxRotationAngle, combinedQuat.toEulerAngles().x)),
-            Math.max(-maxRotationAngle, Math.min(maxRotationAngle, combinedQuat.toEulerAngles().y)),
-            Math.max(-maxRotationAngle, Math.min(maxRotationAngle, combinedQuat.toEulerAngles().z))
-          )
-
+      const setHeadRotation = (rotation: Quaternion): void => {
+        const neckBone = getBone("頭")
+        if (neckBone) {
           neckBone.setRotationQuaternion(
-            Quaternion.Slerp(neckBone.rotationQuaternion || new Quaternion(), clampedQuat, lerpFactor),
+            Quaternion.Slerp(neckBone.rotationQuaternion || new Quaternion(), rotation, lerpFactor),
             Space.LOCAL
           )
         }
       }
 
-      const rotateUpperBody = (): void => {
-        const leftShoulder = getPoseKeypoint(pose, "left_shoulder")
-        const rightShoulder = getPoseKeypoint(pose, "right_shoulder")
-        const upperBodyBone = getBone("上半身")
-
-        if (leftShoulder && rightShoulder && upperBodyBone) {
-          const spineDir = leftShoulder.subtract(rightShoulder).normalize()
-          const spineForward = Vector3.Cross(spineDir, Vector3.Up()).normalize()
-          const spineRotation = Quaternion.FromLookDirectionRH(spineForward, Vector3.Up())
-
-          upperBodyBone.setRotationQuaternion(
-            Quaternion.Slerp(upperBodyBone.rotationQuaternion || new Quaternion(), spineRotation, lerpFactor),
-            Space.LOCAL
-          )
-        }
-
+      const calculateLowerBodyRotation = (): Quaternion => {
         const leftHip = getPoseKeypoint(pose, "left_hip")
         const rightHip = getPoseKeypoint(pose, "right_hip")
 
-        if (leftShoulder && rightShoulder && leftHip && rightHip && upperBodyBone) {
-          const shoulderCenter = leftShoulder.add(rightShoulder).scale(0.5)
-          const hipCenter = leftHip.add(rightHip).scale(0.5)
-          const bendDir = hipCenter.subtract(shoulderCenter).normalize()
-
-          const bendAngle = Math.acos(Vector3.Dot(bendDir, Vector3.Up()))
-          const bendAxis = Vector3.Cross(Vector3.Up(), bendDir).normalize()
-          const bendRotation = Quaternion.RotationAxis(bendAxis, -bendAngle)
-
-          upperBodyBone.rotationQuaternion = Quaternion.Slerp(
-            upperBodyBone.rotationQuaternion || new Quaternion(),
-            bendRotation.multiply(upperBodyBone.rotationQuaternion || new Quaternion()),
-            lerpFactor
-          )
-        }
-      }
-
-      const rotateLowerBody = (): void => {
-        const leftHip = getPoseKeypoint(pose, "left_hip")
-        const rightHip = getPoseKeypoint(pose, "right_hip")
-        const lowerBodyBone = getBone("下半身")
-        if (leftHip && rightHip && lowerBodyBone) {
+        if (leftHip && rightHip) {
           const hipDir = leftHip.subtract(rightHip).normalize()
-          const lowerBodyUp = Vector3.Up()
-          const lowerBodyForward = Vector3.Cross(hipDir, lowerBodyUp).normalize()
-          const lowerBodyRotation = Quaternion.FromLookDirectionRH(lowerBodyForward, lowerBodyUp)
+          hipDir.y *= -1
+          const defaultDir = new Vector3(1, 0, 0)
+          const hipRotation = Quaternion.FromUnitVectorsToRef(defaultDir, hipDir, new Quaternion())
+          return hipRotation
+        }
+        return new Quaternion()
+      }
+
+      const setLowerBodyRotation = (rotation: Quaternion): void => {
+        const lowerBodyBone = getBone("下半身")
+        if (lowerBodyBone) {
           lowerBodyBone.setRotationQuaternion(
-            Quaternion.Slerp(lowerBodyBone.rotationQuaternion || new Quaternion(), lowerBodyRotation, lerpFactor),
+            Quaternion.Slerp(lowerBodyBone.rotationQuaternion || new Quaternion(), rotation, lerpFactor),
             Space.LOCAL
           )
         }
       }
 
-      const rotateHip = (side: "left" | "right"): void => {
+      const calculateHipRotation = (side: "left" | "right", lowerBodyRotation: Quaternion): Quaternion => {
         const hip = getPoseKeypoint(pose, `${side}_hip`)
         const knee = getPoseKeypoint(pose, `${side}_knee`)
         const hipBone = getBone(`${side === "left" ? "左" : "右"}足`)
-        const lowerBodyBone = getBone("下半身")
 
-        if (hip && knee && hipBone && lowerBodyBone) {
+        if (hip && knee && hipBone) {
           const legDir = knee.subtract(hip).normalize()
-          legDir.y *= -1
+          legDir.y *= -1 // Invert Y to match the model's coordinate system
 
-          const lowerBodyRotation = lowerBodyBone.rotationQuaternion || new Quaternion()
           const lowerBodyRotationMatrix = new Matrix()
           Matrix.FromQuaternionToRef(lowerBodyRotation, lowerBodyRotationMatrix)
 
           const localLegDir = Vector3.TransformNormal(legDir, lowerBodyRotationMatrix.invert())
 
-          const defaultDir = new Vector3(0, -1, 0).normalize()
+          const defaultDir = new Vector3(0, -1, 0)
 
           const rotationQuaternion = Quaternion.FromUnitVectorsToRef(defaultDir, localLegDir, new Quaternion())
 
+          return rotationQuaternion
+        }
+        return new Quaternion()
+      }
+
+      const setHipRotation = (side: "left" | "right", rotation: Quaternion): void => {
+        const hipBone = getBone(`${side === "left" ? "左" : "右"}足`)
+        if (hipBone) {
           hipBone.setRotationQuaternion(
-            Quaternion.Slerp(hipBone.rotationQuaternion || new Quaternion(), rotationQuaternion, lerpFactor),
+            Quaternion.Slerp(hipBone.rotationQuaternion || new Quaternion(), rotation, lerpFactor),
             Space.LOCAL
           )
         }
@@ -732,36 +745,44 @@ function MMDScene({
         }
       }
 
-      const rotateFoot = (side: "right" | "left"): void => {
+      const calculateFootRotation = (side: "right" | "left", hipRotation: Quaternion): Quaternion => {
         const hip = getPoseKeypoint(pose, `${side}_hip`)
         const ankle = getPoseKeypoint(pose, `${side}_ankle`)
-        const footBone = getBone(`${side === "right" ? "右" : "左"}足首`)
 
-        if (hip && ankle && footBone) {
+        if (hip && ankle) {
           const footDir = ankle.subtract(hip).normalize()
+          footDir.y *= -1
+          const hipRotationMatrix = new Matrix()
+          Matrix.FromQuaternionToRef(hipRotation, hipRotationMatrix)
+
+          const localFootDir = Vector3.TransformNormal(footDir, hipRotationMatrix.invert())
 
           const defaultDir = new Vector3(0, 0, 1)
 
-          const rotationQuaternion = Quaternion.FromUnitVectorsToRef(defaultDir, footDir, new Quaternion())
+          return Quaternion.FromUnitVectorsToRef(defaultDir, localFootDir, new Quaternion())
+        }
+        return new Quaternion()
+      }
 
+      const setFootRotation = (side: "right" | "left", rotation: Quaternion): void => {
+        const footBone = getBone(`${side === "right" ? "右" : "左"}足首`)
+        if (footBone) {
           footBone.setRotationQuaternion(
-            Quaternion.Slerp(footBone.rotationQuaternion || new Quaternion(), rotationQuaternion, lerpFactor),
+            Quaternion.Slerp(footBone.rotationQuaternion || new Quaternion(), rotation, lerpFactor),
             Space.WORLD
           )
         }
       }
 
-      const rotateUpperArm = (side: "left" | "right"): void => {
+      const calculateUpperArmRotation = (side: "left" | "right", upperBodyRotation: Quaternion): Quaternion => {
         const shoulder = getPoseKeypoint(pose, `${side}_shoulder`)
         const elbow = getPoseKeypoint(pose, `${side}_elbow`)
         const upperArmBone = getBone(`${side === "left" ? "左" : "右"}腕`)
-        const upperBodyBone = getBone("上半身")
 
-        if (shoulder && elbow && upperArmBone && upperBodyBone) {
+        if (shoulder && elbow && upperArmBone) {
           const armDir = elbow.subtract(shoulder).normalize()
           armDir.y *= -1
 
-          const upperBodyRotation = upperBodyBone.rotationQuaternion || new Quaternion()
           const upperBodyRotationMatrix = new Matrix()
           Matrix.FromQuaternionToRef(upperBodyRotation, upperBodyRotationMatrix)
 
@@ -771,24 +792,34 @@ function MMDScene({
 
           const rotationQuaternion = Quaternion.FromUnitVectorsToRef(defaultDir, localArmDir, new Quaternion())
 
-          upperArmBone.setRotationQuaternion(
-            Quaternion.Slerp(upperArmBone.rotationQuaternion || new Quaternion(), rotationQuaternion, lerpFactor),
-            Space.LOCAL
-          )
+          return rotationQuaternion
+        }
+        return new Quaternion()
+      }
+
+      const setUpperArmRotation = (side: "left" | "right", rotation: Quaternion): void => {
+        const upperArmBone = getBone(`${side === "left" ? "左" : "右"}腕`)
+        if (upperArmBone) {
+          upperArmBone.setRotationQuaternion(rotation, Space.LOCAL)
         }
       }
 
-      const rotateLowerArm = (side: "left" | "right"): void => {
+      const setLowerArmRotation = (side: "left" | "right", rotation: Quaternion): void => {
+        const lowerArmBone = getBone(`${side === "left" ? "左" : "右"}ひじ`)
+        if (lowerArmBone) {
+          lowerArmBone.setRotationQuaternion(rotation, Space.LOCAL)
+        }
+      }
+
+      const calculateLowerArmRotation = (side: "left" | "right", upperArmRotation: Quaternion): Quaternion => {
         const elbow = getPoseKeypoint(pose, `${side}_elbow`)
         const wrist = getPoseKeypoint(pose, `${side}_wrist`)
         const lowerArmBone = getBone(`${side === "left" ? "左" : "右"}ひじ`)
-        const upperArmBone = getBone(`${side === "left" ? "左" : "右"}腕`)
 
-        if (elbow && wrist && lowerArmBone && upperArmBone) {
+        if (elbow && wrist && lowerArmBone) {
           const lowerArmDir = wrist.subtract(elbow).normalize()
           lowerArmDir.y *= -1
 
-          const upperArmRotation = upperArmBone.rotationQuaternion || new Quaternion()
           const upperArmRotationMatrix = new Matrix()
           Matrix.FromQuaternionToRef(upperArmRotation, upperArmRotationMatrix)
 
@@ -798,26 +829,36 @@ function MMDScene({
 
           const rotationQuaternion = Quaternion.FromUnitVectorsToRef(defaultDir, localLowerArmDir, new Quaternion())
 
-          lowerArmBone.setRotationQuaternion(
-            Quaternion.Slerp(lowerArmBone.rotationQuaternion || new Quaternion(), rotationQuaternion, lerpFactor),
-            Space.LOCAL
-          )
+          return rotationQuaternion
         }
+        return new Quaternion()
       }
 
-      rotateUpperBody()
-      rotateHead()
-      rotateLowerBody()
+      const upperBodyRotation = calculateUpperBodyRotation()
+      const headRotation = calculateHeadRotation(upperBodyRotation)
+      const lowerBodyRotation = calculateLowerBodyRotation()
+      const rightHipRotation = calculateHipRotation("right", lowerBodyRotation)
+      const leftHipRotation = calculateHipRotation("left", lowerBodyRotation)
+      const rightFootRotation = calculateFootRotation("right", rightHipRotation)
+      const leftFootRotation = calculateFootRotation("left", leftHipRotation)
+      const rightUpperArmRotation = calculateUpperArmRotation("right", upperBodyRotation)
+      const leftUpperArmRotation = calculateUpperArmRotation("left", upperBodyRotation)
+      const rightLowerArmRotation = calculateLowerArmRotation("right", rightUpperArmRotation)
+      const leftLowerArmRotation = calculateLowerArmRotation("left", leftUpperArmRotation)
+
+      setUpperBodyRotation(upperBodyRotation)
+      setHeadRotation(headRotation)
+      setLowerBodyRotation(lowerBodyRotation)
+      setHipRotation("right", rightHipRotation)
+      setFootRotation("right", rightFootRotation)
+      setUpperArmRotation("right", rightUpperArmRotation)
+      setLowerArmRotation("right", rightLowerArmRotation)
+      setHipRotation("left", leftHipRotation)
+      setFootRotation("left", leftFootRotation)
+      setUpperArmRotation("left", leftUpperArmRotation)
+      setLowerArmRotation("left", leftLowerArmRotation)
       moveFoot("right")
       moveFoot("left")
-      rotateFoot("right")
-      rotateFoot("left")
-      rotateHip("right")
-      rotateHip("left")
-      rotateUpperArm("right")
-      rotateUpperArm("left")
-      rotateLowerArm("right")
-      rotateLowerArm("left")
     }
     if (sceneRef.current && mmdModelRef.current) {
       updateMMDPose(mmdModelRef.current, pose)
