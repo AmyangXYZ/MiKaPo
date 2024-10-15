@@ -38,23 +38,23 @@ const VisuallyHiddenInput = styled("input")({
 })
 
 function Video({
-  pose,
-  leftHand,
-  rightHand,
-  setPose,
+  body,
+  setBody,
   setFace,
-  setLeftHand,
-  setRightHand,
   setLerpFactor,
   style,
 }: {
-  pose: NormalizedLandmark[] | null
-  leftHand: NormalizedLandmark[] | null
-  rightHand: NormalizedLandmark[] | null
-  setPose: (pose: NormalizedLandmark[]) => void
+  body: {
+    mainBody: NormalizedLandmark[] | null
+    leftHand: NormalizedLandmark[] | null
+    rightHand: NormalizedLandmark[] | null
+  }
+  setBody: (body: {
+    mainBody: NormalizedLandmark[] | null
+    leftHand: NormalizedLandmark[] | null
+    rightHand: NormalizedLandmark[] | null
+  }) => void
   setFace: (face: NormalizedLandmark[]) => void
-  setLeftHand: (leftHand: NormalizedLandmark[]) => void
-  setRightHand: (rightHand: NormalizedLandmark[]) => void
   setLerpFactor: (lerpFactor: number) => void
   style: React.CSSProperties
 }): JSX.Element {
@@ -217,26 +217,12 @@ function Video({
                 landmarkHistoryRef.current.push(result)
               }
 
-              if (result.poseWorldLandmarks[0]) {
-                setPose(result.poseWorldLandmarks[0])
-              } else {
-                setPose([])
-              }
-              if (result.faceLandmarks && result.faceLandmarks.length > 0) {
-                setFace(result.faceLandmarks[0])
-              } else {
-                setFace([])
-              }
-              if (result.leftHandWorldLandmarks && result.leftHandWorldLandmarks.length > 0) {
-                setLeftHand(result.leftHandWorldLandmarks[0])
-              } else {
-                setLeftHand([])
-              }
-              if (result.rightHandWorldLandmarks && result.rightHandWorldLandmarks.length > 0) {
-                setRightHand(result.rightHandWorldLandmarks[0])
-              } else {
-                setRightHand([])
-              }
+              setBody({
+                mainBody: result.poseWorldLandmarks[0],
+                leftHand: result.leftHandWorldLandmarks[0],
+                rightHand: result.rightHandWorldLandmarks[0],
+              })
+              setFace(result.faceLandmarks[0])
             })
           } else if (
             imgRef.current &&
@@ -248,26 +234,13 @@ function Video({
             lastImgSrc = imgRef.current.src
 
             holisticLandmarkerRef.current!.detect(imgRef.current!, (result) => {
-              if (result.poseWorldLandmarks[0]) {
-                setPose(result.poseWorldLandmarks[0])
-              } else {
-                setPose([])
-              }
-              if (result.faceLandmarks && result.faceLandmarks.length > 0) {
-                setFace(result.faceLandmarks[0])
-              } else {
-                setFace([])
-              }
-              if (result.leftHandWorldLandmarks && result.leftHandWorldLandmarks.length > 0) {
-                setLeftHand(result.leftHandWorldLandmarks[0])
-              } else {
-                setLeftHand([])
-              }
-              if (result.rightHandWorldLandmarks && result.rightHandWorldLandmarks.length > 0) {
-                setRightHand(result.rightHandWorldLandmarks[0])
-              } else {
-                setRightHand([])
-              }
+              setBody({
+                mainBody: result.poseWorldLandmarks[0],
+                leftHand: result.leftHandWorldLandmarks[0],
+                rightHand: result.rightHandWorldLandmarks[0],
+              })
+
+              setFace(result.faceLandmarks[0])
             })
           }
           requestAnimationFrame(detect)
@@ -275,7 +248,7 @@ function Video({
         detect()
       }
     )
-  }, [setPose, setFace, setLeftHand, setRightHand, imgRef, videoRef, isRecordingRef])
+  }, [setBody, setFace, imgRef, videoRef, isRecordingRef])
 
   const replayCallback = (fps: number) => {
     setIsReplaying(true)
@@ -290,28 +263,13 @@ function Video({
         const result = landmarkHistoryRef.current[currentIndex]
 
         if (result.poseWorldLandmarks && result.poseWorldLandmarks[0]) {
-          setPose(result.poseWorldLandmarks[0])
-        } else {
-          setPose([])
+          setBody({
+            mainBody: result.poseWorldLandmarks[0],
+            leftHand: result.leftHandWorldLandmarks[0] || [],
+            rightHand: result.rightHandWorldLandmarks[0] || [],
+          })
         }
-
-        if (result.faceLandmarks && result.faceLandmarks.length > 0) {
-          setFace(result.faceLandmarks[0])
-        } else {
-          setFace([])
-        }
-
-        if (result.leftHandWorldLandmarks && result.leftHandWorldLandmarks.length > 0) {
-          setLeftHand(result.leftHandWorldLandmarks[0])
-        } else {
-          setLeftHand([])
-        }
-
-        if (result.rightHandWorldLandmarks && result.rightHandWorldLandmarks.length > 0) {
-          setRightHand(result.rightHandWorldLandmarks[0])
-        } else {
-          setRightHand([])
-        }
+        setFace(result.faceLandmarks[0] || [])
 
         currentIndex++
         setTimeout(() => requestAnimationFrame(playNextFrame), frameInterval)
@@ -415,7 +373,7 @@ function Video({
         )}
       </div>
 
-      {style.display == "block" && <DebugScene pose={pose} leftHand={leftHand} rightHand={rightHand} />}
+      {style.display == "block" && <DebugScene body={body} />}
     </div>
   )
 }

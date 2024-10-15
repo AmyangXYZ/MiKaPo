@@ -13,10 +13,14 @@ import { Drawer, IconButton } from "@mui/material"
 import { KeyboardBackspace } from "@mui/icons-material"
 
 function App(): JSX.Element {
-  const [pose, setPose] = useState<NormalizedLandmark[] | null>(null)
+  const [body, setBody] = useState<{
+    mainBody: NormalizedLandmark[] | null
+    leftHand: NormalizedLandmark[] | null
+    rightHand: NormalizedLandmark[] | null
+  }>({ mainBody: null, leftHand: null, rightHand: null })
+
   const [face, setFace] = useState<NormalizedLandmark[] | null>(null)
-  const [leftHand, setLeftHand] = useState<NormalizedLandmark[] | null>(null)
-  const [rightHand, setRightHand] = useState<NormalizedLandmark[] | null>(null)
+
   const [lerpFactor, setLerpFactor] = useState<number>(0.5)
   const [fps, setFps] = useState<number>(0)
   const [openDrawer, setOpenDrawer] = useState<boolean>(false)
@@ -51,10 +55,8 @@ function App(): JSX.Element {
         selectedBackground={selectedBackground}
         selectedAnimation={selectedAnimation}
         setSelectedAnimation={setSelectedAnimation}
-        pose={pose}
+        body={body}
         face={face}
-        leftHand={leftHand}
-        rightHand={rightHand}
         lerpFactor={lerpFactor}
         setFps={setFps}
         boneRotation={boneRotation}
@@ -83,13 +85,9 @@ function App(): JSX.Element {
 
         {motionMounted && (
           <Motion
-            pose={pose}
-            leftHand={leftHand}
-            rightHand={rightHand}
-            setPose={setPose}
+            body={body}
+            setBody={setBody}
             setFace={setFace}
-            setLeftHand={setLeftHand}
-            setRightHand={setRightHand}
             setLerpFactor={setLerpFactor}
             style={{ display: activeTab === "motion" ? "block" : "none" }}
           ></Motion>
