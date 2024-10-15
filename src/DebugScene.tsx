@@ -6,13 +6,13 @@ import { HolisticLandmarker, NormalizedLandmark } from "@mediapipe/tasks-vision"
 import "@babylonjs/core/Engines/shaderStore"
 
 function DebugScene({
-  pose,
-  leftHand,
-  rightHand,
+  body,
 }: {
-  pose: NormalizedLandmark[] | null
-  leftHand: NormalizedLandmark[] | null
-  rightHand: NormalizedLandmark[] | null
+  body: {
+    mainBody: NormalizedLandmark[] | null
+    leftHand: NormalizedLandmark[] | null
+    rightHand: NormalizedLandmark[] | null
+  }
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sceneRef = useRef<Scene | null>(null)
@@ -96,15 +96,15 @@ function DebugScene({
       scene!.meshes.filter((mesh) => mesh.name.startsWith("debug_lines")).forEach((mesh) => mesh.dispose())
 
       // Draw new debug lines
-      drawConnections(pose, HolisticLandmarker.POSE_CONNECTIONS, new Color3(1, 1, 1), "pose")
-      drawConnections(leftHand, HolisticLandmarker.HAND_CONNECTIONS, new Color3(1, 1, 1), "left_hand")
-      drawConnections(rightHand, HolisticLandmarker.HAND_CONNECTIONS, new Color3(1, 1, 1), "right_hand")
+      drawConnections(body.mainBody, HolisticLandmarker.POSE_CONNECTIONS, new Color3(1, 1, 1), "pose")
+      drawConnections(body.leftHand, HolisticLandmarker.HAND_CONNECTIONS, new Color3(1, 1, 1), "left_hand")
+      drawConnections(body.rightHand, HolisticLandmarker.HAND_CONNECTIONS, new Color3(1, 1, 1), "right_hand")
     }
 
     if (sceneRef.current) {
       drawDebug()
     }
-  }, [pose, leftHand, rightHand])
+  }, [body])
   return (
     <>
       <canvas ref={canvasRef} className="debug-scene"></canvas>
