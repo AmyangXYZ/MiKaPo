@@ -40,8 +40,10 @@ import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
 
 import "@babylonjs/core/Engines/shaderStore"
-import { IconButton, Tooltip } from "@mui/material"
-import { BorderAll, Camera, CenterFocusWeak } from "@mui/icons-material"
+import { Badge, BadgeProps, IconButton, styled, Tooltip } from "@mui/material"
+import { BorderAll, Camera, CenterFocusWeak, RadioButtonChecked, StopCircle } from "@mui/icons-material"
+import Encoding from "encoding-japanese"
+import { BoneFrame } from "."
 
 registerSceneLoaderPlugin(new PmxLoader())
 
@@ -85,6 +87,18 @@ declare module "@babylonjs/core/Cameras/arcRotateCamera" {
     spinTo(targetPosition: Vector3, targetTarget?: Vector3, duration?: number): void
   }
 }
+
+const StyledBadge = styled(Badge)<BadgeProps>(({ theme }) => ({
+  "& .MuiBadge-badge": {
+    right: -3,
+    top: 4,
+    fontSize: ".66rem",
+    minWidth: "12px",
+    height: "12px",
+    border: `1px solid ${theme.palette.background.paper}`,
+    padding: "2px",
+  },
+}))
 
 const usedKeyBones: string[] = [
   "センター",
@@ -296,6 +310,10 @@ function MMDScene({
   const keyBones = useRef<{ [key: string]: IMmdRuntimeLinkedBone }>({})
 
   const [enableSplitView, setEnableSplitView] = useState<boolean>(false)
+
+  const [isRecordingVMD, setIsRecordingVMD] = useState<boolean>(false)
+  const recordedBoneFramesRef = useRef<BoneFrame[][]>([])
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
     return keyBones.current[name]
@@ -572,7 +590,7 @@ function MMDScene({
       return
 
     const loadAnimation = async (): Promise<void> => {
-      const vmd = await new VmdLoader(sceneRef.current!).loadAsync("vmd", `/animation/${selectedAnimation}.vmd`)
+      const vmd = await new VmdLoader(sceneRef.current!).loadAsync("vmd", selectedAnimation)
       const animation = new MmdWasmAnimation(vmd, mmdWasmInstanceRef.current!, sceneRef.current!)
       mmdModelRef.current?.addAnimation(animation)
       mmdModelRef.current?.setAnimation("vmd")
@@ -1165,6 +1183,139 @@ function MMDScene({
     })
   }
 
+  useEffect(() => {
+    if (isRecordingVMD) {
+      recordedBoneFramesRef.current = []
+      recordingIntervalRef.current = setInterval(() => {
+        const currentBoneFrames: BoneFrame[] = []
+        for (const boneName of usedKeyBones) {
+          const bone = getBone(boneName)
+          if (bone) {
+            const boneFrame: BoneFrame = {
+              name: boneName,
+              position: bone.position.clone(),
+              rotation: bone.rotationQuaternion.clone(),
+            }
+            currentBoneFrames.push(boneFrame)
+          }
+        }
+        recordedBoneFramesRef.current.push(currentBoneFrames)
+      }, 1000 / 30)
+    } else {
+      clearInterval(recordingIntervalRef.current!)
+    }
+  }, [isRecordingVMD])
+
+  function createVMD(boneFrames: BoneFrame[][]): Blob {
+    if (boneFrames.length === 0) {
+      return new Blob()
+    }
+    function encodeShiftJIS(str: string): Uint8Array {
+      const unicodeArray = Encoding.stringToCode(str) // Convert string to code array
+      const sjisArray = Encoding.convert(unicodeArray, {
+        to: "SJIS",
+        from: "UNICODE",
+      })
+      return new Uint8Array(sjisArray)
+    }
+
+    const writeBoneFrame = (
+      dataView: DataView,
+      offset: number,
+      name: string,
+      frame: number,
+      position: Vector3,
+      rotation: Quaternion
+    ): number => {
+      const nameBytes = encodeShiftJIS(name)
+      for (let i = 0; i < 15; i++) {
+        dataView.setUint8(offset + i, i < nameBytes.length ? nameBytes[i] : 0)
+      }
+      offset += 15
+
+      dataView.setUint32(offset, frame, true)
+      offset += 4
+
+      dataView.setFloat32(offset, position.x, true)
+      offset += 4
+      dataView.setFloat32(offset, position.y, true)
+      offset += 4
+      dataView.setFloat32(offset, position.z, true)
+      offset += 4
+
+      dataView.setFloat32(offset, rotation.x, true)
+      offset += 4
+      dataView.setFloat32(offset, rotation.y, true)
+      offset += 4
+      dataView.setFloat32(offset, rotation.z, true)
+      offset += 4
+      dataView.setFloat32(offset, rotation.w, true)
+      offset += 4
+
+      // Interpolation parameters (64 bytes)
+      for (let i = 0; i < 64; i++) {
+        dataView.setUint8(offset + i, 20)
+      }
+      offset += 64
+
+      return offset
+    }
+
+    const frameCount = boneFrames.length
+    const boneCnt = boneFrames[0].length
+    const headerSize = 30 + 20
+    const boneFrameSize = 15 + 4 + 12 + 16 + 64
+    const totalSize = headerSize + 4 + boneFrameSize * frameCount * boneCnt + 4 + 4 + 4 + 4
+
+    const buffer = new ArrayBuffer(totalSize)
+    const dataView = new DataView(buffer)
+    let offset = 0
+
+    // Write header
+    const header = "Vocaloid Motion Data 0002"
+    for (let i = 0; i < 30; i++) {
+      dataView.setUint8(offset + i, i < header.length ? header.charCodeAt(i) : 0)
+    }
+    offset += 30
+
+    // Write model name (empty in this case)
+    offset += 20
+
+    // Write bone frame count
+    dataView.setUint32(offset, frameCount * boneCnt, true)
+    offset += 4
+
+    // Generate keyframes
+    for (let frame = 0; frame < frameCount; frame++) {
+      for (const boneFrame of boneFrames[frame]) {
+        offset = writeBoneFrame(dataView, offset, boneFrame.name, frame, boneFrame.position, boneFrame.rotation)
+      }
+    }
+
+    // Write counts for other frame types (all 0 in this example)
+    dataView.setUint32(offset, 0, true) // Face keyframe count
+    offset += 4
+    dataView.setUint32(offset, 0, true) // Camera keyframe count
+    offset += 4
+    dataView.setUint32(offset, 0, true) // Light keyframe count
+    offset += 4
+    dataView.setUint32(offset, 0, true) // Self shadow keyframe count
+    offset += 4
+
+    return new Blob([buffer], { type: "application/octet-stream" })
+  }
+
+  const handleCreateVMD = () => {
+    const vmdBlob = createVMD(recordedBoneFramesRef.current)
+    const url = URL.createObjectURL(vmdBlob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = "mikapo.vmd"
+    link.click()
+    URL.revokeObjectURL(url)
+    setIsRecordingVMD(false)
+  }
+
   return (
     <>
       <canvas ref={canvasRef} className="scene"></canvas>
@@ -1183,7 +1334,7 @@ function MMDScene({
           style={{ position: "absolute", top: "10rem", right: ".5rem", color: "#f209f5" }}
           onClick={() => setEnableSplitView(!enableSplitView)}
         >
-          <BorderAll sx={{ width: "26px", height: "26px" }} />
+          <BorderAll sx={{ width: "26px", height: "26px", color: enableSplitView ? "cyan" : "#f209f5" }} />
         </IconButton>
       </Tooltip>
       <Tooltip title="Capture screenshot">
@@ -1194,6 +1345,28 @@ function MMDScene({
           <Camera sx={{ width: "26px", height: "26px" }} />
         </IconButton>
       </Tooltip>
+
+      {isRecordingVMD ? (
+        <Tooltip title="Stop recording">
+          <IconButton
+            style={{ position: "absolute", top: "14rem", right: ".5rem", color: "#f209f5" }}
+            onClick={handleCreateVMD}
+          >
+            <StyledBadge badgeContent={recordedBoneFramesRef.current.length} color="secondary" max={999}>
+              <StopCircle sx={{ width: "26px", height: "26px", color: "red" }} />
+            </StyledBadge>
+          </IconButton>
+        </Tooltip>
+      ) : (
+        <Tooltip title="Record animation for VMD export">
+          <IconButton
+            style={{ position: "absolute", top: "14rem", right: ".5rem", color: "#f209f5" }}
+            onClick={() => setIsRecordingVMD(true)}
+          >
+            <RadioButtonChecked sx={{ width: "26px", height: "26px" }} />
+          </IconButton>
+        </Tooltip>
+      )}
     </>
   )
 }
