@@ -1,6 +1,6 @@
-import { Pause, PlayArrow } from "@mui/icons-material"
-import { FormControl, FormControlLabel, IconButton, Radio, RadioGroup, Slider, Typography } from "@mui/material"
-import { useMemo } from "react"
+import { Pause, PlayArrow, FileUpload } from "@mui/icons-material"
+import { Button, FormControl, FormControlLabel, IconButton, Radio, RadioGroup, Slider, Typography } from "@mui/material"
+import { useMemo, useRef } from "react"
 
 const availableAnimations = ["Stand", "Zyy", "Miku", "iKun1", "Man", "0-540"]
 
@@ -35,13 +35,39 @@ function Animation({
     ]
   }, [currentAnimationTime, animationDuration])
 
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleVMDUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      const url = URL.createObjectURL(file)
+      setSelectedAnimation(url)
+    }
+  }
+
   return (
     <FormControl className="animation">
+      <Button
+        variant="contained"
+        startIcon={<FileUpload />}
+        onClick={() => fileInputRef.current?.click()}
+        sx={{
+          margin: "auto",
+          backgroundColor: "#a2c9f5",
+          color: "black",
+          "&:hover": { backgroundColor: "#7ab1f1" },
+          marginBottom: ".3rem",
+        }}
+      >
+        Upload VMD
+      </Button>
+      <input type="file" ref={fileInputRef} onChange={handleVMDUpload} accept=".vmd" style={{ display: "none" }} />
+
       <RadioGroup
         aria-labelledby="demo-radio-buttons-group-label"
         defaultValue=""
         name="radio-buttons-group"
-        onChange={(_, value) => setSelectedAnimation(value)}
+        onChange={(_, value) => setSelectedAnimation(`/animation/${value}.vmd`)}
         sx={{ display: "flex", margin: "auto" }}
       >
         {availableAnimations.map((animation) => (

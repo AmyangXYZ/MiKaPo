@@ -1,29 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 
-import {
-  FilesetResolver,
-  NormalizedLandmark,
-  HolisticLandmarker,
-  HolisticLandmarkerResult,
-} from "@mediapipe/tasks-vision"
-import { Badge, BadgeProps, IconButton, Tooltip } from "@mui/material"
-import { Videocam, CloudUpload, Replay, RadioButtonChecked, StopCircle, LocalFireDepartment } from "@mui/icons-material"
+import { FilesetResolver, NormalizedLandmark, HolisticLandmarker } from "@mediapipe/tasks-vision"
+import { IconButton, Tooltip } from "@mui/material"
+import { Videocam, CloudUpload, Stop } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
 import DebugScene from "./DebugScene"
 
 const defaultVideoSrc = "./video/flash.mp4"
-
-const StyledBadge = styled(Badge)<BadgeProps>(({ theme }) => ({
-  "& .MuiBadge-badge": {
-    right: -3,
-    top: 4,
-    fontSize: ".66rem",
-    minWidth: "12px",
-    height: "12px",
-    border: `1px solid ${theme.palette.background.paper}`,
-    padding: "2px",
-  },
-}))
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",
@@ -63,19 +46,10 @@ function Video({
   const [videoSrc, setVideoSrc] = useState<string>(defaultVideoSrc)
   const [imgSrc, setImgSrc] = useState<string>("")
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false)
-  const [isRecording, setIsRecording] = useState<boolean>(true)
-  const isRecordingRef = useRef<boolean>(true)
-  const [isReplaying, setIsReplaying] = useState<boolean>(false)
   const holisticLandmarkerRef = useRef<HolisticLandmarker | null>(null)
   const [lastMedia, setLastMedia] = useState<string>("VIDEO")
-  const isOfflineProcessingRef = useRef<boolean>(false)
-  const offlineProcessingProgressRef = useRef<number>(0)
-  const landmarkHistoryRef = useRef<HolisticLandmarkerResult[]>([])
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (landmarkHistoryRef.current) {
-      landmarkHistoryRef.current = []
-    }
     const file = event.target.files?.[0]
     if (file) {
       const url = URL.createObjectURL(file)
@@ -140,55 +114,6 @@ function Video({
     }
   }
 
-  const toggleRecording = () => {
-    if (isRecording) {
-      setIsRecording(false)
-      isRecordingRef.current = false
-    } else {
-      landmarkHistoryRef.current = []
-      setIsRecording(true)
-      isRecordingRef.current = true
-    }
-  }
-
-  const toggleProcessCurrentVideoOffline = async () => {
-    if (!videoRef.current) return
-    if (isOfflineProcessingRef.current) {
-      isOfflineProcessingRef.current = false
-      videoRef.current.controls = true
-      return
-    }
-    const videoElement = videoRef.current
-    videoElement.currentTime = 0
-    videoElement.controls = false
-
-    landmarkHistoryRef.current = []
-    isOfflineProcessingRef.current = true
-    const processFrame = async () => {
-      if (!isOfflineProcessingRef.current) {
-        return
-      }
-      if (videoElement.currentTime < videoElement.duration) {
-        offlineProcessingProgressRef.current = videoElement.currentTime / videoElement.duration
-        holisticLandmarkerRef.current!.detectForVideo(videoElement, performance.now(), (result) => {
-          landmarkHistoryRef.current.push(result)
-        })
-        videoElement.currentTime += 1 / 60 // Process at 60 FPS
-        await new Promise((resolve) => {
-          videoElement.onseeked = () => {
-            resolve(null)
-          }
-        })
-        await processFrame()
-      }
-    }
-
-    await processFrame()
-    // replayCallback(60)
-    isOfflineProcessingRef.current = false
-    videoElement.controls = true
-  }
-
   useEffect(() => {
     FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15/wasm").then(
       async (vision) => {
@@ -205,18 +130,9 @@ function Video({
         let lastTime = performance.now()
         let lastImgSrc = ""
         const detect = () => {
-          if (
-            videoRef.current &&
-            lastTime != videoRef.current.currentTime &&
-            videoRef.current.videoWidth > 0 &&
-            !isOfflineProcessingRef.current
-          ) {
+          if (videoRef.current && lastTime != videoRef.current.currentTime && videoRef.current.videoWidth > 0) {
             lastTime = videoRef.current.currentTime
             holisticLandmarkerRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
-              if (isRecordingRef.current && result.poseWorldLandmarks[0]) {
-                landmarkHistoryRef.current.push(result)
-              }
-
               setBody({
                 mainBody: result.poseWorldLandmarks[0],
                 leftHand: result.leftHandWorldLandmarks[0],
@@ -248,113 +164,20 @@ function Video({
         detect()
       }
     )
-  }, [setBody, setFace, imgRef, videoRef, isRecordingRef])
-
-  const replayCallback = (fps: number) => {
-    setIsReplaying(true)
-    if (videoRef.current) {
-      videoRef.current.controls = false
-    }
-    let currentIndex = 0
-    const frameInterval = 1000 / fps
-
-    const playNextFrame = () => {
-      if (currentIndex < landmarkHistoryRef.current.length) {
-        const result = landmarkHistoryRef.current[currentIndex]
-
-        if (result.poseWorldLandmarks && result.poseWorldLandmarks[0]) {
-          setBody({
-            mainBody: result.poseWorldLandmarks[0],
-            leftHand: result.leftHandWorldLandmarks[0] || [],
-            rightHand: result.rightHandWorldLandmarks[0] || [],
-          })
-        }
-        setFace(result.faceLandmarks[0] || [])
-
-        currentIndex++
-        setTimeout(() => requestAnimationFrame(playNextFrame), frameInterval)
-      } else {
-        setIsReplaying(false)
-        if (videoRef.current) {
-          videoRef.current.controls = true
-        }
-      }
-    }
-
-    requestAnimationFrame(playNextFrame)
-  }
+  }, [setBody, setFace, imgRef, videoRef])
 
   return (
     <div className="motion" style={style}>
       <div className="toolbar">
         <Tooltip title="Upload a video or image">
-          <IconButton
-            className="toolbar-item"
-            color="primary"
-            component="label"
-            disabled={isCameraActive || isOfflineProcessingRef.current}
-          >
+          <IconButton className="toolbar-item" color="primary" component="label" disabled={isCameraActive}>
             <CloudUpload />
             <VisuallyHiddenInput type="file" onChange={handleFileUpload} accept="video/*, image/*" />
           </IconButton>
         </Tooltip>
-        <Tooltip title="Use your camera">
-          <IconButton
-            className="toolbar-item"
-            onClick={toggleCamera}
-            color={isCameraActive ? "error" : "success"}
-            disabled={isOfflineProcessingRef.current}
-          >
-            <Videocam />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title={isOfflineProcessingRef.current ? "Stop processing" : "Process video offline at 60 FPS"}>
-          <IconButton
-            className="toolbar-item"
-            onClick={toggleProcessCurrentVideoOffline}
-            color="error"
-            disabled={isCameraActive}
-          >
-            {!isOfflineProcessingRef.current ? (
-              <LocalFireDepartment />
-            ) : (
-              <p style={{ fontSize: ".7rem" }}>{Math.round(offlineProcessingProgressRef.current * 100) + "%"}</p>
-            )}
-          </IconButton>
-        </Tooltip>
-
-        <Tooltip title={isRecording ? "Stop recording" : "Record motion capture"}>
-          <IconButton
-            className="toolbar-item"
-            onClick={toggleRecording}
-            color="secondary"
-            size="small"
-            disabled={isOfflineProcessingRef.current}
-          >
-            {isRecording ? (
-              <>
-                <StyledBadge badgeContent={landmarkHistoryRef.current.length} color="secondary" max={999}>
-                  <StopCircle />
-                </StyledBadge>
-              </>
-            ) : (
-              <>
-                <StyledBadge badgeContent={landmarkHistoryRef.current.length} color="secondary" max={999}>
-                  <RadioButtonChecked />
-                </StyledBadge>
-              </>
-            )}
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Replay last capture">
-          <IconButton
-            className="toolbar-item"
-            onClick={() => replayCallback(60)}
-            color="secondary"
-            size="small"
-            disabled={isCameraActive || isReplaying || isOfflineProcessingRef.current}
-          >
-            <Replay />
+        <Tooltip title={isCameraActive ? "Stop webcam" : "Use your webcam"}>
+          <IconButton className="toolbar-item" onClick={toggleCamera}>
+            {isCameraActive ? <Stop sx={{ color: "red" }} /> : <Videocam sx={{ color: "green" }} />}
           </IconButton>
         </Tooltip>
       </div>

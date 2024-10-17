@@ -11,13 +11,10 @@ import Background from "./Background"
 import { NormalizedLandmark } from "@mediapipe/tasks-vision"
 import { Drawer, IconButton } from "@mui/material"
 import { KeyboardBackspace } from "@mui/icons-material"
+import { Body } from "./index"
 
 function App(): JSX.Element {
-  const [body, setBody] = useState<{
-    mainBody: NormalizedLandmark[] | null
-    leftHand: NormalizedLandmark[] | null
-    rightHand: NormalizedLandmark[] | null
-  }>({ mainBody: null, leftHand: null, rightHand: null })
+  const [body, setBody] = useState<Body>({ mainBody: null, leftHand: null, rightHand: null })
 
   const [face, setFace] = useState<NormalizedLandmark[] | null>(null)
 
