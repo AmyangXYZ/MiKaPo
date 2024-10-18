@@ -16,7 +16,7 @@
 - Web framework: [Vite+React](https://vitejs.dev/)
 - Models are from [aplaybox](https://aplaybox.com/en/mmd-models/).
 
-## Todo
+## Features
 
 - [x] Pose detection
 - [x] Face detection
@@ -26,10 +26,8 @@
 - [x] Camera input
 - [x] Model selection
 - [x] Ollama support ([electron version](https://github.com/AmyangXYZ/MiKaPo-Electron))
-- [ ] VMD export
+- [x] VMD import/export (to export a valid VMD file, you must record at least one movement.)
 - [x] MMD editor: bone, material, mesh edit
-- [ ] Custom model, vmd import
-- [ ] Multi-user co-editing
 
 ## Project Setup
 

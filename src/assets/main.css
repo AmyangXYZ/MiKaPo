@@ -158,6 +158,24 @@ a {
   color: inherit;
 }
 
+@keyframes capture-shutter {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    transform: scale(0.6) rotate(180deg);
+  }
+}
+
+.screenshot-button {
+  transition: transform 0.5s;
+}
+
+.screenshot-button.animate {
+  animation: capture-shutter 0.5s ease-in-out;
+}
+
 @media screen and (max-width: 767px) {
   .scene {
     position: relative;
