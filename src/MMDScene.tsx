@@ -43,7 +43,7 @@ import "@babylonjs/core/Engines/shaderStore"
 import { Badge, BadgeProps, IconButton, styled, Tooltip } from "@mui/material"
 import { BorderAll, Camera, CenterFocusWeak, RadioButtonChecked, StopCircle } from "@mui/icons-material"
 import Encoding from "encoding-japanese"
-import { BoneFrame } from "."
+import { BoneFrame, MorphFrame, RecordedFrame } from "."
 
 registerSceneLoaderPlugin(new PmxLoader())
 
@@ -312,8 +312,8 @@ function MMDScene({
   const [enableSplitView, setEnableSplitView] = useState<boolean>(false)
 
   const [isRecordingVMD, setIsRecordingVMD] = useState<boolean>(false)
-  const recordedBoneFramesRef = useRef<BoneFrame[][]>([])
-  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const isRecordingRef = useRef<boolean>(false)
+  const recordedFramesRef = useRef<RecordedFrame[]>([])
 
   const getBone = (name: string): IMmdRuntimeLinkedBone | undefined => {
     return keyBones.current[name]
@@ -1173,6 +1173,15 @@ function MMDScene({
   }, [face, lerpFactor])
 
   const handleCaptureScreenshot = () => {
+    const button = document.querySelector(".screenshot-button")
+    if (button) {
+      button.classList.add("animate")
+
+      setTimeout(() => {
+        button.classList.remove("animate")
+      }, 600)
+    }
+
     CreateScreenshotAsync(engineRef.current!, cameraRef.current!, { precision: 1 }).then((b64) => {
       const link = document.createElement("a")
       link.href = b64
@@ -1185,33 +1194,60 @@ function MMDScene({
 
   useEffect(() => {
     if (isRecordingVMD) {
-      recordedBoneFramesRef.current = []
-      recordingIntervalRef.current = setInterval(() => {
-        const currentBoneFrames: BoneFrame[] = []
-        for (const boneName of usedKeyBones) {
-          const bone = getBone(boneName)
-          if (bone) {
+      recordedFramesRef.current = []
+      let lastRecordTime = performance.now()
+      const targetInterval = 1000 / 30
+
+      const recordFrame = () => {
+        if (!isRecordingRef.current) return
+        const currentTime = performance.now()
+        const elapsedTime = currentTime - lastRecordTime
+
+        const currentFrames: RecordedFrame = {
+          boneFrames: [],
+          morphFrames: [],
+        }
+        if (elapsedTime >= targetInterval) {
+          for (const boneName in keyBones.current) {
             const boneFrame: BoneFrame = {
               name: boneName,
-              position: bone.position.clone(),
-              rotation: bone.rotationQuaternion.clone(),
+              position: new Vector3(0, 0, 0),
+              rotation: keyBones.current[boneName].rotationQuaternion.clone(),
             }
-            currentBoneFrames.push(boneFrame)
+            currentFrames.boneFrames.push(boneFrame)
           }
+
+          if (mmdModelRef.current) {
+            const morphs = mmdModelRef.current.morph.morphs
+            for (const morph of morphs) {
+              const morphFrame: MorphFrame = {
+                name: morph.name,
+                weight: mmdModelRef.current.morph.getMorphWeight(morph.name),
+              }
+              currentFrames.morphFrames.push(morphFrame)
+            }
+          }
+
+          recordedFramesRef.current.push(currentFrames)
+          lastRecordTime = currentTime - (elapsedTime % targetInterval)
         }
-        recordedBoneFramesRef.current.push(currentBoneFrames)
-      }, 1000 / 30)
-    } else {
-      clearInterval(recordingIntervalRef.current!)
+
+        if (isRecordingVMD) {
+          requestAnimationFrame(recordFrame)
+        }
+      }
+
+      requestAnimationFrame(recordFrame)
     }
   }, [isRecordingVMD])
 
-  function createVMD(boneFrames: BoneFrame[][]): Blob {
-    if (boneFrames.length === 0) {
+  function createVMD(frames: RecordedFrame[]): Blob {
+    if (frames.length === 0) {
       return new Blob()
     }
+
     function encodeShiftJIS(str: string): Uint8Array {
-      const unicodeArray = Encoding.stringToCode(str) // Convert string to code array
+      const unicodeArray = Encoding.stringToCode(str)
       const sjisArray = Encoding.convert(unicodeArray, {
         to: "SJIS",
         from: "UNICODE",
@@ -1261,11 +1297,36 @@ function MMDScene({
       return offset
     }
 
-    const frameCount = boneFrames.length
-    const boneCnt = boneFrames[0].length
+    const writeMorphFrame = (
+      dataView: DataView,
+      offset: number,
+      name: string,
+      frame: number,
+      weight: number
+    ): number => {
+      const nameBytes = encodeShiftJIS(name)
+      for (let i = 0; i < 15; i++) {
+        dataView.setUint8(offset + i, i < nameBytes.length ? nameBytes[i] : 0)
+      }
+      offset += 15
+
+      dataView.setUint32(offset, frame, true)
+      offset += 4
+
+      dataView.setFloat32(offset, weight, true)
+      offset += 4
+
+      return offset
+    }
+
+    const frameCount = frames.length
+    const boneCnt = frames[0].boneFrames.length
+    const morphCnt = frames[0].morphFrames.length
     const headerSize = 30 + 20
     const boneFrameSize = 15 + 4 + 12 + 16 + 64
-    const totalSize = headerSize + 4 + boneFrameSize * frameCount * boneCnt + 4 + 4 + 4 + 4
+    const morphFrameSize = 15 + 4 + 4
+    const totalSize =
+      headerSize + 4 + boneFrameSize * frameCount * boneCnt + 4 + morphFrameSize * frameCount * morphCnt + 4 + 4 + 4
 
     const buffer = new ArrayBuffer(totalSize)
     const dataView = new DataView(buffer)
@@ -1285,16 +1346,25 @@ function MMDScene({
     dataView.setUint32(offset, frameCount * boneCnt, true)
     offset += 4
 
-    // Generate keyframes
-    for (let frame = 0; frame < frameCount; frame++) {
-      for (const boneFrame of boneFrames[frame]) {
-        offset = writeBoneFrame(dataView, offset, boneFrame.name, frame, boneFrame.position, boneFrame.rotation)
+    // Generate bone keyframes
+    for (let i = 0; i < frameCount; i++) {
+      for (const boneFrame of frames[i].boneFrames) {
+        offset = writeBoneFrame(dataView, offset, boneFrame.name, i, boneFrame.position, boneFrame.rotation)
+      }
+    }
+
+    // Write morph frame count
+    dataView.setUint32(offset, frameCount * morphCnt, true)
+    offset += 4
+
+    // Generate morph keyframes
+    for (let i = 0; i < frameCount; i++) {
+      for (const morphFrame of frames[i].morphFrames) {
+        offset = writeMorphFrame(dataView, offset, morphFrame.name, i, morphFrame.weight)
       }
     }
 
     // Write counts for other frame types (all 0 in this example)
-    dataView.setUint32(offset, 0, true) // Face keyframe count
-    offset += 4
     dataView.setUint32(offset, 0, true) // Camera keyframe count
     offset += 4
     dataView.setUint32(offset, 0, true) // Light keyframe count
@@ -1306,14 +1376,15 @@ function MMDScene({
   }
 
   const handleCreateVMD = () => {
-    const vmdBlob = createVMD(recordedBoneFramesRef.current)
+    const vmdBlob = createVMD(recordedFramesRef.current)
     const url = URL.createObjectURL(vmdBlob)
     const link = document.createElement("a")
     link.href = url
-    link.download = "mikapo.vmd"
+    link.download = "mikapo_animation.vmd"
     link.click()
     URL.revokeObjectURL(url)
     setIsRecordingVMD(false)
+    isRecordingRef.current = false
   }
 
   return (
@@ -1341,6 +1412,7 @@ function MMDScene({
         <IconButton
           style={{ position: "absolute", top: "12rem", right: ".5rem", color: "#f209f5" }}
           onClick={handleCaptureScreenshot}
+          className="screenshot-button"
         >
           <Camera sx={{ width: "26px", height: "26px" }} />
         </IconButton>
@@ -1352,7 +1424,7 @@ function MMDScene({
             style={{ position: "absolute", top: "14rem", right: ".5rem", color: "#f209f5" }}
             onClick={handleCreateVMD}
           >
-            <StyledBadge badgeContent={recordedBoneFramesRef.current.length} color="secondary" max={999}>
+            <StyledBadge badgeContent={recordedFramesRef.current.length} color="secondary" max={999}>
               <StopCircle sx={{ width: "26px", height: "26px", color: "red" }} />
             </StyledBadge>
           </IconButton>
@@ -1361,7 +1433,10 @@ function MMDScene({
         <Tooltip title="Record animation for VMD export">
           <IconButton
             style={{ position: "absolute", top: "14rem", right: ".5rem", color: "#f209f5" }}
-            onClick={() => setIsRecordingVMD(true)}
+            onClick={() => {
+              isRecordingRef.current = true
+              setIsRecordingVMD(true)
+            }}
           >
             <RadioButtonChecked sx={{ width: "26px", height: "26px" }} />
           </IconButton>
