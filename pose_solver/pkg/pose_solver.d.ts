@@ -15,6 +15,8 @@ export class PoseSolverResult {
   free(): void;
   left_foot: Rotation;
   left_hip: Rotation;
+  left_index_finger_mcp: Rotation;
+  left_index_finger_pip: Rotation;
   left_lower_arm: Rotation;
   left_upper_arm: Rotation;
   left_wrist: Rotation;
@@ -81,6 +83,10 @@ export interface InitOutput {
   readonly __wbg_set_posesolverresult_left_wrist: (a: number, b: number) => void;
   readonly __wbg_get_posesolverresult_right_wrist: (a: number) => number;
   readonly __wbg_set_posesolverresult_right_wrist: (a: number, b: number) => void;
+  readonly __wbg_get_posesolverresult_left_index_finger_mcp: (a: number) => number;
+  readonly __wbg_set_posesolverresult_left_index_finger_mcp: (a: number, b: number) => void;
+  readonly __wbg_get_posesolverresult_left_index_finger_pip: (a: number) => number;
+  readonly __wbg_set_posesolverresult_left_index_finger_pip: (a: number, b: number) => void;
   readonly __wbg_posesolver_free: (a: number, b: number) => void;
   readonly posesolver_new: () => number;
   readonly posesolver_solve: (a: number, b: number, c: number, d: number) => number;

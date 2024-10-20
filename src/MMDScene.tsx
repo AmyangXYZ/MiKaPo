@@ -585,6 +585,8 @@ function MMDScene({
       setBoneRotation(getBone("右足首"), result.right_foot)
       setBoneRotation(getBone("左手首"), result.left_wrist)
       setBoneRotation(getBone("右手首"), result.right_wrist)
+      // setBoneRotation(getBone("左人指１"), result.left_index_finger_mcp)
+      // setBoneRotation(getBone("左人指２"), result.left_index_finger_pip)
 
       getBone("左足ＩＫ")!.position = new Vector3(
         body.mainBody![27].x * 10,
