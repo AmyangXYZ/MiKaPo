@@ -21,12 +21,13 @@
 - [x] Pose detection
 - [x] Face detection
 - [x] Hand detection
-- [x] Environment selection
+- [x] Rust-WASM based pose-to-quaternion solver
+- [x] 360-degree background selection
 - [x] Video, image upload
-- [x] Camera input
+- [x] Webcam input
 - [x] Model selection
 - [x] Ollama support ([electron version](https://github.com/AmyangXYZ/MiKaPo-Electron))
-- [x] VMD import/export (to export a valid VMD file, you must record at least one movement.)
+- [x] VMD import/export (to export a valid VMD file, you must record at least one motion)
 - [x] MMD editor: bone, material, mesh edit
 
 ## Project Setup
