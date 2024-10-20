@@ -454,6 +454,36 @@ export class PoseSolverResult {
     /**
      * @returns {Rotation}
      */
+    get left_thumb_cmc() {
+        const ret = wasm.__wbg_get_posesolverresult_left_thumb_cmc(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_thumb_cmc(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_thumb_cmc(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_thumb_mcp() {
+        const ret = wasm.__wbg_get_posesolverresult_left_thumb_mcp(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_thumb_mcp(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_thumb_mcp(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
     get left_index_finger_mcp() {
         const ret = wasm.__wbg_get_posesolverresult_left_index_finger_mcp(this.__wbg_ptr);
         return Rotation.__wrap(ret);
@@ -480,6 +510,366 @@ export class PoseSolverResult {
         _assertClass(arg0, Rotation);
         var ptr0 = arg0.__destroy_into_raw();
         wasm.__wbg_set_posesolverresult_left_index_finger_pip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_index_finger_dip() {
+        const ret = wasm.__wbg_get_posesolverresult_left_index_finger_dip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_index_finger_dip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_index_finger_dip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_middle_finger_mcp() {
+        const ret = wasm.__wbg_get_posesolverresult_left_middle_finger_mcp(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_middle_finger_mcp(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_middle_finger_mcp(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_middle_finger_pip() {
+        const ret = wasm.__wbg_get_posesolverresult_left_middle_finger_pip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_middle_finger_pip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_middle_finger_pip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_middle_finger_dip() {
+        const ret = wasm.__wbg_get_posesolverresult_left_middle_finger_dip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_middle_finger_dip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_middle_finger_dip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_ring_finger_mcp() {
+        const ret = wasm.__wbg_get_posesolverresult_left_ring_finger_mcp(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_ring_finger_mcp(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_ring_finger_mcp(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_ring_finger_pip() {
+        const ret = wasm.__wbg_get_posesolverresult_left_ring_finger_pip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_ring_finger_pip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_ring_finger_pip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_ring_finger_dip() {
+        const ret = wasm.__wbg_get_posesolverresult_left_ring_finger_dip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_ring_finger_dip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_ring_finger_dip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_pinky_finger_mcp() {
+        const ret = wasm.__wbg_get_posesolverresult_left_pinky_finger_mcp(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_pinky_finger_mcp(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_pinky_finger_mcp(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_pinky_finger_pip() {
+        const ret = wasm.__wbg_get_posesolverresult_left_pinky_finger_pip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_pinky_finger_pip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_pinky_finger_pip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_pinky_finger_dip() {
+        const ret = wasm.__wbg_get_posesolverresult_left_pinky_finger_dip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_pinky_finger_dip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_pinky_finger_dip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_thumb_cmc() {
+        const ret = wasm.__wbg_get_posesolverresult_right_thumb_cmc(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_thumb_cmc(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_thumb_cmc(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_thumb_mcp() {
+        const ret = wasm.__wbg_get_posesolverresult_right_thumb_mcp(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_thumb_mcp(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_thumb_mcp(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_index_finger_mcp() {
+        const ret = wasm.__wbg_get_posesolverresult_right_index_finger_mcp(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_index_finger_mcp(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_index_finger_mcp(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_index_finger_pip() {
+        const ret = wasm.__wbg_get_posesolverresult_right_index_finger_pip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_index_finger_pip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_index_finger_pip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_index_finger_dip() {
+        const ret = wasm.__wbg_get_posesolverresult_right_index_finger_dip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_index_finger_dip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_index_finger_dip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_middle_finger_mcp() {
+        const ret = wasm.__wbg_get_posesolverresult_right_middle_finger_mcp(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_middle_finger_mcp(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_middle_finger_mcp(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_middle_finger_pip() {
+        const ret = wasm.__wbg_get_posesolverresult_right_middle_finger_pip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_middle_finger_pip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_middle_finger_pip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_middle_finger_dip() {
+        const ret = wasm.__wbg_get_posesolverresult_right_middle_finger_dip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_middle_finger_dip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_middle_finger_dip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_ring_finger_mcp() {
+        const ret = wasm.__wbg_get_posesolverresult_right_ring_finger_mcp(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_ring_finger_mcp(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_ring_finger_mcp(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_ring_finger_pip() {
+        const ret = wasm.__wbg_get_posesolverresult_right_ring_finger_pip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_ring_finger_pip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_ring_finger_pip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_ring_finger_dip() {
+        const ret = wasm.__wbg_get_posesolverresult_right_ring_finger_dip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_ring_finger_dip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_ring_finger_dip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_pinky_finger_mcp() {
+        const ret = wasm.__wbg_get_posesolverresult_right_pinky_finger_mcp(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_pinky_finger_mcp(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_pinky_finger_mcp(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_pinky_finger_pip() {
+        const ret = wasm.__wbg_get_posesolverresult_right_pinky_finger_pip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_pinky_finger_pip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_pinky_finger_pip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_pinky_finger_dip() {
+        const ret = wasm.__wbg_get_posesolverresult_right_pinky_finger_dip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_pinky_finger_dip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_pinky_finger_dip(this.__wbg_ptr, ptr0);
     }
 }
 

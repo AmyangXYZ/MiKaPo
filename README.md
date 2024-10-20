@@ -30,6 +30,10 @@
 - [x] VMD import/export (to export a valid VMD file, you must record at least one motion)
 - [x] MMD editor: bone, material, mesh edit
 
+## Hint
+
+- Let your browser use dedicated GPU for better performance.
+
 ## Project Setup
 
 ```sh
