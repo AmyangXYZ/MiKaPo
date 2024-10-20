@@ -1,0 +1,15 @@
+{
+  "name": "pose_solver",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "pose_solver_bg.wasm",
+    "pose_solver.js",
+    "pose_solver.d.ts"
+  ],
+  "main": "pose_solver.js",
+  "types": "pose_solver.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
