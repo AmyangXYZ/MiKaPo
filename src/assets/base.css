@@ -43,13 +43,20 @@ ul {
   list-style: none;
 }
 
+@font-face {
+  font-family: "Zhiyin";
+  src: url("/Zhiyin.otf") format("opentype");
+  font-weight: normal;
+  font-style: normal;
+}
+
 body {
   max-height: 100vh;
   color: var(--color-text);
   background: var(--color-background);
   line-height: 1.6;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans",
-    "Droid Sans", "Helvetica Neue", sans-serif;
+  font-family: Zhiyin, Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell,
+    "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
