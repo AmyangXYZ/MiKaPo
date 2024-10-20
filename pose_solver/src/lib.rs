@@ -1,4 +1,5 @@
 use nalgebra::{Quaternion, UnitQuaternion, UnitVector3, Vector3};
+use std::ops::Index;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -59,8 +60,34 @@ pub struct PoseSolverResult {
     pub right_lower_arm: Rotation,
     pub left_wrist: Rotation,
     pub right_wrist: Rotation,
+    pub left_thumb_cmc: Rotation,
+    pub left_thumb_mcp: Rotation,
     pub left_index_finger_mcp: Rotation,
     pub left_index_finger_pip: Rotation,
+    pub left_index_finger_dip: Rotation,
+    pub left_middle_finger_mcp: Rotation,
+    pub left_middle_finger_pip: Rotation,
+    pub left_middle_finger_dip: Rotation,
+    pub left_ring_finger_mcp: Rotation,
+    pub left_ring_finger_pip: Rotation,
+    pub left_ring_finger_dip: Rotation,
+    pub left_pinky_finger_mcp: Rotation,
+    pub left_pinky_finger_pip: Rotation,
+    pub left_pinky_finger_dip: Rotation,
+    pub right_thumb_cmc: Rotation,
+    pub right_thumb_mcp: Rotation,
+    pub right_index_finger_mcp: Rotation,
+    pub right_index_finger_pip: Rotation,
+    pub right_index_finger_dip: Rotation,
+    pub right_middle_finger_mcp: Rotation,
+    pub right_middle_finger_pip: Rotation,
+    pub right_middle_finger_dip: Rotation,
+    pub right_ring_finger_mcp: Rotation,
+    pub right_ring_finger_pip: Rotation,
+    pub right_ring_finger_dip: Rotation,
+    pub right_pinky_finger_mcp: Rotation,
+    pub right_pinky_finger_pip: Rotation,
+    pub right_pinky_finger_dip: Rotation,
 }
 
 impl PoseSolverResult {
@@ -79,8 +106,34 @@ impl PoseSolverResult {
             right_lower_arm: Rotation::default(),
             left_wrist: Rotation::default(),
             right_wrist: Rotation::default(),
+            left_thumb_cmc: Rotation::default(),
+            left_thumb_mcp: Rotation::default(),
             left_index_finger_mcp: Rotation::default(),
             left_index_finger_pip: Rotation::default(),
+            left_index_finger_dip: Rotation::default(),
+            left_middle_finger_mcp: Rotation::default(),
+            left_middle_finger_pip: Rotation::default(),
+            left_middle_finger_dip: Rotation::default(),
+            left_ring_finger_mcp: Rotation::default(),
+            left_ring_finger_pip: Rotation::default(),
+            left_ring_finger_dip: Rotation::default(),
+            left_pinky_finger_mcp: Rotation::default(),
+            left_pinky_finger_pip: Rotation::default(),
+            left_pinky_finger_dip: Rotation::default(),
+            right_thumb_cmc: Rotation::default(),
+            right_thumb_mcp: Rotation::default(),
+            right_index_finger_mcp: Rotation::default(),
+            right_index_finger_pip: Rotation::default(),
+            right_index_finger_dip: Rotation::default(),
+            right_middle_finger_mcp: Rotation::default(),
+            right_middle_finger_pip: Rotation::default(),
+            right_middle_finger_dip: Rotation::default(),
+            right_ring_finger_mcp: Rotation::default(),
+            right_ring_finger_pip: Rotation::default(),
+            right_ring_finger_dip: Rotation::default(),
+            right_pinky_finger_mcp: Rotation::default(),
+            right_pinky_finger_pip: Rotation::default(),
+            right_pinky_finger_dip: Rotation::default(),
         }
     }
 }
@@ -146,6 +199,22 @@ pub enum HandIndex {
     PinkyTip = 20,
 }
 
+impl Index<MainBodyIndex> for Vec<Vector3<f32>> {
+    type Output = Vector3<f32>;
+
+    fn index(&self, index: MainBodyIndex) -> &Self::Output {
+        &self[index as usize]
+    }
+}
+
+impl Index<HandIndex> for Vec<Vector3<f32>> {
+    type Output = Vector3<f32>;
+
+    fn index(&self, index: HandIndex) -> &Self::Output {
+        &self[index as usize]
+    }
+}
+
 const LEFT: u8 = 0;
 const RIGHT: u8 = 1;
 
@@ -193,51 +262,51 @@ impl PoseSolver {
 
         let mut result = PoseSolverResult::new();
 
-        let left_shoulder = main_body[MainBodyIndex::LeftShoulder as usize];
-        let right_shoulder = main_body[MainBodyIndex::RightShoulder as usize];
-        let left_hip = main_body[MainBodyIndex::LeftHip as usize];
-        let right_hip = main_body[MainBodyIndex::RightHip as usize];
+        let left_shoulder = main_body[MainBodyIndex::LeftShoulder];
+        let right_shoulder = main_body[MainBodyIndex::RightShoulder];
+        let left_hip = main_body[MainBodyIndex::LeftHip];
+        let right_hip = main_body[MainBodyIndex::RightHip];
 
         result.upper_body = self.calculate_upper_body_rotation(&left_shoulder, &right_shoulder);
         result.lower_body = self.calculate_lower_body_rotation(&left_hip, &right_hip);
         result.neck = self.calculate_neck_rotation(
-            &main_body[MainBodyIndex::Nose as usize],
+            &main_body[MainBodyIndex::Nose],
             &left_shoulder,
             &right_shoulder,
             &result.upper_body,
         );
         result.left_upper_arm = self.calculate_upper_arm_rotation(
             &left_shoulder,
-            &main_body[MainBodyIndex::LeftElbow as usize],
+            &main_body[MainBodyIndex::LeftElbow],
             &result.upper_body,
             LEFT,
         );
         result.left_lower_arm = self.calculate_lower_arm_rotation(
-            &main_body[MainBodyIndex::LeftElbow as usize],
-            &main_body[MainBodyIndex::LeftWrist as usize],
+            &main_body[MainBodyIndex::LeftElbow],
+            &main_body[MainBodyIndex::LeftWrist],
             &result.left_upper_arm,
             LEFT,
         );
         result.right_upper_arm = self.calculate_upper_arm_rotation(
             &right_shoulder,
-            &main_body[MainBodyIndex::RightElbow as usize],
+            &main_body[MainBodyIndex::RightElbow],
             &result.upper_body,
             RIGHT,
         );
         result.right_lower_arm = self.calculate_lower_arm_rotation(
-            &main_body[MainBodyIndex::RightElbow as usize],
-            &main_body[MainBodyIndex::RightWrist as usize],
+            &main_body[MainBodyIndex::RightElbow],
+            &main_body[MainBodyIndex::RightWrist],
             &result.right_upper_arm,
             RIGHT,
         );
         result.left_hip = self.calculate_hip_rotation(
             &left_hip,
-            &main_body[MainBodyIndex::LeftKnee as usize],
+            &main_body[MainBodyIndex::LeftKnee],
             &result.lower_body,
         );
         result.right_hip = self.calculate_hip_rotation(
             &right_hip,
-            &main_body[MainBodyIndex::RightKnee as usize],
+            &main_body[MainBodyIndex::RightKnee],
             &result.lower_body,
         );
         result.left_foot = result.left_hip;
@@ -247,22 +316,94 @@ impl PoseSolver {
             let left_hand: Vec<Vector3<f32>> = landmarks_to_vector3(left_hand);
 
             result.left_wrist = self.calculate_wrist_rotation(
-                &left_hand[HandIndex::Wrist as usize],
-                &left_hand[HandIndex::MiddleMCP as usize],
+                &left_hand[HandIndex::Wrist],
+                &left_hand[HandIndex::MiddleMCP],
                 &result.left_lower_arm,
                 LEFT,
             );
 
+            result.left_thumb_cmc = self.calculate_thumb_rotation(
+                &left_hand[HandIndex::ThumbCMC],
+                &left_hand[HandIndex::ThumbMCP],
+                &result.left_wrist,
+                LEFT,
+            );
+            result.left_thumb_mcp = self.calculate_thumb_rotation(
+                &left_hand[HandIndex::ThumbMCP],
+                &left_hand[HandIndex::ThumbIP],
+                &result.left_thumb_cmc,
+                LEFT,
+            );
             result.left_index_finger_mcp = self.calculate_finger_rotation(
-                &left_hand[HandIndex::IndexMCP as usize],
-                &left_hand[HandIndex::IndexPIP as usize],
+                &left_hand[HandIndex::IndexMCP],
+                &left_hand[HandIndex::IndexPIP],
                 &result.left_wrist,
                 LEFT,
             );
             result.left_index_finger_pip = self.calculate_finger_rotation(
-                &left_hand[HandIndex::IndexPIP as usize],
-                &left_hand[HandIndex::IndexDIP as usize],
+                &left_hand[HandIndex::IndexPIP],
+                &left_hand[HandIndex::IndexDIP],
                 &result.left_index_finger_mcp,
+                LEFT,
+            );
+            result.left_index_finger_dip = self.calculate_finger_rotation(
+                &left_hand[HandIndex::IndexDIP],
+                &left_hand[HandIndex::IndexTip],
+                &result.left_index_finger_pip,
+                LEFT,
+            );
+            result.left_middle_finger_mcp = self.calculate_finger_rotation(
+                &left_hand[HandIndex::MiddleMCP],
+                &left_hand[HandIndex::MiddlePIP],
+                &result.left_wrist,
+                LEFT,
+            );
+            result.left_middle_finger_pip = self.calculate_finger_rotation(
+                &left_hand[HandIndex::MiddlePIP],
+                &left_hand[HandIndex::MiddleDIP],
+                &result.left_middle_finger_mcp,
+                LEFT,
+            );
+            result.left_middle_finger_dip = self.calculate_finger_rotation(
+                &left_hand[HandIndex::MiddleDIP],
+                &left_hand[HandIndex::MiddleTip],
+                &result.left_middle_finger_pip,
+                LEFT,
+            );
+            result.left_ring_finger_mcp = self.calculate_finger_rotation(
+                &left_hand[HandIndex::RingMCP],
+                &left_hand[HandIndex::RingPIP],
+                &result.left_wrist,
+                LEFT,
+            );
+            result.left_ring_finger_pip = self.calculate_finger_rotation(
+                &left_hand[HandIndex::RingPIP],
+                &left_hand[HandIndex::RingDIP],
+                &result.left_ring_finger_mcp,
+                LEFT,
+            );
+            result.left_ring_finger_dip = self.calculate_finger_rotation(
+                &left_hand[HandIndex::RingDIP],
+                &left_hand[HandIndex::RingTip],
+                &result.left_ring_finger_pip,
+                LEFT,
+            );
+            result.left_pinky_finger_mcp = self.calculate_finger_rotation(
+                &left_hand[HandIndex::PinkyMCP],
+                &left_hand[HandIndex::PinkyPIP],
+                &result.left_wrist,
+                LEFT,
+            );
+            result.left_pinky_finger_pip = self.calculate_finger_rotation(
+                &left_hand[HandIndex::PinkyPIP],
+                &left_hand[HandIndex::PinkyDIP],
+                &result.left_pinky_finger_mcp,
+                LEFT,
+            );
+            result.left_pinky_finger_dip = self.calculate_finger_rotation(
+                &left_hand[HandIndex::PinkyDIP],
+                &left_hand[HandIndex::PinkyTip],
+                &result.left_pinky_finger_pip,
                 LEFT,
             );
         }
@@ -271,9 +412,94 @@ impl PoseSolver {
             let right_hand: Vec<Vector3<f32>> = landmarks_to_vector3(right_hand);
 
             result.right_wrist = self.calculate_wrist_rotation(
-                &right_hand[HandIndex::Wrist as usize],
-                &right_hand[HandIndex::MiddleMCP as usize],
+                &right_hand[HandIndex::Wrist],
+                &right_hand[HandIndex::MiddleMCP],
                 &result.right_lower_arm,
+                RIGHT,
+            );
+
+            result.right_thumb_cmc = self.calculate_thumb_rotation(
+                &right_hand[HandIndex::ThumbCMC],
+                &right_hand[HandIndex::ThumbMCP],
+                &result.right_wrist,
+                RIGHT,
+            );
+            result.right_thumb_mcp = self.calculate_thumb_rotation(
+                &right_hand[HandIndex::ThumbMCP],
+                &right_hand[HandIndex::ThumbIP],
+                &result.right_thumb_cmc,
+                RIGHT,
+            );
+            result.right_index_finger_mcp = self.calculate_finger_rotation(
+                &right_hand[HandIndex::IndexMCP],
+                &right_hand[HandIndex::IndexPIP],
+                &result.right_wrist,
+                RIGHT,
+            );
+            result.right_index_finger_pip = self.calculate_finger_rotation(
+                &right_hand[HandIndex::IndexPIP],
+                &right_hand[HandIndex::IndexDIP],
+                &result.right_index_finger_mcp,
+                RIGHT,
+            );
+            result.right_index_finger_dip = self.calculate_finger_rotation(
+                &right_hand[HandIndex::IndexDIP],
+                &right_hand[HandIndex::IndexTip],
+                &result.right_index_finger_pip,
+                RIGHT,
+            );
+            result.right_middle_finger_mcp = self.calculate_finger_rotation(
+                &right_hand[HandIndex::MiddleMCP],
+                &right_hand[HandIndex::MiddlePIP],
+                &result.right_wrist,
+                RIGHT,
+            );
+            result.right_middle_finger_pip = self.calculate_finger_rotation(
+                &right_hand[HandIndex::MiddlePIP],
+                &right_hand[HandIndex::MiddleDIP],
+                &result.right_middle_finger_mcp,
+                RIGHT,
+            );
+            result.right_middle_finger_dip = self.calculate_finger_rotation(
+                &right_hand[HandIndex::MiddleDIP],
+                &right_hand[HandIndex::MiddleTip],
+                &result.right_middle_finger_pip,
+                RIGHT,
+            );
+            result.right_ring_finger_mcp = self.calculate_finger_rotation(
+                &right_hand[HandIndex::RingMCP],
+                &right_hand[HandIndex::RingPIP],
+                &result.right_wrist,
+                RIGHT,
+            );
+            result.right_ring_finger_pip = self.calculate_finger_rotation(
+                &right_hand[HandIndex::RingPIP],
+                &right_hand[HandIndex::RingDIP],
+                &result.right_ring_finger_mcp,
+                RIGHT,
+            );
+            result.right_ring_finger_dip = self.calculate_finger_rotation(
+                &right_hand[HandIndex::RingDIP],
+                &right_hand[HandIndex::RingTip],
+                &result.right_ring_finger_pip,
+                RIGHT,
+            );
+            result.right_pinky_finger_mcp = self.calculate_finger_rotation(
+                &right_hand[HandIndex::PinkyMCP],
+                &right_hand[HandIndex::PinkyPIP],
+                &result.right_wrist,
+                RIGHT,
+            );
+            result.right_pinky_finger_pip = self.calculate_finger_rotation(
+                &right_hand[HandIndex::PinkyPIP],
+                &right_hand[HandIndex::PinkyDIP],
+                &result.right_pinky_finger_mcp,
+                RIGHT,
+            );
+            result.right_pinky_finger_dip = self.calculate_finger_rotation(
+                &right_hand[HandIndex::PinkyDIP],
+                &right_hand[HandIndex::PinkyTip],
+                &result.right_pinky_finger_pip,
                 RIGHT,
             );
         }
@@ -450,6 +676,29 @@ impl PoseSolver {
         Rotation::new(quat[0], quat[1], quat[2], quat[3])
     }
 
+    fn calculate_thumb_rotation(
+        &self,
+        current_joint: &Vector3<f32>,
+        next_joint: &Vector3<f32>,
+        parent_rotation: &Rotation,
+        side: u8,
+    ) -> Rotation {
+        let mut joint_dir = (next_joint - current_joint).normalize();
+        joint_dir.y *= -1.0;
+
+        let parent_quat = parent_rotation.to_unit_quaternion();
+        let local_joint_dir = parent_quat.inverse() * joint_dir;
+
+        let default_dir =
+            Vector3::new(if side == LEFT { -1.0 } else { 1.0 }, -1.0, -1.0).normalize();
+
+        let quat = UnitQuaternion::rotation_between(&default_dir, &local_joint_dir)
+            .unwrap_or_else(UnitQuaternion::identity)
+            .into_inner();
+
+        Rotation::new(quat[0], quat[1], quat[2], quat[3])
+    }
+
     fn calculate_finger_rotation(
         &self,
         current_joint: &Vector3<f32>,
@@ -471,6 +720,6 @@ impl PoseSolver {
             .unwrap_or_else(UnitQuaternion::identity)
             .into_inner();
 
-        Rotation::new(0.0, 0.0, quat[2], quat[3])
+        Rotation::new(quat[0], quat[1], quat[2], quat[3])
     }
 }
