@@ -451,6 +451,36 @@ export class PoseSolverResult {
         var ptr0 = arg0.__destroy_into_raw();
         wasm.__wbg_set_posesolverresult_right_wrist(this.__wbg_ptr, ptr0);
     }
+    /**
+     * @returns {Rotation}
+     */
+    get left_index_finger_mcp() {
+        const ret = wasm.__wbg_get_posesolverresult_left_index_finger_mcp(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_index_finger_mcp(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_index_finger_mcp(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_index_finger_pip() {
+        const ret = wasm.__wbg_get_posesolverresult_left_index_finger_pip(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_index_finger_pip(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_index_finger_pip(this.__wbg_ptr, ptr0);
+    }
 }
 
 const RotationFinalization = (typeof FinalizationRegistry === 'undefined')

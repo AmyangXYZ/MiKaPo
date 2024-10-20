@@ -59,6 +59,8 @@ pub struct PoseSolverResult {
     pub right_lower_arm: Rotation,
     pub left_wrist: Rotation,
     pub right_wrist: Rotation,
+    pub left_index_finger_mcp: Rotation,
+    pub left_index_finger_pip: Rotation,
 }
 
 impl PoseSolverResult {
@@ -77,6 +79,8 @@ impl PoseSolverResult {
             right_lower_arm: Rotation::default(),
             left_wrist: Rotation::default(),
             right_wrist: Rotation::default(),
+            left_index_finger_mcp: Rotation::default(),
+            left_index_finger_pip: Rotation::default(),
         }
     }
 }
@@ -124,18 +128,18 @@ pub enum HandIndex {
     ThumbMCP = 2,
     ThumbIP = 3,
     ThumbTip = 4,
-    IndexFingerMCP = 5,
-    IndexFingerPIP = 6,
-    IndexFingerDIP = 7,
-    IndexFingerTip = 8,
-    MiddleFingerMCP = 9,
-    MiddleFingerPIP = 10,
-    MiddleFingerDIP = 11,
-    MiddleFingerTip = 12,
-    RingFingerMCP = 13,
-    RingFingerPIP = 14,
-    RingFingerDIP = 15,
-    RingFingerTip = 16,
+    IndexMCP = 5,
+    IndexPIP = 6,
+    IndexDIP = 7,
+    IndexTip = 8,
+    MiddleMCP = 9,
+    MiddlePIP = 10,
+    MiddleDIP = 11,
+    MiddleTip = 12,
+    RingMCP = 13,
+    RingPIP = 14,
+    RingDIP = 15,
+    RingTip = 16,
     PinkyMCP = 17,
     PinkyPIP = 18,
     PinkyDIP = 19,
@@ -144,6 +148,28 @@ pub enum HandIndex {
 
 const LEFT: u8 = 0;
 const RIGHT: u8 = 1;
+
+fn landmarks_to_vector3(landmarks: js_sys::Array) -> Vec<Vector3<f32>> {
+    landmarks
+        .iter()
+        .map(|item| {
+            let obj = js_sys::Object::from(item);
+            let x = js_sys::Reflect::get(&obj, &"x".into())
+                .unwrap()
+                .as_f64()
+                .unwrap() as f32;
+            let y = js_sys::Reflect::get(&obj, &"y".into())
+                .unwrap()
+                .as_f64()
+                .unwrap() as f32;
+            let z = js_sys::Reflect::get(&obj, &"z".into())
+                .unwrap()
+                .as_f64()
+                .unwrap() as f32;
+            Vector3::new(x, y, z)
+        })
+        .collect()
+}
 
 #[wasm_bindgen]
 pub struct PoseSolver {}
@@ -163,25 +189,7 @@ impl PoseSolver {
         if main_body.length() == 0 {
             return PoseSolverResult::new();
         }
-        let main_body: Vec<Vector3<f32>> = main_body
-            .iter()
-            .map(|item| {
-                let obj = js_sys::Object::from(item);
-                let x = js_sys::Reflect::get(&obj, &"x".into())
-                    .unwrap()
-                    .as_f64()
-                    .unwrap() as f32;
-                let y = js_sys::Reflect::get(&obj, &"y".into())
-                    .unwrap()
-                    .as_f64()
-                    .unwrap() as f32;
-                let z = js_sys::Reflect::get(&obj, &"z".into())
-                    .unwrap()
-                    .as_f64()
-                    .unwrap() as f32;
-                Vector3::new(x, y, z)
-            })
-            .collect();
+        let main_body: Vec<Vector3<f32>> = landmarks_to_vector3(main_body);
 
         let mut result = PoseSolverResult::new();
 
@@ -236,58 +244,35 @@ impl PoseSolver {
         result.right_foot = result.right_hip;
 
         if left_hand.length() > 0 {
-            let left_hand: Vec<Vector3<f32>> = left_hand
-                .iter()
-                .map(|item| {
-                    let obj = js_sys::Object::from(item);
-                    let x = js_sys::Reflect::get(&obj, &"x".into())
-                        .unwrap()
-                        .as_f64()
-                        .unwrap() as f32;
-                    let y = js_sys::Reflect::get(&obj, &"y".into())
-                        .unwrap()
-                        .as_f64()
-                        .unwrap() as f32;
-                    let z = js_sys::Reflect::get(&obj, &"z".into())
-                        .unwrap()
-                        .as_f64()
-                        .unwrap() as f32;
-                    Vector3::new(x, y, z)
-                })
-                .collect();
+            let left_hand: Vec<Vector3<f32>> = landmarks_to_vector3(left_hand);
 
             result.left_wrist = self.calculate_wrist_rotation(
                 &left_hand[HandIndex::Wrist as usize],
-                &left_hand[HandIndex::IndexFingerTip as usize],
+                &left_hand[HandIndex::MiddleMCP as usize],
                 &result.left_lower_arm,
+                LEFT,
+            );
+
+            result.left_index_finger_mcp = self.calculate_finger_rotation(
+                &left_hand[HandIndex::IndexMCP as usize],
+                &left_hand[HandIndex::IndexPIP as usize],
+                &result.left_wrist,
+                LEFT,
+            );
+            result.left_index_finger_pip = self.calculate_finger_rotation(
+                &left_hand[HandIndex::IndexPIP as usize],
+                &left_hand[HandIndex::IndexDIP as usize],
+                &result.left_index_finger_mcp,
                 LEFT,
             );
         }
 
         if right_hand.length() > 0 {
-            let right_hand: Vec<Vector3<f32>> = right_hand
-                .iter()
-                .map(|item| {
-                    let obj = js_sys::Object::from(item);
-                    let x = js_sys::Reflect::get(&obj, &"x".into())
-                        .unwrap()
-                        .as_f64()
-                        .unwrap() as f32;
-                    let y = js_sys::Reflect::get(&obj, &"y".into())
-                        .unwrap()
-                        .as_f64()
-                        .unwrap() as f32;
-                    let z = js_sys::Reflect::get(&obj, &"z".into())
-                        .unwrap()
-                        .as_f64()
-                        .unwrap() as f32;
-                    Vector3::new(x, y, z)
-                })
-                .collect();
+            let right_hand: Vec<Vector3<f32>> = landmarks_to_vector3(right_hand);
 
             result.right_wrist = self.calculate_wrist_rotation(
                 &right_hand[HandIndex::Wrist as usize],
-                &right_hand[HandIndex::IndexFingerTip as usize],
+                &right_hand[HandIndex::MiddleMCP as usize],
                 &result.right_lower_arm,
                 RIGHT,
             );
@@ -456,13 +441,36 @@ impl PoseSolver {
 
         let local_wrist_dir = lower_arm_quat.inverse() * wrist_dir;
 
-        let default_dir =
-            Vector3::new(if side == LEFT { 1.0 } else { -1.0 }, -1.0, 0.0).normalize();
+        let default_dir = Vector3::new(if side == LEFT { 1.0 } else { -1.0 }, -1.0, -1.0);
 
         let quat = UnitQuaternion::rotation_between(&default_dir, &local_wrist_dir)
             .unwrap_or_else(UnitQuaternion::identity)
             .into_inner();
 
         Rotation::new(quat[0], quat[1], quat[2], quat[3])
+    }
+
+    fn calculate_finger_rotation(
+        &self,
+        current_joint: &Vector3<f32>,
+        next_joint: &Vector3<f32>,
+        parent_rotation: &Rotation,
+        side: u8,
+    ) -> Rotation {
+        let mut joint_dir = (next_joint - current_joint).normalize();
+        joint_dir.y *= -1.0;
+
+        let parent_quat = parent_rotation.to_unit_quaternion();
+
+        let local_joint_dir = parent_quat.inverse() * joint_dir;
+
+        let default_dir =
+            Vector3::new(if side == LEFT { 1.0 } else { -1.0 }, -1.0, 0.0).normalize();
+
+        let quat = UnitQuaternion::rotation_between(&default_dir, &local_joint_dir)
+            .unwrap_or_else(UnitQuaternion::identity)
+            .into_inner();
+
+        Rotation::new(0.0, 0.0, quat[2], quat[3])
     }
 }
