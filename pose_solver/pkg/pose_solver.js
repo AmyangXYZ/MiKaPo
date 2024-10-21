@@ -223,10 +223,11 @@ export class PoseSolver {
      * @param {Array<any>} main_body
      * @param {Array<any>} left_hand
      * @param {Array<any>} right_hand
+     * @param {Array<any>} face
      * @returns {PoseSolverResult}
      */
-    solve(main_body, left_hand, right_hand) {
-        const ret = wasm.posesolver_solve(this.__wbg_ptr, addHeapObject(main_body), addHeapObject(left_hand), addHeapObject(right_hand));
+    solve(main_body, left_hand, right_hand, face) {
+        const ret = wasm.posesolver_solve(this.__wbg_ptr, addHeapObject(main_body), addHeapObject(left_hand), addHeapObject(right_hand), addHeapObject(face));
         return PoseSolverResult.__wrap(ret);
     }
 }
@@ -870,6 +871,75 @@ export class PoseSolverResult {
         _assertClass(arg0, Rotation);
         var ptr0 = arg0.__destroy_into_raw();
         wasm.__wbg_set_posesolverresult_right_pinky_finger_dip(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get left_eye_rotation() {
+        const ret = wasm.__wbg_get_posesolverresult_left_eye_rotation(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set left_eye_rotation(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_left_eye_rotation(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {Rotation}
+     */
+    get right_eye_rotation() {
+        const ret = wasm.__wbg_get_posesolverresult_right_eye_rotation(this.__wbg_ptr);
+        return Rotation.__wrap(ret);
+    }
+    /**
+     * @param {Rotation} arg0
+     */
+    set right_eye_rotation(arg0) {
+        _assertClass(arg0, Rotation);
+        var ptr0 = arg0.__destroy_into_raw();
+        wasm.__wbg_set_posesolverresult_right_eye_rotation(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * @returns {number}
+     */
+    get left_eye_openness() {
+        const ret = wasm.__wbg_get_posesolverresult_left_eye_openness(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} arg0
+     */
+    set left_eye_openness(arg0) {
+        wasm.__wbg_set_posesolverresult_left_eye_openness(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @returns {number}
+     */
+    get right_eye_openness() {
+        const ret = wasm.__wbg_get_posesolverresult_right_eye_openness(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} arg0
+     */
+    set right_eye_openness(arg0) {
+        wasm.__wbg_set_posesolverresult_right_eye_openness(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @returns {number}
+     */
+    get mouth_openness() {
+        const ret = wasm.__wbg_get_posesolverresult_mouth_openness(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} arg0
+     */
+    set mouth_openness(arg0) {
+        wasm.__wbg_set_posesolverresult_mouth_openness(this.__wbg_ptr, arg0);
     }
 }
 

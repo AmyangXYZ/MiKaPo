@@ -88,6 +88,11 @@ pub struct PoseSolverResult {
     pub right_pinky_finger_mcp: Rotation,
     pub right_pinky_finger_pip: Rotation,
     pub right_pinky_finger_dip: Rotation,
+    pub left_eye_rotation: Rotation,
+    pub right_eye_rotation: Rotation,
+    pub left_eye_openness: f32,
+    pub right_eye_openness: f32,
+    pub mouth_openness: f32,
 }
 
 impl PoseSolverResult {
@@ -134,11 +139,15 @@ impl PoseSolverResult {
             right_pinky_finger_mcp: Rotation::default(),
             right_pinky_finger_pip: Rotation::default(),
             right_pinky_finger_dip: Rotation::default(),
+            left_eye_rotation: Rotation::default(),
+            right_eye_rotation: Rotation::default(),
+            left_eye_openness: 0.0,
+            right_eye_openness: 0.0,
+            mouth_openness: 0.0,
         }
     }
 }
 
-#[repr(u8)]
 pub enum MainBodyIndex {
     Nose = 0,
     LeftEyeInner = 1,
@@ -199,6 +208,27 @@ pub enum HandIndex {
     PinkyTip = 20,
 }
 
+pub enum FaceIndex {
+    LeftEyeUpper = 159,
+    LeftEyeLower = 145,
+    LeftEyeLeft = 33,
+    LeftEyeRight = 133,
+    LeftEyeIris = 468,
+    RightEyeUpper = 386,
+    RightEyeLower = 374,
+    RightEyeLeft = 362,
+    RightEyeRight = 263,
+    RightEyeIris = 473,
+    UpperLipTop = 13,
+    LowerLipBottom = 14,
+    MouthLeft = 61,
+    MouthRight = 291,
+    UpperLipCenter = 0,
+    LowerLipCenter = 17,
+    LeftEar = 234,
+    RightEar = 454,
+}
+
 impl Index<MainBodyIndex> for Vec<Vector3<f32>> {
     type Output = Vector3<f32>;
 
@@ -211,6 +241,14 @@ impl Index<HandIndex> for Vec<Vector3<f32>> {
     type Output = Vector3<f32>;
 
     fn index(&self, index: HandIndex) -> &Self::Output {
+        &self[index as usize]
+    }
+}
+
+impl Index<FaceIndex> for Vec<Vector3<f32>> {
+    type Output = Vector3<f32>;
+
+    fn index(&self, index: FaceIndex) -> &Self::Output {
         &self[index as usize]
     }
 }
@@ -254,6 +292,7 @@ impl PoseSolver {
         main_body: js_sys::Array,
         left_hand: js_sys::Array,
         right_hand: js_sys::Array,
+        face: js_sys::Array,
     ) -> PoseSolverResult {
         if main_body.length() == 0 {
             return PoseSolverResult::new();
@@ -504,6 +543,38 @@ impl PoseSolver {
             );
         }
 
+        if face.length() > 0 {
+            let face: Vec<Vector3<f32>> = landmarks_to_vector3(face);
+            result.left_eye_openness = self.calculate_eye_openness(
+                &face[FaceIndex::LeftEyeLeft],
+                &face[FaceIndex::LeftEyeRight],
+                &face[FaceIndex::LeftEyeUpper],
+                &face[FaceIndex::LeftEyeLower],
+            );
+            result.right_eye_openness = self.calculate_eye_openness(
+                &face[FaceIndex::RightEyeLeft],
+                &face[FaceIndex::RightEyeRight],
+                &face[FaceIndex::RightEyeUpper],
+                &face[FaceIndex::RightEyeLower],
+            );
+            result.left_eye_rotation = self.calculate_eye_rotation(
+                &face[FaceIndex::LeftEyeLeft],
+                &face[FaceIndex::LeftEyeRight],
+                &face[FaceIndex::LeftEyeIris],
+            );
+            result.right_eye_rotation = self.calculate_eye_rotation(
+                &face[FaceIndex::RightEyeLeft],
+                &face[FaceIndex::RightEyeRight],
+                &face[FaceIndex::RightEyeIris],
+            );
+            result.mouth_openness = self.calculate_mouth_openness(
+                &face[FaceIndex::UpperLipTop],
+                &face[FaceIndex::LowerLipBottom],
+                &face[FaceIndex::MouthLeft],
+                &face[FaceIndex::MouthRight],
+            );
+        }
+
         result
     }
 
@@ -721,5 +792,76 @@ impl PoseSolver {
             .into_inner();
 
         Rotation::new(quat[0], quat[1], quat[2], quat[3])
+    }
+
+    fn calculate_eye_rotation(
+        &self,
+        eye_left: &Vector3<f32>,
+        eye_right: &Vector3<f32>,
+        iris: &Vector3<f32>,
+    ) -> Rotation {
+        let (x, y) = self.calculate_eye_gaze(eye_left, eye_right, iris);
+
+        let max_horizontal_rotation = std::f32::consts::PI / 6.0;
+        let max_vertical_rotation = std::f32::consts::PI / 12.0;
+
+        let x_rotation = y * max_vertical_rotation;
+        let y_rotation = -x * max_horizontal_rotation;
+
+        let quat = UnitQuaternion::from_euler_angles(x_rotation, y_rotation, 0.0);
+
+        Rotation::new(quat[0], quat[1], quat[2], quat[3])
+    }
+
+    fn calculate_eye_gaze(
+        &self,
+        eye_left: &Vector3<f32>,
+        eye_right: &Vector3<f32>,
+        iris: &Vector3<f32>,
+    ) -> (f32, f32) {
+        let eye_center = (eye_left + eye_right) / 2.0;
+        let eye_width = (eye_left - eye_right).magnitude();
+        let eye_height = eye_width * 0.5;
+
+        let x = (iris.x - eye_center.x) / (eye_width * 0.5);
+        let y = (iris.y - eye_center.y) / (eye_height * 0.5);
+
+        (x.clamp(-1.0, 1.0), y.clamp(-0.5, 0.5))
+    }
+
+    fn calculate_eye_openness(
+        &self,
+        eye_left: &Vector3<f32>,
+        eye_right: &Vector3<f32>,
+        eye_upper: &Vector3<f32>,
+        eye_lower: &Vector3<f32>,
+    ) -> f32 {
+        let eye_height = (eye_upper - eye_lower).magnitude();
+        let eye_width = (eye_left - eye_right).magnitude();
+        let aspect_ratio = eye_height / eye_width;
+
+        let open_ratio = 0.28;
+        let closed_ratio = 0.15;
+
+        if aspect_ratio <= closed_ratio {
+            return 0.0;
+        }
+        if aspect_ratio >= open_ratio {
+            return 1.0;
+        }
+        return (aspect_ratio - closed_ratio) / (open_ratio - closed_ratio);
+    }
+
+    fn calculate_mouth_openness(
+        &self,
+        upper_lip_top: &Vector3<f32>,
+        lower_lip_bottom: &Vector3<f32>,
+        mouth_left: &Vector3<f32>,
+        mouth_right: &Vector3<f32>,
+    ) -> f32 {
+        let mouth_height = (upper_lip_top - lower_lip_bottom).magnitude();
+        let mouth_width = (mouth_left - mouth_right).magnitude();
+        let openness = (mouth_height / mouth_width - 0.1) / 0.5;
+        openness.clamp(0.0, 0.7)
     }
 }
