@@ -8,15 +8,12 @@ import Header from "./Header"
 import Footer from "./Footer"
 import Skeleton from "./Skeleton"
 import Background from "./Background"
-import { NormalizedLandmark } from "@mediapipe/tasks-vision"
 import { Drawer, IconButton } from "@mui/material"
 import { KeyboardBackspace } from "@mui/icons-material"
 import { Body } from "./index"
 
 function App(): JSX.Element {
-  const [body, setBody] = useState<Body>({ mainBody: null, leftHand: null, rightHand: null })
-
-  const [face, setFace] = useState<NormalizedLandmark[] | null>(null)
+  const [body, setBody] = useState<Body>({ mainBody: null, leftHand: null, rightHand: null, face: null })
 
   const [lerpFactor, setLerpFactor] = useState<number>(0.5)
   const [fps, setFps] = useState<number>(0)
@@ -53,7 +50,6 @@ function App(): JSX.Element {
         selectedAnimation={selectedAnimation}
         setSelectedAnimation={setSelectedAnimation}
         body={body}
-        face={face}
         lerpFactor={lerpFactor}
         setFps={setFps}
         boneRotation={boneRotation}
@@ -84,7 +80,6 @@ function App(): JSX.Element {
           <Motion
             body={body}
             setBody={setBody}
-            setFace={setFace}
             setLerpFactor={setLerpFactor}
             style={{ display: activeTab === "motion" ? "block" : "none" }}
           ></Motion>

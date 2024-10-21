@@ -7,12 +7,15 @@ export class PoseSolver {
    * @param {Array<any>} main_body
    * @param {Array<any>} left_hand
    * @param {Array<any>} right_hand
+   * @param {Array<any>} face
    * @returns {PoseSolverResult}
    */
-  solve(main_body: Array<any>, left_hand: Array<any>, right_hand: Array<any>): PoseSolverResult;
+  solve(main_body: Array<any>, left_hand: Array<any>, right_hand: Array<any>, face: Array<any>): PoseSolverResult;
 }
 export class PoseSolverResult {
   free(): void;
+  left_eye_openness: number;
+  left_eye_rotation: Rotation;
   left_foot: Rotation;
   left_hip: Rotation;
   left_index_finger_dip: Rotation;
@@ -33,7 +36,10 @@ export class PoseSolverResult {
   left_upper_arm: Rotation;
   left_wrist: Rotation;
   lower_body: Rotation;
+  mouth_openness: number;
   neck: Rotation;
+  right_eye_openness: number;
+  right_eye_rotation: Rotation;
   right_foot: Rotation;
   right_hip: Rotation;
   right_index_finger_dip: Rotation;
@@ -165,9 +171,19 @@ export interface InitOutput {
   readonly __wbg_set_posesolverresult_right_pinky_finger_pip: (a: number, b: number) => void;
   readonly __wbg_get_posesolverresult_right_pinky_finger_dip: (a: number) => number;
   readonly __wbg_set_posesolverresult_right_pinky_finger_dip: (a: number, b: number) => void;
+  readonly __wbg_get_posesolverresult_left_eye_rotation: (a: number) => number;
+  readonly __wbg_set_posesolverresult_left_eye_rotation: (a: number, b: number) => void;
+  readonly __wbg_get_posesolverresult_right_eye_rotation: (a: number) => number;
+  readonly __wbg_set_posesolverresult_right_eye_rotation: (a: number, b: number) => void;
+  readonly __wbg_get_posesolverresult_left_eye_openness: (a: number) => number;
+  readonly __wbg_set_posesolverresult_left_eye_openness: (a: number, b: number) => void;
+  readonly __wbg_get_posesolverresult_right_eye_openness: (a: number) => number;
+  readonly __wbg_set_posesolverresult_right_eye_openness: (a: number, b: number) => void;
+  readonly __wbg_get_posesolverresult_mouth_openness: (a: number) => number;
+  readonly __wbg_set_posesolverresult_mouth_openness: (a: number, b: number) => void;
   readonly __wbg_posesolver_free: (a: number, b: number) => void;
   readonly posesolver_new: () => number;
-  readonly posesolver_solve: (a: number, b: number, c: number, d: number) => number;
+  readonly posesolver_solve: (a: number, b: number, c: number, d: number, e: number) => number;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react"
 
-import { FilesetResolver, NormalizedLandmark, HolisticLandmarker } from "@mediapipe/tasks-vision"
+import { FilesetResolver, HolisticLandmarker } from "@mediapipe/tasks-vision"
 import { IconButton, Tooltip } from "@mui/material"
 import { Videocam, CloudUpload, Stop } from "@mui/icons-material"
 import { styled } from "@mui/material/styles"
 import DebugScene from "./DebugScene"
-
+import { Body } from "./index"
 const defaultVideoSrc = "./video/flash.mp4"
 
 const VisuallyHiddenInput = styled("input")({
@@ -23,21 +23,11 @@ const VisuallyHiddenInput = styled("input")({
 function Video({
   body,
   setBody,
-  setFace,
   setLerpFactor,
   style,
 }: {
-  body: {
-    mainBody: NormalizedLandmark[] | null
-    leftHand: NormalizedLandmark[] | null
-    rightHand: NormalizedLandmark[] | null
-  }
-  setBody: (body: {
-    mainBody: NormalizedLandmark[] | null
-    leftHand: NormalizedLandmark[] | null
-    rightHand: NormalizedLandmark[] | null
-  }) => void
-  setFace: (face: NormalizedLandmark[]) => void
+  body: Body
+  setBody: (body: Body) => void
   setLerpFactor: (lerpFactor: number) => void
   style: React.CSSProperties
 }): JSX.Element {
@@ -137,8 +127,8 @@ function Video({
                 mainBody: result.poseWorldLandmarks[0],
                 leftHand: result.leftHandWorldLandmarks[0],
                 rightHand: result.rightHandWorldLandmarks[0],
+                face: result.faceLandmarks[0],
               })
-              setFace(result.faceLandmarks[0])
             })
           } else if (
             imgRef.current &&
@@ -154,9 +144,8 @@ function Video({
                 mainBody: result.poseWorldLandmarks[0],
                 leftHand: result.leftHandWorldLandmarks[0],
                 rightHand: result.rightHandWorldLandmarks[0],
+                face: result.faceLandmarks[0],
               })
-
-              setFace(result.faceLandmarks[0])
             })
           }
           requestAnimationFrame(detect)
@@ -164,7 +153,7 @@ function Video({
         detect()
       }
     )
-  }, [setBody, setFace, imgRef, videoRef])
+  }, [setBody, imgRef, videoRef])
 
   return (
     <div className="motion" style={style}>

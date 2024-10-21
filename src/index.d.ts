@@ -2,6 +2,7 @@ export type Body = {
   mainBody: NormalizedLandmark[] | null
   leftHand: NormalizedLandmark[] | null
   rightHand: NormalizedLandmark[] | null
+  face: NormalizedLandmark[] | null
 }
 
 export type RecordedFrame = {
