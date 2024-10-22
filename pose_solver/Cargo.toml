@@ -2,6 +2,9 @@
 name = "pose_solver"
 version = "0.1.0"
 edition = "2021"
+description = "A library for solving the 3d landmarks from mediapipe to rotation quaternions in Babylon.js."
+license = "GPL-3.0"
+repository = "https://github.com/AmyangXYZ/MiKaPo"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

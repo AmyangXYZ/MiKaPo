@@ -1,5 +1,5 @@
 use nalgebra::{Quaternion, UnitQuaternion, UnitVector3, Vector3};
-use std::ops::Index;
+use std::{collections::HashMap, ops::Index};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -279,12 +279,26 @@ fn landmarks_to_vector3(landmarks: js_sys::Array) -> Vec<Vector3<f32>> {
 }
 
 #[wasm_bindgen]
-pub struct PoseSolver {}
+pub struct PoseSolver {
+    default_directions: HashMap<String, Vector3<f32>>,
+}
 #[wasm_bindgen]
 impl PoseSolver {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self {}
+        let mut default_directions = HashMap::new();
+        default_directions.insert("upper_body".to_string(), Vector3::new(1.0, 0.0, 0.0));
+        default_directions.insert("lower_body".to_string(), Vector3::new(1.0, 0.0, 0.0));
+        default_directions.insert("hip".to_string(), Vector3::new(0.0, -1.0, 0.0));
+        default_directions.insert(
+            "left_arm".to_string(),
+            Vector3::new(1.0, -1.0, 0.0).normalize(),
+        );
+        default_directions.insert(
+            "right_arm".to_string(),
+            Vector3::new(-1.0, -1.0, 0.0).normalize(),
+        );
+        Self { default_directions }
     }
     #[wasm_bindgen(js_name = solve)]
     pub fn solve(
@@ -591,14 +605,12 @@ impl PoseSolver {
     ) -> Rotation {
         let mut spine_dir = (left_shoulder - right_shoulder).normalize();
         spine_dir.y *= -1.0;
-        let default_dir = Vector3::new(1.0, 0.0, 0.0);
 
-        let spine_rotation = UnitQuaternion::rotation_between(&default_dir, &spine_dir)
-            .unwrap_or_else(UnitQuaternion::identity);
+        let spine_rotation =
+            UnitQuaternion::rotation_between(&self.default_directions["upper_body"], &spine_dir)
+                .unwrap_or_else(UnitQuaternion::identity);
 
-        let shoulder_center = (left_shoulder + right_shoulder) / 2.0;
-        let hip_center = Vector3::zeros();
-        let mut bend_dir = (shoulder_center - hip_center).normalize();
+        let mut bend_dir = ((left_shoulder + right_shoulder) / 2.0).normalize();
         bend_dir.y *= -1.0;
 
         let bend_angle = bend_dir.dot(&Vector3::y()).acos();
@@ -617,11 +629,11 @@ impl PoseSolver {
     ) -> Rotation {
         let mut hip_dir = (left_hip - right_hip).normalize();
         hip_dir.y *= -1.0;
-        let default_dir = Vector3::new(1.0, 0.0, 0.0);
 
-        let quat = UnitQuaternion::rotation_between(&default_dir, &hip_dir)
-            .unwrap_or_else(UnitQuaternion::identity)
-            .into_inner();
+        let quat =
+            UnitQuaternion::rotation_between(&self.default_directions["lower_body"], &hip_dir)
+                .unwrap_or_else(UnitQuaternion::identity)
+                .into_inner();
 
         Rotation::new(quat[0], quat[1], quat[2], quat[3])
     }
@@ -668,12 +680,16 @@ impl PoseSolver {
 
         let local_arm_dir = upper_body_quat.inverse() * arm_dir;
 
-        let default_dir =
-            Vector3::new(if side == LEFT { 1.0 } else { -1.0 }, -1.0, 0.0).normalize();
-
-        let quat = UnitQuaternion::rotation_between(&default_dir, &local_arm_dir)
-            .unwrap_or_else(UnitQuaternion::identity)
-            .into_inner();
+        let quat = UnitQuaternion::rotation_between(
+            if side == LEFT {
+                &self.default_directions["left_arm"]
+            } else {
+                &self.default_directions["right_arm"]
+            },
+            &local_arm_dir,
+        )
+        .unwrap_or_else(UnitQuaternion::identity)
+        .into_inner();
 
         Rotation::new(quat[0], quat[1], quat[2], quat[3])
     }
@@ -692,12 +708,16 @@ impl PoseSolver {
 
         let local_lower_arm_dir = upper_arm_quat.inverse() * lower_arm_dir;
 
-        let default_dir =
-            Vector3::new(if side == LEFT { 1.0 } else { -1.0 }, -1.0, 0.0).normalize();
-
-        let quat = UnitQuaternion::rotation_between(&default_dir, &local_lower_arm_dir)
-            .unwrap_or_else(UnitQuaternion::identity)
-            .into_inner();
+        let quat = UnitQuaternion::rotation_between(
+            if side == LEFT {
+                &self.default_directions["left_arm"]
+            } else {
+                &self.default_directions["right_arm"]
+            },
+            &local_lower_arm_dir,
+        )
+        .unwrap_or_else(UnitQuaternion::identity)
+        .into_inner();
 
         Rotation::new(quat[0], quat[1], quat[2], quat[3])
     }
@@ -715,15 +735,14 @@ impl PoseSolver {
 
         let local_leg_dir = lower_body_quat.inverse() * leg_dir;
 
-        let default_dir = Vector3::new(0.0, -1.0, 0.0);
-
-        let angle = default_dir.angle(&local_leg_dir);
+        let angle = self.default_directions["hip"].angle(&local_leg_dir);
 
         let max_angle = std::f32::consts::FRAC_PI_2;
 
         let clamped_angle = angle.min(max_angle);
 
-        let rotation_axis = UnitVector3::new_normalize(default_dir.cross(&local_leg_dir));
+        let rotation_axis =
+            UnitVector3::new_normalize(self.default_directions["hip"].cross(&local_leg_dir));
 
         let quat = UnitQuaternion::from_axis_angle(&rotation_axis, clamped_angle).into_inner();
 
@@ -744,11 +763,16 @@ impl PoseSolver {
 
         let local_wrist_dir = lower_arm_quat.inverse() * wrist_dir;
 
-        let default_dir = Vector3::new(if side == LEFT { 1.0 } else { -1.0 }, -1.0, -1.0);
-
-        let quat = UnitQuaternion::rotation_between(&default_dir, &local_wrist_dir)
-            .unwrap_or_else(UnitQuaternion::identity)
-            .into_inner();
+        let quat = UnitQuaternion::rotation_between(
+            if side == LEFT {
+                &self.default_directions["left_arm"]
+            } else {
+                &self.default_directions["right_arm"]
+            },
+            &local_wrist_dir,
+        )
+        .unwrap_or_else(UnitQuaternion::identity)
+        .into_inner();
 
         Rotation::new(quat[0], quat[1], quat[2], quat[3])
     }
