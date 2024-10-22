@@ -545,28 +545,34 @@ impl PoseSolver {
 
         if face.length() > 0 {
             let face: Vec<Vector3<f32>> = landmarks_to_vector3(face);
-            result.left_eye_openness = self.calculate_eye_openness(
+            let left_eye_gaze = self.calculate_eye_gaze(
                 &face[FaceIndex::LeftEyeLeft],
                 &face[FaceIndex::LeftEyeRight],
-                &face[FaceIndex::LeftEyeUpper],
-                &face[FaceIndex::LeftEyeLower],
+                &face[FaceIndex::LeftEyeIris],
             );
-            result.right_eye_openness = self.calculate_eye_openness(
+            let right_eye_gaze = self.calculate_eye_gaze(
+                &face[FaceIndex::RightEyeLeft],
+                &face[FaceIndex::RightEyeRight],
+                &face[FaceIndex::RightEyeIris],
+            );
+            let average_gaze = (
+                (left_eye_gaze.0 + right_eye_gaze.0) / 2.0,
+                (left_eye_gaze.1 + right_eye_gaze.1) / 2.0,
+            );
+            result.left_eye_openness = self.calculate_eye_openness(
                 &face[FaceIndex::RightEyeLeft],
                 &face[FaceIndex::RightEyeRight],
                 &face[FaceIndex::RightEyeUpper],
                 &face[FaceIndex::RightEyeLower],
             );
-            result.left_eye_rotation = self.calculate_eye_rotation(
+            result.right_eye_openness = self.calculate_eye_openness(
                 &face[FaceIndex::LeftEyeLeft],
                 &face[FaceIndex::LeftEyeRight],
-                &face[FaceIndex::LeftEyeIris],
+                &face[FaceIndex::LeftEyeUpper],
+                &face[FaceIndex::LeftEyeLower],
             );
-            result.right_eye_rotation = self.calculate_eye_rotation(
-                &face[FaceIndex::RightEyeLeft],
-                &face[FaceIndex::RightEyeRight],
-                &face[FaceIndex::RightEyeIris],
-            );
+            result.left_eye_rotation = self.calculate_eye_rotation(average_gaze.0, average_gaze.1);
+            result.right_eye_rotation = self.calculate_eye_rotation(average_gaze.0, average_gaze.1);
             result.mouth_openness = self.calculate_mouth_openness(
                 &face[FaceIndex::UpperLipTop],
                 &face[FaceIndex::LowerLipBottom],
@@ -794,14 +800,7 @@ impl PoseSolver {
         Rotation::new(quat[0], quat[1], quat[2], quat[3])
     }
 
-    fn calculate_eye_rotation(
-        &self,
-        eye_left: &Vector3<f32>,
-        eye_right: &Vector3<f32>,
-        iris: &Vector3<f32>,
-    ) -> Rotation {
-        let (x, y) = self.calculate_eye_gaze(eye_left, eye_right, iris);
-
+    fn calculate_eye_rotation(&self, x: f32, y: f32) -> Rotation {
         let max_horizontal_rotation = std::f32::consts::PI / 6.0;
         let max_vertical_rotation = std::f32::consts::PI / 12.0;
 
@@ -819,10 +818,11 @@ impl PoseSolver {
         eye_right: &Vector3<f32>,
         iris: &Vector3<f32>,
     ) -> (f32, f32) {
-        let eye_center = (eye_left + eye_right) / 2.0;
-        let eye_width = (eye_left - eye_right).magnitude();
+        let eye_center = (eye_left.scale(10.0) + eye_right.scale(10.0)) / 2.0;
+        let eye_width = (eye_left.scale(10.0) - eye_right.scale(10.0)).magnitude();
         let eye_height = eye_width * 0.5;
 
+        let iris = iris.scale(10.0);
         let x = (iris.x - eye_center.x) / (eye_width * 0.5);
         let y = (iris.y - eye_center.y) / (eye_height * 0.5);
 
