@@ -20,7 +20,7 @@
 
 - [x] Pose detection
 - [x] Face detection
-- [x] Hand detection
+- [x] Hand detection (experimental)
 - [x] Rust-WASM based pose-to-quaternion solver
 - [x] 360-degree background selection
 - [x] Video, image upload
