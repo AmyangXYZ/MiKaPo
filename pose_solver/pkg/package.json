@@ -1,7 +1,13 @@
 {
   "name": "pose_solver",
   "type": "module",
+  "description": "A library for solving the 3d landmarks from mediapipe to rotation quaternions in Babylon.js.",
   "version": "0.1.0",
+  "license": "GPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AmyangXYZ/MiKaPo"
+  },
   "files": [
     "pose_solver_bg.wasm",
     "pose_solver.js",
