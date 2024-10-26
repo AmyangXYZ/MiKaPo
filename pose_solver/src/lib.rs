@@ -290,14 +290,8 @@ impl PoseSolver {
         default_directions.insert("upper_body".to_string(), Vector3::new(1.0, 0.0, 0.0));
         default_directions.insert("lower_body".to_string(), Vector3::new(1.0, 0.0, 0.0));
         default_directions.insert("hip".to_string(), Vector3::new(0.0, -1.0, 0.0));
-        default_directions.insert(
-            "left_arm".to_string(),
-            Vector3::new(1.0, -1.0, 0.0).normalize(),
-        );
-        default_directions.insert(
-            "right_arm".to_string(),
-            Vector3::new(-1.0, -1.0, 0.0).normalize(),
-        );
+        default_directions.insert("left_arm".to_string(), Vector3::new(1.0, -1.0, 0.0));
+        default_directions.insert("right_arm".to_string(), Vector3::new(-1.0, -1.0, 0.0));
         Self { default_directions }
     }
     #[wasm_bindgen(js_name = solve)]
@@ -370,7 +364,7 @@ impl PoseSolver {
 
             result.left_wrist = self.calculate_wrist_rotation(
                 &left_hand[HandIndex::Wrist],
-                &left_hand[HandIndex::MiddleMCP],
+                &left_hand[HandIndex::PinkyMCP],
                 &result.left_lower_arm,
                 LEFT,
             );
@@ -466,7 +460,7 @@ impl PoseSolver {
 
             result.right_wrist = self.calculate_wrist_rotation(
                 &right_hand[HandIndex::Wrist],
-                &right_hand[HandIndex::MiddleMCP],
+                &right_hand[HandIndex::PinkyMCP],
                 &result.right_lower_arm,
                 RIGHT,
             );
