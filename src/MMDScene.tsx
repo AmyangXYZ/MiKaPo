@@ -8,6 +8,7 @@ import {
   DirectionalLight,
   Engine,
   HemisphericLight,
+  ImportMeshAsync,
   Material,
   Mesh,
   MeshBuilder,
@@ -15,7 +16,6 @@ import {
   Quaternion,
   registerSceneLoaderPlugin,
   Scene,
-  SceneLoader,
   ShadowGenerator,
   Space,
   Texture,
@@ -23,17 +23,16 @@ import {
   Viewport,
 } from "@babylonjs/core"
 import {
-  getMmdWasmInstance,
   MmdWasmAnimation,
-  MmdWasmInstance,
-  MmdWasmInstanceTypeMPD,
   MmdWasmModel,
-  MmdWasmPhysics,
-  MmdWasmRuntime,
   PmxLoader,
   SdefInjector,
   VmdLoader,
 } from "babylon-mmd"
+
+import "babylon-mmd/esm/Runtime/Optimized/Animation/mmdWasmRuntimeModelAnimation";
+import "@babylonjs/core/Materials/Textures/Loaders/tgaTextureLoader";
+
 import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
 
@@ -43,7 +42,14 @@ import { BorderAll, Camera, CenterFocusWeak, RadioButtonChecked, StopCircle } fr
 import Encoding from "encoding-japanese"
 import { BoneFrame, MorphFrame, RecordedFrame, Body } from "."
 
+import { MmdWasmInstanceTypeMPD } from "babylon-mmd/esm/Runtime/Optimized/InstanceType/multiPhysicsDebug";
+import type { IMmdWasmInstance } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance";
+import { GetMmdWasmInstance } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance";
+import { MmdWasmRuntime } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmRuntime";
+import { MmdWasmPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdWasmPhysics";
+
 import init, { PoseSolver, PoseSolverResult, Rotation } from "pose_solver"
+
 
 registerSceneLoaderPlugin(new PmxLoader())
 
@@ -194,7 +200,7 @@ function MMDScene({
   const domeRef = useRef<PhotoDome | null>(null)
   const groundRef = useRef<Mesh | null>(null)
 
-  const mmdWasmInstanceRef = useRef<MmdWasmInstance | null>(null)
+  const mmdWasmInstanceRef = useRef<IMmdWasmInstance | null>(null)
   const mmdModelRef = useRef<MmdWasmModel | null>(null)
   const mmdRuntimeRef = useRef<MmdWasmRuntime | null>(null)
   const keyBones = useRef<{ [key: string]: IMmdRuntimeLinkedBone }>({})
@@ -342,9 +348,13 @@ function MMDScene({
       SdefInjector.OverrideEngineCreateEffect(engine)
       const scene = new Scene(engine)
       scene.clearColor = new Color4(0, 0, 0, 0)
-      mmdWasmInstanceRef.current = await getMmdWasmInstance(new MmdWasmInstanceTypeMPD(), 2)
-      mmdRuntimeRef.current = new MmdWasmRuntime(mmdWasmInstanceRef.current, scene, new MmdWasmPhysics(scene))
-      mmdRuntimeRef.current.register(scene)
+      mmdWasmInstanceRef.current = await GetMmdWasmInstance(new MmdWasmInstanceTypeMPD())
+
+
+      const mmdRuntime = new MmdWasmRuntime(mmdWasmInstanceRef.current, scene, new MmdWasmPhysics(scene));
+      mmdRuntime.register(scene)
+      mmdRuntimeRef.current = mmdRuntime
+
       mmdRuntimeRef.current!.onAnimationTickObservable.add(() => {
         setCurrentAnimationTime(mmdRuntimeRef.current!.currentTime)
       })
@@ -451,7 +461,8 @@ function MMDScene({
         mmdModelRef.current.mesh.dispose()
       }
       setSelectedAnimation("")
-      SceneLoader.ImportMeshAsync(undefined, `/model/${selectedModel}/`, `${selectedModel}.pmx`, sceneRef.current).then(
+
+      ImportMeshAsync(`/model/${selectedModel}/${selectedModel}.pmx`, sceneRef.current!).then(
         (result) => {
           const mesh = result.meshes[0]
           for (const m of mesh.metadata.meshes) {
@@ -461,7 +472,7 @@ function MMDScene({
           shadowGeneratorRef.current!.addShadowCaster(mesh)
           mmdModelRef.current = mmdRuntimeRef.current!.createMmdModel(mesh as Mesh, {
             buildPhysics: {
-              worldId: 0,
+              disableOffsetForConstraintFrame: true
             },
           })
 
