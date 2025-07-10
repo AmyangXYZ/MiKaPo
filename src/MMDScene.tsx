@@ -22,16 +22,10 @@ import {
   Vector3,
   Viewport,
 } from "@babylonjs/core"
-import {
-  MmdWasmAnimation,
-  MmdWasmModel,
-  PmxLoader,
-  SdefInjector,
-  VmdLoader,
-} from "babylon-mmd"
+import { MmdWasmAnimation, MmdWasmModel, PmxLoader, SdefInjector, VmdLoader } from "babylon-mmd"
 
-import "babylon-mmd/esm/Runtime/Optimized/Animation/mmdWasmRuntimeModelAnimation";
-import "@babylonjs/core/Materials/Textures/Loaders/tgaTextureLoader";
+import "babylon-mmd/esm/Runtime/Optimized/Animation/mmdWasmRuntimeModelAnimation"
+import "@babylonjs/core/Materials/Textures/Loaders/tgaTextureLoader"
 
 import backgroundGroundUrl from "./assets/backgroundGround.png"
 import type { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinkedBone"
@@ -42,14 +36,13 @@ import { BorderAll, Camera, CenterFocusWeak, RadioButtonChecked, StopCircle } fr
 import Encoding from "encoding-japanese"
 import { BoneFrame, MorphFrame, RecordedFrame, Body } from "."
 
-import { MmdWasmInstanceTypeMPD } from "babylon-mmd/esm/Runtime/Optimized/InstanceType/multiPhysicsDebug";
-import type { IMmdWasmInstance } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance";
-import { GetMmdWasmInstance } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance";
-import { MmdWasmRuntime } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmRuntime";
-import { MmdWasmPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdWasmPhysics";
+import { MmdWasmInstanceTypeMPD } from "babylon-mmd/esm/Runtime/Optimized/InstanceType/multiPhysicsDebug"
+import type { IMmdWasmInstance } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance"
+import { GetMmdWasmInstance } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance"
+import { MmdWasmRuntime } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmRuntime"
+import { MmdWasmPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdWasmPhysics"
 
 import init, { PoseSolver, PoseSolverResult, Rotation } from "pose_solver"
-
 
 registerSceneLoaderPlugin(new PmxLoader())
 
@@ -161,7 +154,6 @@ const usedKeyBones: string[] = [
 function MMDScene({
   body,
   lerpFactor,
-  setFps,
   selectedModel,
   selectedBackground,
   selectedAnimation,
@@ -177,7 +169,6 @@ function MMDScene({
 }: {
   body: Body
   lerpFactor: number
-  setFps: (fps: number) => void
   selectedModel: string
   selectedBackground: string
   selectedAnimation: string
@@ -350,8 +341,7 @@ function MMDScene({
       scene.clearColor = new Color4(0, 0, 0, 0)
       mmdWasmInstanceRef.current = await GetMmdWasmInstance(new MmdWasmInstanceTypeMPD())
 
-
-      const mmdRuntime = new MmdWasmRuntime(mmdWasmInstanceRef.current, scene, new MmdWasmPhysics(scene));
+      const mmdRuntime = new MmdWasmRuntime(mmdWasmInstanceRef.current, scene, new MmdWasmPhysics(scene))
       mmdRuntime.register(scene)
       mmdRuntimeRef.current = mmdRuntime
 
@@ -410,7 +400,6 @@ function MMDScene({
       groundRef.current!.receiveShadows = true
 
       engine.runRenderLoop(() => {
-        setFps(Math.round(engine.getFps()))
         engine.resize()
         scene!.render()
       })
@@ -423,7 +412,7 @@ function MMDScene({
         setSceneRendered(true)
       })
     }
-  }, [setFps, setSceneRendered, setCurrentAnimationTime])
+  }, [setSceneRendered, setCurrentAnimationTime])
 
   useEffect(() => {
     if (domeRef.current) {
@@ -462,27 +451,25 @@ function MMDScene({
       }
       setSelectedAnimation("")
 
-      ImportMeshAsync(`/model/${selectedModel}/${selectedModel}.pmx`, sceneRef.current!).then(
-        (result) => {
-          const mesh = result.meshes[0]
-          for (const m of mesh.metadata.meshes) {
-            m.receiveShadows = true
-          }
-          setMaterials(mesh.metadata.materials.map((m: Material) => m.name))
-          shadowGeneratorRef.current!.addShadowCaster(mesh)
-          mmdModelRef.current = mmdRuntimeRef.current!.createMmdModel(mesh as Mesh, {
-            buildPhysics: {
-              disableOffsetForConstraintFrame: true
-            },
-          })
+      ImportMeshAsync(`/model/${selectedModel}/${selectedModel}.pmx`, sceneRef.current!).then((result) => {
+        const mesh = result.meshes[0]
+        for (const m of mesh.metadata.meshes) {
+          m.receiveShadows = true
+        }
+        setMaterials(mesh.metadata.materials.map((m: Material) => m.name))
+        shadowGeneratorRef.current!.addShadowCaster(mesh)
+        mmdModelRef.current = mmdRuntimeRef.current!.createMmdModel(mesh as Mesh, {
+          buildPhysics: {
+            disableOffsetForConstraintFrame: true,
+          },
+        })
 
-          for (const bone of mmdModelRef.current!.skeleton.bones) {
-            if (usedKeyBones.includes(bone.name)) {
-              keyBones.current[bone.name] = bone
-            }
+        for (const bone of mmdModelRef.current!.skeleton.bones) {
+          if (usedKeyBones.includes(bone.name)) {
+            keyBones.current[bone.name] = bone
           }
         }
-      )
+      })
     }
     loadMMD()
   }, [sceneRendered, sceneRef, mmdWasmInstanceRef, mmdRuntimeRef, selectedModel, setSelectedAnimation, setMaterials])

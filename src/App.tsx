@@ -16,7 +16,6 @@ function App(): JSX.Element {
   const [body, setBody] = useState<Body>({ mainBody: null, leftHand: null, rightHand: null, face: null })
 
   const [lerpFactor, setLerpFactor] = useState<number>(0.5)
-  const [fps, setFps] = useState<number>(0)
   const [openDrawer, setOpenDrawer] = useState<boolean>(false)
   const [activeTab, setActiveTab] = useState<string>("")
 
@@ -42,7 +41,7 @@ function App(): JSX.Element {
 
   return (
     <>
-      <Header fps={fps}></Header>
+      <Header></Header>
 
       <MMDScene
         selectedModel={selectedModel}
@@ -51,7 +50,6 @@ function App(): JSX.Element {
         setSelectedAnimation={setSelectedAnimation}
         body={body}
         lerpFactor={lerpFactor}
-        setFps={setFps}
         boneRotation={boneRotation}
         setMaterials={setMaterials}
         materialVisible={materialVisible}
