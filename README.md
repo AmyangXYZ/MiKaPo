@@ -1,5 +1,7 @@
 # MiKaPo: AI Pose Picker for MikuMikuDance
 
+> **🎉 NEW PROJECT ALERT!** Check out [**PoPo**](https://popo.love) - Transform text into MMD poses with AI! No more manual bone adjustments - just type "shy smile while waving" and watch the magic happen ✨
+
 <img width="300px" alt="demo_pose" src="./logo.jpg" />
 
 [MiKaPo](https://mikapo.amyang.dev) is a **Web-based tool** that poses MMD models from video input in real-time. Welcome feature requests and PRs!

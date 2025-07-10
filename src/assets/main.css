@@ -45,7 +45,6 @@ body {
 }
 
 .header-item {
-  width: 30%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -158,6 +157,10 @@ a {
   color: inherit;
 }
 
+.header-item-mobile-only {
+  display: none;
+}
+
 @keyframes capture-shutter {
   0%,
   100% {
@@ -202,5 +205,13 @@ a {
   .header {
     position: relative;
     height: 2.5rem;
+  }
+
+  .header-item-mobile-hidden {
+    display: none !important;
+  }
+
+  .header-item-mobile-only {
+    display: inline;
   }
 }
