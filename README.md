@@ -4,7 +4,7 @@ A web-based tool that enables real-time motion capture for MikuMikuDance (MMD) m
 
 ## Overview
 
-[MiKaPo](https://mikapo.amyang.dev) transforms video input into real-time MMD model poses by detecting 3D landmarks and converting them to bone rotations. The core technical challenge lies in accurately mapping world-space 3D landmarks from MediaPipe to MMD bone quaternion rotations, accounting for MMD's specific bone coordinate system and directional conventions.
+[MiKaPo](https://mikapo.vercel.app) transforms video input into real-time MMD model poses by detecting 3D landmarks and converting them to bone rotations. The core technical challenge lies in accurately mapping world-space 3D landmarks from MediaPipe to MMD bone quaternion rotations, accounting for MMD's specific bone coordinate system and directional conventions.
 
 **MiKaPo 2.0** introduces a completely rewritten solver with hierarchical bone transformations, migrating from Vite to Next.js for improved performance and maintainability.
 
