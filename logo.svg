@@ -1,0 +1,13 @@
+<svg viewBox="0 0 53 53" xmlns="http://www.w3.org/2000/svg">
+    <!-- Golden/yellow circle with black edge -->
+    <circle cx="26.5" cy="26.5" r="24" fill="#ff7209" stroke="#000" stroke-width="3" />
+
+    <!-- Black ring 2 -->
+    <circle cx="26.5" cy="26.5" r="17" fill="none" stroke="#000" stroke-width="2" />
+
+    <!-- Black ring 3 -->
+    <circle cx="26.5" cy="26.5" r="9" fill="none" stroke="#000" stroke-width="2" />
+
+    <!-- Black center -->
+    <circle cx="26.5" cy="26.5" r="3" fill="#000" />
+</svg>

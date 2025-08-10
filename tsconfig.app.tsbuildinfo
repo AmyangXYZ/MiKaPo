@@ -1,1 +1,0 @@
-{"root":["./src/animation.tsx","./src/app.tsx","./src/background.tsx","./src/debugscene.tsx","./src/footer.tsx","./src/header.tsx","./src/mmdscene.tsx","./src/materials.tsx","./src/model.tsx","./src/motion.tsx","./src/skeleton.tsx","./src/env.d.ts","./src/index.d.ts","./src/main.tsx","./src/vite-env.d.ts"],"version":"5.6.2"}
