@@ -39,7 +39,7 @@ export const metadata: Metadata = {
     description:
       "Transform video input into real-time MMD model poses using advanced 3D landmark detection and hierarchical bone transformations.",
     type: "website",
-    url: "https://mikapo.amyang.dev",
+    url: "https://mikapo.vercel.app",
   },
   twitter: {
     card: "summary_large_image",
