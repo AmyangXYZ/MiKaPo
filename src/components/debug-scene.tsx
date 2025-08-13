@@ -101,7 +101,7 @@ function DebugScene({ landmarks }: { landmarks: HolisticLandmarkerResult | null 
     )
   }, [landmarks, drawConnections])
 
-  return <canvas ref={canvasRef} className="w-[400px] h-[400px] outline-none"></canvas>
+  return <canvas ref={canvasRef} className="pt-4 max-w-sm w-full h-[400px] outline-none"></canvas>
 }
 
 export default DebugScene

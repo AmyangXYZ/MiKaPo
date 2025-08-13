@@ -160,13 +160,12 @@ export class Solver {
     this.boneStates["right_arm"] = this.solveRightArm()
     this.boneStates["left_elbow"] = this.solveLeftElbow()
     this.boneStates["right_elbow"] = this.solveRightElbow()
-    this.boneStates["left_wrist"] = this.solveLeftWrist()
-    this.boneStates["right_wrist"] = this.solveRightWrist()
     this.boneStates["left_wrist_twist"] = this.solveLeftWristTwist()
     this.boneStates["right_wrist_twist"] = this.solveRightWristTwist()
+    this.boneStates["left_wrist"] = this.solveLeftWrist()
+    this.boneStates["right_wrist"] = this.solveRightWrist()
 
     // Left Hand Fingers
-    this.boneStates["left_thumb_0"] = this.solveLeftThumb0()
     this.boneStates["left_thumb_1"] = this.solveLeftThumb1()
     this.boneStates["left_thumb_2"] = this.solveLeftThumb2()
     this.boneStates["left_index_1"] = this.solveLeftIndex1()
@@ -183,7 +182,6 @@ export class Solver {
     this.boneStates["left_pinky_3"] = this.solveLeftPinky3()
 
     // Right Hand Fingers
-    this.boneStates["right_thumb_0"] = this.solveRightThumb0()
     this.boneStates["right_thumb_1"] = this.solveRightThumb1()
     this.boneStates["right_thumb_2"] = this.solveRightThumb2()
     this.boneStates["right_index_1"] = this.solveRightIndex1()
@@ -304,7 +302,7 @@ export class Solver {
     const localEarCenter = localLeftEar.add(localRightEar).scale(0.5)
     const localShoulderCenter = localLeftShoulder.add(localRightShoulder).scale(0.5)
     const neckDirection = localEarCenter.subtract(localShoulderCenter).normalize()
-    const reference = new Vector3(0, 1, 0).normalize()
+    const reference = new Vector3(0, 0.9758578206707508, -0.21840676233975218).normalize()
 
     return {
       name: "首",
@@ -369,7 +367,7 @@ export class Solver {
 
     const leftLegDirection = localLeftKnee.subtract(localLeftHip).normalize()
 
-    const reference = new Vector3(0, -1, 0).normalize()
+    const reference = new Vector3(-0.009540689177369048, -0.998440855265296, 0.05499848895310636).normalize()
 
     return {
       name: "左足",
@@ -393,7 +391,7 @@ export class Solver {
 
     const rightLegDirection = localRightKnee.subtract(localRightHip).normalize()
 
-    const reference = new Vector3(0, -1, 0).normalize()
+    const reference = new Vector3(-0.009540689177369048, -0.998440855265296, 0.05499848895310636).normalize()
 
     return {
       name: "右足",
@@ -419,7 +417,7 @@ export class Solver {
     const localLeftAnkle = Vector3.TransformCoordinates(worldLeftAnkle, worldToFullParent)
 
     const kneeDirection = localLeftAnkle.subtract(localLeftKnee).normalize()
-    const reference = new Vector3(0, -1, 0).normalize()
+    const reference = new Vector3(-0.0007085292291306043, -0.9908517790187175, 0.1349527695224302).normalize()
 
     return {
       name: "左ひざ",
@@ -445,7 +443,7 @@ export class Solver {
     const localRightAnkle = Vector3.TransformCoordinates(worldRightAnkle, worldToFullParent)
 
     const kneeDirection = localRightAnkle.subtract(localRightKnee).normalize()
-    const reference = new Vector3(0, -1, 0).normalize()
+    const reference = new Vector3(0.0007079817891811808, -0.9908517794028981, 0.13495276957475513).normalize()
 
     return {
       name: "右ひざ",
@@ -472,7 +470,7 @@ export class Solver {
     const localLeftFootIndex = Vector3.TransformCoordinates(worldLeftFootIndex, worldToFullParent)
 
     const ankleDirection = localLeftFootIndex.subtract(localLeftHeel).normalize()
-    const reference = new Vector3(0, 0, -1).normalize()
+    const reference = new Vector3(0, -0.65728916525082, -0.7536384764884819).normalize()
 
     return {
       name: "左足首",
@@ -500,7 +498,7 @@ export class Solver {
     const localRightFootIndex = Vector3.TransformCoordinates(worldRightFootIndex, worldToFullParent)
 
     const ankleDirection = localRightFootIndex.subtract(localRightHeel).normalize()
-    const reference = new Vector3(0, 0, -1).normalize()
+    const reference = new Vector3(0, -0.65728916525082, -0.7536384764884819).normalize()
 
     return {
       name: "右足首",
@@ -523,7 +521,7 @@ export class Solver {
     const localLeftElbow = Vector3.TransformCoordinates(worldLeftElbow, worldToUpperBody)
 
     const leftArmDirection = localLeftElbow.subtract(localLeftShoulder).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8012514930735141, -0.5966378711527615, -0.04493657256361681).normalize()
 
     return {
       name: "左腕",
@@ -546,7 +544,7 @@ export class Solver {
     const localRightElbow = Vector3.TransformCoordinates(worldRightElbow, worldToUpperBody)
 
     const rightArmDirection = localRightElbow.subtract(localRightShoulder).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8020376176381924, -0.5972232450219962, -0.007749548286792409).normalize()
 
     return {
       name: "右腕",
@@ -572,7 +570,7 @@ export class Solver {
     const localLeftWrist = Vector3.TransformCoordinates(worldLeftWrist, worldToFullParent)
 
     const leftElbowDirection = localLeftWrist.subtract(localLeftElbow).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.7991214493734219, -0.600241324846603, -0.03339552511514752).normalize()
 
     return {
       name: "左ひじ",
@@ -598,68 +596,11 @@ export class Solver {
     const localRightWrist = Vector3.TransformCoordinates(worldRightWrist, worldToFullParent)
 
     const rightElbowDirection = localRightWrist.subtract(localRightElbow).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.7991213083626819, -0.6002415122251716, -0.03339553147285845).normalize()
 
     return {
       name: "右ひじ",
       rotation: Quaternion.FromUnitVectorsToRef(reference, rightElbowDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftWrist(): BoneState {
-    // Full parent chain: upper_body * left_arm * left_elbow
-
-    const worldLeftWrist = this.getPoseLandmark("left_wrist")
-    const worldLeftIndex = this.getPoseLandmark("left_index")
-
-    if (!worldLeftWrist || !worldLeftIndex) return { name: "左手首", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-
-    const fullParentQuat = upperBodyQuat.multiply(leftArmQuat).multiply(leftElbowQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localLeftWrist = Vector3.TransformCoordinates(worldLeftWrist, worldToFullParent)
-    const localLeftIndex = Vector3.TransformCoordinates(worldLeftIndex, worldToFullParent)
-
-    const wristDirection = localLeftIndex.subtract(localLeftWrist).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
-
-    return {
-      name: "左手首",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, wristDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightWrist(): BoneState {
-    const worldRightWrist = this.getPoseLandmark("right_wrist")
-    const worldRightIndex = this.getPoseLandmark("right_index")
-
-    if (!worldRightWrist || !worldRightIndex) return { name: "右手首", rotation: Quaternion.Identity() }
-
-    // Full parent chain: upper_body * right_arm * right_elbow
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-
-    const fullParentQuat = upperBodyQuat.multiply(rightArmQuat).multiply(rightElbowQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRightWrist = Vector3.TransformCoordinates(worldRightWrist, worldToFullParent)
-    const localRightIndex = Vector3.TransformCoordinates(worldRightIndex, worldToFullParent)
-
-    const wristDirection = localRightIndex.subtract(localRightWrist).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
-
-    return {
-      name: "右手首",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, wristDirection, new Quaternion()),
     }
   }
 
@@ -728,38 +669,61 @@ export class Solver {
     }
   }
 
-  // Left Hand Fingers
-  private solveLeftThumb0(): BoneState {
-    const thumbCMC = this.getLeftHandLandmark("thumb_cmc")
-    const thumbMCP = this.getLeftHandLandmark("thumb_mcp")
-    if (!thumbCMC || !thumbMCP) return { name: "左親指０", rotation: Quaternion.Identity() }
+  private solveLeftWrist(): BoneState {
+    // Full parent chain: upper_body * left_arm * left_elbows
+    const worldLeftWrist = this.getPoseLandmark("left_wrist")
+    const worldLeftMiddleMcp = this.getLeftHandLandmark("middle_mcp")
 
-    // Get full parent chain: upper_body * left_arm * left_elbow * left_wrist
+    if (!worldLeftWrist || !worldLeftMiddleMcp) return { name: "左手首", rotation: Quaternion.Identity() }
+
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
 
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
-      .multiply(leftWristTwistQuat)
-
+    const fullParentQuat = upperBodyQuat.multiply(leftArmQuat).multiply(leftElbowQuat).multiply(leftWristTwistQuat)
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
     const worldToFullParent = fullParentMatrix.invert()
 
-    const localThumbCMC = Vector3.TransformCoordinates(thumbCMC, worldToFullParent)
-    const localThumbMCP = Vector3.TransformCoordinates(thumbMCP, worldToFullParent)
+    const localLeftWrist = Vector3.TransformCoordinates(worldLeftWrist, worldToFullParent)
+    const localLeftMiddleMcp = Vector3.TransformCoordinates(worldLeftMiddleMcp, worldToFullParent)
 
-    const thumbDirection = localThumbMCP.subtract(localThumbCMC).normalize()
-    const reference = new Vector3(1, -1, -1).normalize()
+    const wristDirection = localLeftMiddleMcp.subtract(localLeftWrist).normalize()
+    const reference = new Vector3(0.8, -0.6, 0).normalize()
 
     return {
-      name: "左親指０",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, thumbDirection, new Quaternion()),
+      name: "左手首",
+      rotation: Quaternion.FromUnitVectorsToRef(reference, wristDirection, new Quaternion()),
+    }
+  }
+
+  private solveRightWrist(): BoneState {
+    const worldRightWrist = this.getPoseLandmark("right_wrist")
+    const worldRightMiddleMcp = this.getRightHandLandmark("middle_mcp")
+
+    if (!worldRightWrist || !worldRightMiddleMcp) return { name: "右手首", rotation: Quaternion.Identity() }
+
+    // Full parent chain: upper_body * right_arm * right_elbow
+    const upperBodyQuat = this.boneStates["upper_body"].rotation
+    const rightArmQuat = this.boneStates["right_arm"].rotation
+    const rightElbowQuat = this.boneStates["right_elbow"].rotation
+    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
+
+    const fullParentQuat = upperBodyQuat.multiply(rightArmQuat).multiply(rightElbowQuat).multiply(rightWristTwistQuat)
+    const fullParentMatrix = new Matrix()
+    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
+    const worldToFullParent = fullParentMatrix.invert()
+
+    const localRightWrist = Vector3.TransformCoordinates(worldRightWrist, worldToFullParent)
+    const localRightMiddleMcp = Vector3.TransformCoordinates(worldRightMiddleMcp, worldToFullParent)
+
+    const wristDirection = localRightMiddleMcp.subtract(localRightWrist).normalize()
+    const reference = new Vector3(-0.8, -0.6, 0).normalize()
+
+    return {
+      name: "右手首",
+      rotation: Quaternion.FromUnitVectorsToRef(reference, wristDirection, new Quaternion()),
     }
   }
 
@@ -772,16 +736,14 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftThumb0Quat = this.boneStates["left_thumb_0"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
-      .multiply(leftThumb0Quat)
+      .multiply(leftWristQuat)
 
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
@@ -791,7 +753,7 @@ export class Solver {
     const localThumbIP = Vector3.TransformCoordinates(thumbIP, worldToFullParent)
 
     const thumbDirection = localThumbIP.subtract(localThumbMCP).normalize()
-    const reference = new Vector3(1, -1, -1).normalize()
+    const reference = new Vector3(0.6236582921350833, -0.7035050354478427, -0.34077998730952624).normalize()
     return {
       name: "左親指１",
       rotation: Quaternion.FromUnitVectorsToRef(reference, thumbDirection, new Quaternion()),
@@ -806,17 +768,15 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftThumb0Quat = this.boneStates["left_thumb_0"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftThumb1Quat = this.boneStates["left_thumb_1"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
-      .multiply(leftThumb0Quat)
+      .multiply(leftWristQuat)
       .multiply(leftThumb1Quat)
 
     const fullParentMatrix = new Matrix()
@@ -827,7 +787,7 @@ export class Solver {
     const localThumbTip = Vector3.TransformCoordinates(thumbTip, worldToFullParent)
 
     const thumbDirection = localThumbTip.subtract(localThumbIP).normalize()
-    const reference = new Vector3(1, -1, -1).normalize()
+    const reference = new Vector3(0.6335557251313008, -0.7097178001569598, -0.308071075068266).normalize()
 
     return {
       name: "左親指２",
@@ -845,14 +805,14 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
 
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
@@ -862,7 +822,7 @@ export class Solver {
     const localIndexPIP = Vector3.TransformCoordinates(indexPIP, worldToFullParent)
 
     const indexDirection = localIndexPIP.subtract(localIndexMCP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8432431728071625, -0.5368768421934949, 0.026536914486258466).normalize()
 
     return {
       name: "左人指１",
@@ -879,15 +839,15 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftIndex1Quat = this.boneStates["left_index_1"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
       .multiply(leftIndex1Quat)
 
     const fullParentMatrix = new Matrix()
@@ -898,7 +858,7 @@ export class Solver {
     const localIndexDIP = Vector3.TransformCoordinates(indexDIP, worldToFullParent)
 
     const indexDirection = localIndexDIP.subtract(localIndexPIP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8452406149438719, -0.5337284035571757, 0.026500831790980922).normalize()
 
     return {
       name: "左人指２",
@@ -915,16 +875,16 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftIndex1Quat = this.boneStates["left_index_1"].rotation
     const leftIndex2Quat = this.boneStates["left_index_2"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
       .multiply(leftIndex1Quat)
       .multiply(leftIndex2Quat)
 
@@ -936,7 +896,7 @@ export class Solver {
     const localIndexTip = Vector3.TransformCoordinates(indexTip, worldToFullParent)
 
     const indexDirection = localIndexTip.subtract(localIndexDIP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8448758179361382, -0.534305307281219, 0.026508317145067652).normalize()
 
     return {
       name: "左人指３",
@@ -953,8 +913,8 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
@@ -970,7 +930,7 @@ export class Solver {
     const localMiddlePIP = Vector3.TransformCoordinates(middlePIP, worldToFullParent)
 
     const middleDirection = localMiddlePIP.subtract(localMiddleMCP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8303922987881693, -0.5566343204926274, 0.02463459687127938).normalize()
 
     return {
       name: "左中指１",
@@ -993,8 +953,8 @@ export class Solver {
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
       .multiply(leftMiddle1Quat)
 
     const fullParentMatrix = new Matrix()
@@ -1005,7 +965,7 @@ export class Solver {
     const localMiddleDIP = Vector3.TransformCoordinates(middleDIP, worldToFullParent)
 
     const middleDirection = localMiddleDIP.subtract(localMiddlePIP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.839527879195794, -0.542743454616619, 0.02494959967274926).normalize()
 
     return {
       name: "左中指２",
@@ -1021,16 +981,16 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftMiddle1Quat = this.boneStates["left_middle_1"].rotation
     const leftMiddle2Quat = this.boneStates["left_middle_2"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
       .multiply(leftMiddle1Quat)
       .multiply(leftMiddle2Quat)
     const fullParentMatrix = new Matrix()
@@ -1041,7 +1001,7 @@ export class Solver {
     const localMiddleTip = Vector3.TransformCoordinates(middleTip, worldToFullParent)
 
     const middleDirection = localMiddleTip.subtract(localMiddleDIP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8431055325028831, -0.5371633481358361, 0.025071866355111806).normalize()
 
     return {
       name: "左中指３",
@@ -1058,14 +1018,14 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
     const worldToFullParent = fullParentMatrix.invert()
@@ -1074,7 +1034,7 @@ export class Solver {
     const localRingPIP = Vector3.TransformCoordinates(ringPIP, worldToFullParent)
 
     const ringDirection = localRingPIP.subtract(localRingMCP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8076445279586488, -0.5883930602992032, 0.038780446750771254).normalize()
 
     return {
       name: "左薬指１",
@@ -1090,16 +1050,17 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftRing1Quat = this.boneStates["left_ring_1"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
       .multiply(leftRing1Quat)
+
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
     const worldToFullParent = fullParentMatrix.invert()
@@ -1108,7 +1069,7 @@ export class Solver {
     const localRingDIP = Vector3.TransformCoordinates(ringDIP, worldToFullParent)
 
     const ringDirection = localRingDIP.subtract(localRingPIP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8125380906332118, -0.5814864755919819, 0.040685746567439465).normalize()
 
     return {
       name: "左薬指２",
@@ -1124,16 +1085,16 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftRing1Quat = this.boneStates["left_ring_1"].rotation
     const leftRing2Quat = this.boneStates["left_ring_2"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
       .multiply(leftRing1Quat)
       .multiply(leftRing2Quat)
 
@@ -1145,7 +1106,7 @@ export class Solver {
     const localRingTip = Vector3.TransformCoordinates(ringTip, worldToFullParent)
 
     const ringDirection = localRingTip.subtract(localRingDIP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8136639417250288, -0.5798788497141442, 0.04112796604125028).normalize()
 
     return {
       name: "左薬指３",
@@ -1162,14 +1123,15 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
+
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
     const worldToFullParent = fullParentMatrix.invert()
@@ -1178,7 +1140,7 @@ export class Solver {
     const localPinkyPIP = Vector3.TransformCoordinates(pinkyPIP, worldToFullParent)
 
     const pinkyDirection = localPinkyPIP.subtract(localPinkyMCP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8462256262210587, -0.5275922475926769, 0.07448899117913084).normalize()
 
     return {
       name: "左小指１",
@@ -1194,15 +1156,15 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftPinky1Quat = this.boneStates["left_pinky_1"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
       .multiply(leftPinky1Quat)
 
     const fullParentMatrix = new Matrix()
@@ -1213,7 +1175,7 @@ export class Solver {
     const localPinkyDIP = Vector3.TransformCoordinates(pinkyDIP, worldToFullParent)
 
     const pinkyDirection = localPinkyDIP.subtract(localPinkyPIP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8480549942906748, -0.52448182476782, 0.07564087616402639).normalize()
 
     return {
       name: "左小指２",
@@ -1229,16 +1191,16 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const leftArmQuat = this.boneStates["left_arm"].rotation
     const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
+    const leftWristQuat = this.boneStates["left_wrist"].rotation
     const leftPinky1Quat = this.boneStates["left_pinky_1"].rotation
     const leftPinky2Quat = this.boneStates["left_pinky_2"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
       .multiply(leftPinky1Quat)
       .multiply(leftPinky2Quat)
 
@@ -1250,42 +1212,11 @@ export class Solver {
     const localPinkyTip = Vector3.TransformCoordinates(pinkyTip, worldToFullParent)
 
     const pinkyDirection = localPinkyTip.subtract(localPinkyDIP).normalize()
-    const reference = new Vector3(1, -1, 0).normalize()
+    const reference = new Vector3(0.8327493851909811, -0.5496703554614868, 0.06626433272044494).normalize()
 
     return {
       name: "左小指３",
       rotation: Quaternion.FromUnitVectorsToRef(reference, pinkyDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightThumb0(): BoneState {
-    const thumbCMC = this.getRightHandLandmark("thumb_cmc")
-    const thumbMCP = this.getRightHandLandmark("thumb_mcp")
-    if (!thumbCMC || !thumbMCP) return { name: "右親指０", rotation: Quaternion.Identity() }
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
-      .multiply(rightWristTwistQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localThumbCMC = Vector3.TransformCoordinates(thumbCMC, worldToFullParent)
-    const localThumbMCP = Vector3.TransformCoordinates(thumbMCP, worldToFullParent)
-
-    const thumbDirection = localThumbMCP.subtract(localThumbCMC).normalize()
-    const reference = new Vector3(-1, -1, -1).normalize()
-
-    return {
-      name: "右親指０",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, thumbDirection, new Quaternion()),
     }
   }
 
@@ -1298,18 +1229,14 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const rightArmQuat = this.boneStates["right_arm"].rotation
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightThumbQuat = this.boneStates["right_thumb_0"]
-      ? this.boneStates["right_thumb_0"].rotation
-      : new Quaternion()
+    const rightWristQuat = this.boneStates["right_wrist"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
-      .multiply(rightThumbQuat)
+      .multiply(rightWristQuat)
 
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
@@ -1319,7 +1246,7 @@ export class Solver {
     const localThumbIP = Vector3.TransformCoordinates(thumbIP, worldToFullParent)
 
     const thumbDirection = localThumbIP.subtract(localThumbMCP).normalize()
-    const reference = new Vector3(-1, -1, -1).normalize()
+    const reference = new Vector3(-0.6236753178947897, -0.7034896546159694, -0.34078057998826367).normalize()
 
     return {
       name: "右親指１",
@@ -1337,16 +1264,14 @@ export class Solver {
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
     const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightThumbQuat = this.boneStates["right_thumb_0"].rotation
-    const rightThumbProximalQuat = this.boneStates["right_thumb_1"].rotation
+    const rightThumb1Quat = this.boneStates["right_thumb_1"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
-      .multiply(rightThumbQuat)
-      .multiply(rightThumbProximalQuat)
+      .multiply(rightWristQuat)
+      .multiply(rightThumb1Quat)
 
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
@@ -1356,7 +1281,7 @@ export class Solver {
     const localThumbTip = Vector3.TransformCoordinates(thumbTip, worldToFullParent)
 
     const thumbDirection = localThumbTip.subtract(localThumbIP).normalize()
-    const reference = new Vector3(-1, -1, -1).normalize()
+    const reference = new Vector3(-0.6335455374186182, -0.7097313611875484, -0.30806078452770314).normalize()
 
     return {
       name: "右親指２",
@@ -1379,8 +1304,8 @@ export class Solver {
     const wristSpaceQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
 
     const wristSpaceMatrix = new Matrix()
     Matrix.FromQuaternionToRef(wristSpaceQuat, wristSpaceMatrix)
@@ -1390,7 +1315,7 @@ export class Solver {
     const localIndexPIP = Vector3.TransformCoordinates(indexPIP, worldToWristSpace)
 
     const indexDirection = localIndexPIP.subtract(localIndexMCP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8432487044803304, -0.5368678957658006, 0.026542134206687714).normalize()
 
     return {
       name: "右人指１",
@@ -1406,16 +1331,16 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const rightArmQuat = this.boneStates["right_arm"].rotation
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
+    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightIndex1Quat = this.boneStates["right_index_1"].rotation
 
     // Transform to index1 local space (including wrist twist and index1)
     const index1SpaceQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
       .multiply(rightIndex1Quat)
 
     const index1SpaceMatrix = new Matrix()
@@ -1426,7 +1351,7 @@ export class Solver {
     const localIndexDIP = Vector3.TransformCoordinates(indexDIP, worldToIndex1Space)
 
     const indexDirection = localIndexDIP.subtract(localIndexPIP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8452398089172044, -0.5337293606141105, 0.026507263911246644).normalize()
 
     return {
       name: "右人指２",
@@ -1451,8 +1376,8 @@ export class Solver {
     const index2SpaceQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
       .multiply(rightIndex1Quat)
       .multiply(rightIndex2Quat)
 
@@ -1464,7 +1389,7 @@ export class Solver {
     const localIndexTip = Vector3.TransformCoordinates(indexTip, worldToIndex2Space)
 
     const indexDirection = localIndexTip.subtract(localIndexDIP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8448756990123644, -0.5343052320730024, 0.02651362287171898).normalize()
 
     return {
       name: "右人指３",
@@ -1480,14 +1405,14 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const rightArmQuat = this.boneStates["right_arm"].rotation
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
+    const rightWristQuat = this.boneStates["right_wrist"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
 
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
@@ -1497,7 +1422,7 @@ export class Solver {
     const localMiddlePIP = Vector3.TransformCoordinates(middlePIP, worldToFullParent)
 
     const middleDirection = localMiddlePIP.subtract(localMiddleMCP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.830394244494938, -0.5566311582035673, 0.024640463198495298).normalize()
 
     return {
       name: "右中指１",
@@ -1513,15 +1438,15 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const rightArmQuat = this.boneStates["right_arm"].rotation
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
+    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightMiddle1Quat = this.boneStates["right_middle_1"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
       .multiply(rightMiddle1Quat)
 
     const fullParentMatrix = new Matrix()
@@ -1532,7 +1457,7 @@ export class Solver {
     const localMiddleDIP = Vector3.TransformCoordinates(middleDIP, worldToFullParent)
 
     const middleDirection = localMiddleDIP.subtract(localMiddlePIP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8395301057522512, -0.5427397736393517, 0.024954751962689228).normalize()
 
     return {
       name: "右中指２",
@@ -1548,16 +1473,16 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const rightArmQuat = this.boneStates["right_arm"].rotation
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
+    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightMiddle1Quat = this.boneStates["right_middle_1"].rotation
     const rightMiddle2Quat = this.boneStates["right_middle_2"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
       .multiply(rightMiddle1Quat)
       .multiply(rightMiddle2Quat)
 
@@ -1569,7 +1494,7 @@ export class Solver {
     const localMiddleTip = Vector3.TransformCoordinates(middleTip, worldToFullParent)
 
     const middleDirection = localMiddleTip.subtract(localMiddleDIP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.84308631622587, -0.5371932648835979, 0.02507707232499044).normalize()
 
     return {
       name: "右中指３",
@@ -1585,14 +1510,14 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const rightArmQuat = this.boneStates["right_arm"].rotation
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
+    const rightWristQuat = this.boneStates["right_wrist"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
 
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
@@ -1602,7 +1527,7 @@ export class Solver {
     const localRingPIP = Vector3.TransformCoordinates(ringPIP, worldToFullParent)
 
     const ringDirection = localRingPIP.subtract(localRingMCP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8076382239720394, -0.5884013252930373, 0.03878633229228).normalize()
 
     return {
       name: "右薬指１",
@@ -1618,15 +1543,15 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const rightArmQuat = this.boneStates["right_arm"].rotation
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
+    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightRing1Quat = this.boneStates["right_ring_1"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
       .multiply(rightRing1Quat)
 
     const fullParentMatrix = new Matrix()
@@ -1637,7 +1562,7 @@ export class Solver {
     const localRingDIP = Vector3.TransformCoordinates(ringDIP, worldToFullParent)
 
     const ringDirection = localRingDIP.subtract(localRingPIP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8125366462679537, -0.5814880212962473, 0.040692500053461825).normalize()
 
     return {
       name: "右薬指２",
@@ -1653,8 +1578,8 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const rightArmQuat = this.boneStates["right_arm"].rotation
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
+    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightRing1Quat = this.boneStates["right_ring_1"].rotation
     const rightRing2Quat = this.boneStates["right_ring_2"].rotation
 
@@ -1674,7 +1599,7 @@ export class Solver {
     const localRingTip = Vector3.TransformCoordinates(ringTip, worldToFullParent)
 
     const ringDirection = localRingTip.subtract(localRingDIP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8136825589798424, -0.5798522905807838, 0.04113410167043191).normalize()
 
     return {
       name: "右薬指３",
@@ -1696,8 +1621,8 @@ export class Solver {
     const fullParentQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
 
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
@@ -1707,7 +1632,7 @@ export class Solver {
     const localPinkyPIP = Vector3.TransformCoordinates(pinkyPIP, worldToFullParent)
 
     const pinkyDirection = localPinkyPIP.subtract(localPinkyMCP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8462155810704232, -0.5276077240369134, 0.07449348891167894).normalize()
 
     return {
       name: "右小指１",
@@ -1723,15 +1648,15 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const rightArmQuat = this.boneStates["right_arm"].rotation
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
+    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightPinky1Quat = this.boneStates["right_pinky_1"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
       .multiply(rightPinky1Quat)
 
     const fullParentMatrix = new Matrix()
@@ -1742,7 +1667,7 @@ export class Solver {
     const localPinkyDIP = Vector3.TransformCoordinates(pinkyDIP, worldToFullParent)
 
     const pinkyDirection = localPinkyDIP.subtract(localPinkyPIP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8480806127883251, -0.5244388349554634, 0.07565171910231294).normalize()
 
     return {
       name: "右小指２",
@@ -1758,16 +1683,16 @@ export class Solver {
     const upperBodyQuat = this.boneStates["upper_body"].rotation
     const rightArmQuat = this.boneStates["right_arm"].rotation
     const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
+    const rightWristQuat = this.boneStates["right_wrist"].rotation
     const rightPinky1Quat = this.boneStates["right_pinky_1"].rotation
     const rightPinky2Quat = this.boneStates["right_pinky_2"].rotation
 
     const fullParentQuat = upperBodyQuat
       .multiply(rightArmQuat)
       .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
       .multiply(rightWristTwistQuat)
+      .multiply(rightWristQuat)
       .multiply(rightPinky1Quat)
       .multiply(rightPinky2Quat)
 
@@ -1779,7 +1704,7 @@ export class Solver {
     const localPinkyTip = Vector3.TransformCoordinates(pinkyTip, worldToFullParent)
 
     const pinkyDirection = localPinkyTip.subtract(localPinkyDIP).normalize()
-    const reference = new Vector3(-1, -1, 0).normalize()
+    const reference = new Vector3(-0.8327717876184499, -0.5496348867012903, 0.06627700255466351).normalize()
 
     return {
       name: "右小指３",
