@@ -52,12 +52,13 @@ export default function MainScene() {
   const modelRef = useRef<MmdWasmModel>(null)
   const bonesRef = useRef<{ [key: string]: IMmdRuntimeLinkedBone }>({})
   const [modelLoaded, setModelLoaded] = useState(false)
+  const [lerp, setLerp] = useState(0.7)
 
   const rotateBone = useCallback((name: string, quaternion: Quaternion) => {
     const bone = bonesRef.current[name]
     if (!bone) return
-    bone.setRotationQuaternion(quaternion, Space.LOCAL)
-  }, [])
+    bone.setRotationQuaternion(Quaternion.Slerp(bone.rotationQuaternion, quaternion, lerp), Space.LOCAL)
+  }, [lerp])
 
   const loadModel = useCallback(async (): Promise<void> => {
     if (!sceneRef.current || !mmdWasmInstanceRef.current || !mmdRuntimeRef.current) return
@@ -89,6 +90,24 @@ export default function MainScene() {
           bonesRef.current[bone.name] = bone
         }
       }
+
+      // setTimeout(() => {
+      //   modelRef.current!.runtimeBones.forEach((bone) => {
+      //     if (KeyBones.includes(bone.name)) {
+      //       const worldMatrix = bone.worldMatrix
+      //       const position = new Vector3(worldMatrix[12], worldMatrix[13], worldMatrix[14])
+
+      //       const childBones = bone.childBones
+      //       if (childBones.length > 0) {
+      //         const childBone = childBones[0]
+      //         const childWorldMatrix = childBone.worldMatrix
+      //         const childPosition = new Vector3(childWorldMatrix[12], childWorldMatrix[13], childWorldMatrix[14])
+      //         const direction = childPosition.subtract(position).normalize()
+      //         console.log(bone.name, childBone.name, `(${direction.x}, ${direction.y}, ${direction.z})`)
+      //       }
+      //     }
+      //   })
+      // }, 1000)
 
       result.addAllToScene()
       setModelLoaded(true)
@@ -201,7 +220,7 @@ export default function MainScene() {
           <Image src="/github-mark.svg" alt="GitHub" width={18} height={18} />
         </Link>
       </Button>
-      <MotionCapture applyPose={applyPose} modelLoaded={modelLoaded} />
+      <MotionCapture applyPose={applyPose} modelLoaded={modelLoaded} setLerp={setLerp} />
       <canvas ref={canvasRef} className="w-full h-full z-1 outline-none" />
     </div>
   )
