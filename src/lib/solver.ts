@@ -671,7 +671,7 @@ export class Solver {
 
   private solveLeftWrist(): BoneState {
     // Full parent chain: upper_body * left_arm * left_elbows
-    const worldLeftWrist = this.getPoseLandmark("left_wrist")
+    const worldLeftWrist = this.getLeftHandLandmark("wrist")
     const worldLeftMiddleMcp = this.getLeftHandLandmark("middle_mcp")
 
     if (!worldLeftWrist || !worldLeftMiddleMcp) return { name: "左手首", rotation: Quaternion.Identity() }
@@ -690,7 +690,7 @@ export class Solver {
     const localLeftMiddleMcp = Vector3.TransformCoordinates(worldLeftMiddleMcp, worldToFullParent)
 
     const wristDirection = localLeftMiddleMcp.subtract(localLeftWrist).normalize()
-    const reference = new Vector3(0.8, -0.6, 0).normalize()
+    const reference = new Vector3(0.72573996, -0.40247154, -0.01692206).normalize()
 
     return {
       name: "左手首",
@@ -699,8 +699,8 @@ export class Solver {
   }
 
   private solveRightWrist(): BoneState {
-    const worldRightWrist = this.getPoseLandmark("right_wrist")
-    const worldRightMiddleMcp = this.getRightHandLandmark("middle_mcp")
+    const worldRightWrist = this.getRightHandLandmark("wrist")
+    const worldRightMiddleMcp = this.getRightHandLandmark("index_mcp")
 
     if (!worldRightWrist || !worldRightMiddleMcp) return { name: "右手首", rotation: Quaternion.Identity() }
 
@@ -719,7 +719,7 @@ export class Solver {
     const localRightMiddleMcp = Vector3.TransformCoordinates(worldRightMiddleMcp, worldToFullParent)
 
     const wristDirection = localRightMiddleMcp.subtract(localRightWrist).normalize()
-    const reference = new Vector3(-0.8, -0.6, 0).normalize()
+    const reference = new Vector3(-0.72573996, -0.40247154, 0.01692206).normalize()
 
     return {
       name: "右手首",
