@@ -10,6 +10,7 @@ import {
   Color3,
   Color4,
   CreateDisc,
+  CreateScreenshotAsync,
   DirectionalLight,
   Engine,
   HemisphericLight,
@@ -40,11 +41,15 @@ import { IMmdRuntimeLinkedBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeLinked
 
 import { MotionCapture } from "./motion-capture"
 import { BoneState, KeyBones } from "@/lib/solver"
+import ModelsPanel from "./models-panel"
+import { Aperture, User } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
 
 export default function MainScene() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const engineRef = useRef<Engine>(null)
   const sceneRef = useRef<Scene>(null)
+  const cameraRef = useRef<ArcRotateCamera>(null)
   const shadowGeneratorRef = useRef<ShadowGenerator>(null)
   const mmdWasmInstanceRef = useRef<IMmdWasmInstance>(null)
   const mmdRuntimeRef = useRef<MmdWasmRuntime>(null)
@@ -54,6 +59,11 @@ export default function MainScene() {
   const [modelLoaded, setModelLoaded] = useState(false)
   const [lerp, setLerp] = useState(0.7)
 
+  const [openModelsPanel, setOpenModelsPanel] = useState(false)
+  const modelNameRef = useRef(localStorage.getItem("selectedModel") || "深空之眼-梵天")
+
+
+
   const rotateBone = useCallback((name: string, quaternion: Quaternion) => {
     const bone = bonesRef.current[name]
     if (!bone) return
@@ -61,13 +71,13 @@ export default function MainScene() {
   }, [lerp])
 
   const loadModel = useCallback(async (): Promise<void> => {
-    if (!sceneRef.current || !mmdWasmInstanceRef.current || !mmdRuntimeRef.current) return
+    if (!sceneRef.current || !mmdWasmInstanceRef.current || !mmdRuntimeRef.current || !shadowGeneratorRef.current) return
     if (modelRef.current) {
       mmdRuntimeRef.current.destroyMmdModel(modelRef.current)
       modelRef.current.mesh.dispose()
     }
 
-    LoadAssetContainerAsync(`/models/深空之眼-塞勒涅.bpmx`, sceneRef.current!, {
+    LoadAssetContainerAsync(`/models/${modelNameRef.current}.bpmx`, sceneRef.current!, {
       pluginOptions: {
         mmdmodel: {
           materialBuilder: mmdMaterialBuilderRef.current || undefined,
@@ -114,6 +124,16 @@ export default function MainScene() {
     })
   }, [])
 
+  const selectModel = useCallback(
+    (model: string) => {
+      modelNameRef.current = model
+      localStorage.setItem("selectedModel", model)
+      loadModel()
+    },
+    [loadModel]
+  )
+
+
   useEffect(() => {
     const resize = () => {
       if (sceneRef.current) {
@@ -133,6 +153,7 @@ export default function MainScene() {
 
       scene.clearColor = new Color4(0.99, 0.44, 0.66, 1.0)
       scene.ambientColor = new Color3(0.5, 0.5, 0.5)
+
       engineRef.current = engine
       sceneRef.current = scene
 
@@ -141,18 +162,34 @@ export default function MainScene() {
       camera.attachControl(canvasRef.current, false)
       camera.inertia = 0.8
       camera.speed = 10
+      cameraRef.current = camera
 
       scene.activeCameras = [camera]
 
-      const hemisphericLight = new HemisphericLight("hemisphericLight", new Vector3(0, 1, 0), scene)
-      hemisphericLight.intensity = 0.5
-      hemisphericLight.specular = new Color3(0, 0, 0)
-      hemisphericLight.groundColor = new Color3(1, 1, 1)
+      const hemisphericLight = new HemisphericLight("hemisphericLight", new Vector3(0, 1, 0), scene);
+      hemisphericLight.intensity = 0.5;
+      hemisphericLight.specular = new Color3(0, 0, 0);
+      hemisphericLight.groundColor = new Color3(1, 1, 1);
 
-      const directionalLight = new DirectionalLight("directionalLight", new Vector3(2, -30, 4), scene)
-      directionalLight.intensity = 0.7
+      const directionalLight = new DirectionalLight("directionalLight", new Vector3(0.5, -1, 1), scene);
+      directionalLight.intensity = 0.5;
+      directionalLight.autoCalcShadowZBounds = false;
+      directionalLight.autoUpdateExtends = false;
+      directionalLight.shadowMaxZ = 20 * 3;
+      directionalLight.shadowMinZ = -30;
+      directionalLight.orthoTop = 18 * 3;
+      directionalLight.orthoBottom = -1 * 3;
+      directionalLight.orthoLeft = -10 * 3;
+      directionalLight.orthoRight = 10 * 3;
+      directionalLight.shadowOrthoScale = 0;
 
-      const shadowGenerator = new ShadowGenerator(2048, directionalLight)
+      const shadowGenerator = new ShadowGenerator(2048, directionalLight, true, camera);
+      shadowGenerator.transparencyShadow = true;
+      shadowGenerator.usePercentageCloserFiltering = true;
+      shadowGenerator.forceBackFacesOnly = false;
+      shadowGenerator.bias = 0.01;
+      shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
+      shadowGenerator.frustumEdgeFalloff = 0.1;
       shadowGeneratorRef.current = shadowGenerator
 
       mmdWasmInstanceRef.current = await GetMmdWasmInstance(new MmdWasmInstanceTypeMPR())
@@ -209,6 +246,19 @@ export default function MainScene() {
     [rotateBone]
   )
 
+
+  const takeScreenshot = useCallback(() => {
+    if (!canvasRef.current || !engineRef.current || !cameraRef.current) return
+    CreateScreenshotAsync(engineRef.current!, cameraRef.current!, { precision: 1 }).then((b64) => {
+      const link = document.createElement("a")
+      link.href = b64
+      link.download = "mikapo_screenshot.png"
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    })
+  }, [canvasRef])
+
   return (
     <div className="w-full h-full">
       <Button
@@ -220,6 +270,45 @@ export default function MainScene() {
           <Image src="/github-mark.svg" alt="GitHub" width={18} height={18} />
         </Link>
       </Button>
+      <div className="absolute flex justify-end top-[50%] -translate-y-1/2 right-0 mx-auto flex px-4 z-20">
+        <div className="flex flex-col items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                className="bg-white text-black size-7 rounded-full hover:bg-pink-100 cursor-pointer"
+                onClick={() => setOpenModelsPanel(true)}
+              >
+                <User />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              <p>Switch Models</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                className="bg-white text-black size-7 rounded-full hover:bg-pink-100 cursor-pointer"
+                onClick={() => takeScreenshot()}
+              >
+                <Aperture />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              <p>Take Screenshot</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+      <ModelsPanel
+        open={openModelsPanel}
+        setOpen={setOpenModelsPanel}
+        selectedModel={modelNameRef.current}
+        selectModel={selectModel}
+      />
       <MotionCapture applyPose={applyPose} modelLoaded={modelLoaded} setLerp={setLerp} />
       <canvas ref={canvasRef} className="w-full h-full z-1 outline-none" />
     </div>
