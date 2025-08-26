@@ -761,38 +761,7 @@ export class Solver {
   }
 
   private solveLeftThumb2(): BoneState {
-    const thumbIP = this.getLeftHandLandmark("thumb_ip")
-    const thumbTip = this.getLeftHandLandmark("thumb_tip")
-    if (!thumbIP || !thumbTip) return { name: "左親指２", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-    const leftThumb1Quat = this.boneStates["left_thumb_1"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-      .multiply(leftThumb1Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localThumbIP = Vector3.TransformCoordinates(thumbIP, worldToFullParent)
-    const localThumbTip = Vector3.TransformCoordinates(thumbTip, worldToFullParent)
-
-    const thumbDirection = localThumbTip.subtract(localThumbIP).normalize()
-    const reference = new Vector3(0.6335557251313008, -0.7097178001569598, -0.308071075068266).normalize()
-
-    return {
-      name: "左親指２",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, thumbDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("left_thumb_1", "左親指２", new Vector3(-1.0, -1.0, 0.0).normalize(), 0.85)
   }
 
   private solveLeftIndex1(): BoneState {
@@ -831,77 +800,11 @@ export class Solver {
   }
 
   private solveLeftIndex2(): BoneState {
-    const indexPIP = this.getLeftHandLandmark("index_pip")
-    const indexDIP = this.getLeftHandLandmark("index_dip")
-    if (!indexPIP || !indexDIP) return { name: "左人指２", rotation: Quaternion.Identity() }
-
-    // Get full parent chain including index base
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-    const leftIndex1Quat = this.boneStates["left_index_1"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-      .multiply(leftIndex1Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localIndexPIP = Vector3.TransformCoordinates(indexPIP, worldToFullParent)
-    const localIndexDIP = Vector3.TransformCoordinates(indexDIP, worldToFullParent)
-
-    const indexDirection = localIndexDIP.subtract(localIndexPIP).normalize()
-    const reference = new Vector3(0.8452406149438719, -0.5337284035571757, 0.026500831790980922).normalize()
-
-    return {
-      name: "左人指２",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, indexDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("left_index_1", "左人指２", new Vector3(-0.031, 0.0, -0.993).normalize(), 0.9)
   }
 
   private solveLeftIndex3(): BoneState {
-    const indexDIP = this.getLeftHandLandmark("index_dip")
-    const indexTip = this.getLeftHandLandmark("index_tip")
-    if (!indexDIP || !indexTip) return { name: "左人指３", rotation: Quaternion.Identity() }
-
-    // Get full parent chain including previous index joints
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-    const leftIndex1Quat = this.boneStates["left_index_1"].rotation
-    const leftIndex2Quat = this.boneStates["left_index_2"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-      .multiply(leftIndex1Quat)
-      .multiply(leftIndex2Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localIndexDIP = Vector3.TransformCoordinates(indexDIP, worldToFullParent)
-    const localIndexTip = Vector3.TransformCoordinates(indexTip, worldToFullParent)
-
-    const indexDirection = localIndexTip.subtract(localIndexDIP).normalize()
-    const reference = new Vector3(0.8448758179361382, -0.534305307281219, 0.026508317145067652).normalize()
-
-    return {
-      name: "左人指３",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, indexDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("left_index_1", "左人指３", new Vector3(-0.031, 0.0, -0.993).normalize(), 0.65)
   }
 
   // Left Middle Finger
@@ -939,74 +842,11 @@ export class Solver {
   }
 
   private solveLeftMiddle2(): BoneState {
-    const middlePIP = this.getLeftHandLandmark("middle_pip")
-    const middleDIP = this.getLeftHandLandmark("middle_dip")
-    if (!middlePIP || !middleDIP) return { name: "左中指２", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftMiddle1Quat = this.boneStates["left_middle_1"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-      .multiply(leftMiddle1Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localMiddlePIP = Vector3.TransformCoordinates(middlePIP, worldToFullParent)
-    const localMiddleDIP = Vector3.TransformCoordinates(middleDIP, worldToFullParent)
-
-    const middleDirection = localMiddleDIP.subtract(localMiddlePIP).normalize()
-    const reference = new Vector3(0.839527879195794, -0.542743454616619, 0.02494959967274926).normalize()
-
-    return {
-      name: "左中指２",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, middleDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("left_middle_1", "左中指２", new Vector3(0.03, 0.0, -0.996).normalize(), 0.9)
   }
 
   private solveLeftMiddle3(): BoneState {
-    const middleDIP = this.getLeftHandLandmark("middle_dip")
-    const middleTip = this.getLeftHandLandmark("middle_tip")
-    if (!middleDIP || !middleTip) return { name: "左中指３", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-    const leftMiddle1Quat = this.boneStates["left_middle_1"].rotation
-    const leftMiddle2Quat = this.boneStates["left_middle_2"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-      .multiply(leftMiddle1Quat)
-      .multiply(leftMiddle2Quat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localMiddleDIP = Vector3.TransformCoordinates(middleDIP, worldToFullParent)
-    const localMiddleTip = Vector3.TransformCoordinates(middleTip, worldToFullParent)
-
-    const middleDirection = localMiddleTip.subtract(localMiddleDIP).normalize()
-    const reference = new Vector3(0.8431055325028831, -0.5371633481358361, 0.025071866355111806).normalize()
-
-    return {
-      name: "左中指３",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, middleDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("left_middle_1", "左中指３", new Vector3(0.03, 0.0, -0.996).normalize(), 0.65)
   }
 
   // Left Ring Finger
@@ -1043,75 +883,11 @@ export class Solver {
   }
 
   private solveLeftRing2(): BoneState {
-    const ringPIP = this.getLeftHandLandmark("ring_pip")
-    const ringDIP = this.getLeftHandLandmark("ring_dip")
-    if (!ringPIP || !ringDIP) return { name: "左薬指２", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-    const leftRing1Quat = this.boneStates["left_ring_1"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-      .multiply(leftRing1Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRingPIP = Vector3.TransformCoordinates(ringPIP, worldToFullParent)
-    const localRingDIP = Vector3.TransformCoordinates(ringDIP, worldToFullParent)
-
-    const ringDirection = localRingDIP.subtract(localRingPIP).normalize()
-    const reference = new Vector3(0.8125380906332118, -0.5814864755919819, 0.040685746567439465).normalize()
-
-    return {
-      name: "左薬指２",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, ringDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("left_ring_1", "左薬指２", new Vector3(0.048, 0.0, 0.997).normalize(), 0.88)
   }
 
   private solveLeftRing3(): BoneState {
-    const ringDIP = this.getLeftHandLandmark("ring_dip")
-    const ringTip = this.getLeftHandLandmark("ring_tip")
-    if (!ringDIP || !ringTip) return { name: "左薬指３", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-    const leftRing1Quat = this.boneStates["left_ring_1"].rotation
-    const leftRing2Quat = this.boneStates["left_ring_2"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-      .multiply(leftRing1Quat)
-      .multiply(leftRing2Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRingDIP = Vector3.TransformCoordinates(ringDIP, worldToFullParent)
-    const localRingTip = Vector3.TransformCoordinates(ringTip, worldToFullParent)
-
-    const ringDirection = localRingTip.subtract(localRingDIP).normalize()
-    const reference = new Vector3(0.8136639417250288, -0.5798788497141442, 0.04112796604125028).normalize()
-
-    return {
-      name: "左薬指３",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, ringDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("left_ring_1", "左薬指３", new Vector3(0.048, 0.0, 0.997).normalize(), 0.6)
   }
 
   // Left Pinky Finger
@@ -1149,75 +925,11 @@ export class Solver {
   }
 
   private solveLeftPinky2(): BoneState {
-    const pinkyPIP = this.getLeftHandLandmark("pinky_pip")
-    const pinkyDIP = this.getLeftHandLandmark("pinky_dip")
-    if (!pinkyPIP || !pinkyDIP) return { name: "左小指２", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-    const leftPinky1Quat = this.boneStates["left_pinky_1"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-      .multiply(leftPinky1Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localPinkyPIP = Vector3.TransformCoordinates(pinkyPIP, worldToFullParent)
-    const localPinkyDIP = Vector3.TransformCoordinates(pinkyDIP, worldToFullParent)
-
-    const pinkyDirection = localPinkyDIP.subtract(localPinkyPIP).normalize()
-    const reference = new Vector3(0.8480549942906748, -0.52448182476782, 0.07564087616402639).normalize()
-
-    return {
-      name: "左小指２",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, pinkyDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("left_pinky_1", "左小指２", new Vector3(0.088, 0.0, -0.997).normalize(), 0.85)
   }
 
   private solveLeftPinky3(): BoneState {
-    const pinkyDIP = this.getLeftHandLandmark("pinky_dip")
-    const pinkyTip = this.getLeftHandLandmark("pinky_tip")
-    if (!pinkyDIP || !pinkyTip) return { name: "左小指３", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-    const leftPinky1Quat = this.boneStates["left_pinky_1"].rotation
-    const leftPinky2Quat = this.boneStates["left_pinky_2"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-      .multiply(leftPinky1Quat)
-      .multiply(leftPinky2Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localPinkyDIP = Vector3.TransformCoordinates(pinkyDIP, worldToFullParent)
-    const localPinkyTip = Vector3.TransformCoordinates(pinkyTip, worldToFullParent)
-
-    const pinkyDirection = localPinkyTip.subtract(localPinkyDIP).normalize()
-    const reference = new Vector3(0.8327493851909811, -0.5496703554614868, 0.06626433272044494).normalize()
-
-    return {
-      name: "左小指３",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, pinkyDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("left_pinky_1", "左小指３", new Vector3(0.088, 0.0, -0.997).normalize(), 0.55)
   }
 
   private solveRightThumb1(): BoneState {
@@ -1255,38 +967,7 @@ export class Solver {
   }
 
   private solveRightThumb2(): BoneState {
-    const thumbIP = this.getRightHandLandmark("thumb_ip")
-    const thumbTip = this.getRightHandLandmark("thumb_tip")
-    if (!thumbIP || !thumbTip) return { name: "右親指２", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightThumb1Quat = this.boneStates["right_thumb_1"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-      .multiply(rightThumb1Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localThumbIP = Vector3.TransformCoordinates(thumbIP, worldToFullParent)
-    const localThumbTip = Vector3.TransformCoordinates(thumbTip, worldToFullParent)
-
-    const thumbDirection = localThumbTip.subtract(localThumbIP).normalize()
-    const reference = new Vector3(-0.6335455374186182, -0.7097313611875484, -0.30806078452770314).normalize()
-
-    return {
-      name: "右親指２",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, thumbDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("right_thumb_1", "右親指２", new Vector3(-1.0, 1.0, 0.0).normalize(), 0.85)
   }
 
   private solveRightIndex1(): BoneState {
@@ -1324,77 +1005,11 @@ export class Solver {
   }
 
   private solveRightIndex2(): BoneState {
-    const indexPIP = this.getRightHandLandmark("index_pip")
-    const indexDIP = this.getRightHandLandmark("index_dip")
-    if (!indexPIP || !indexDIP) return { name: "右人指２", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightIndex1Quat = this.boneStates["right_index_1"].rotation
-
-    // Transform to index1 local space (including wrist twist and index1)
-    const index1SpaceQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-      .multiply(rightIndex1Quat)
-
-    const index1SpaceMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(index1SpaceQuat, index1SpaceMatrix)
-    const worldToIndex1Space = index1SpaceMatrix.invert()
-
-    const localIndexPIP = Vector3.TransformCoordinates(indexPIP, worldToIndex1Space)
-    const localIndexDIP = Vector3.TransformCoordinates(indexDIP, worldToIndex1Space)
-
-    const indexDirection = localIndexDIP.subtract(localIndexPIP).normalize()
-    const reference = new Vector3(-0.8452398089172044, -0.5337293606141105, 0.026507263911246644).normalize()
-
-    return {
-      name: "右人指２",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, indexDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("right_index_1", "右人指２", new Vector3(-0.031, 0.0, 0.993).normalize(), 0.9)
   }
 
   private solveRightIndex3(): BoneState {
-    const indexDIP = this.getRightHandLandmark("index_dip")
-    const indexTip = this.getRightHandLandmark("index_tip")
-    if (!indexDIP || !indexTip) return { name: "右人指３", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightIndex1Quat = this.boneStates["right_index_1"].rotation
-    const rightIndex2Quat = this.boneStates["right_index_2"].rotation
-
-    // Transform to index2 local space (including wrist twist and previous finger bones)
-    const index2SpaceQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-      .multiply(rightIndex1Quat)
-      .multiply(rightIndex2Quat)
-
-    const index2SpaceMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(index2SpaceQuat, index2SpaceMatrix)
-    const worldToIndex2Space = index2SpaceMatrix.invert()
-
-    const localIndexDIP = Vector3.TransformCoordinates(indexDIP, worldToIndex2Space)
-    const localIndexTip = Vector3.TransformCoordinates(indexTip, worldToIndex2Space)
-
-    const indexDirection = localIndexTip.subtract(localIndexDIP).normalize()
-    const reference = new Vector3(-0.8448756990123644, -0.5343052320730024, 0.02651362287171898).normalize()
-
-    return {
-      name: "右人指３",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, indexDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("right_index_1", "右人指３", new Vector3(-0.031, 0.0, 0.993).normalize(), 0.65)
   }
 
   private solveRightMiddle1(): BoneState {
@@ -1431,75 +1046,11 @@ export class Solver {
   }
 
   private solveRightMiddle2(): BoneState {
-    const middlePIP = this.getRightHandLandmark("middle_pip")
-    const middleDIP = this.getRightHandLandmark("middle_dip")
-    if (!middlePIP || !middleDIP) return { name: "右中指２", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightMiddle1Quat = this.boneStates["right_middle_1"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-      .multiply(rightMiddle1Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localMiddlePIP = Vector3.TransformCoordinates(middlePIP, worldToFullParent)
-    const localMiddleDIP = Vector3.TransformCoordinates(middleDIP, worldToFullParent)
-
-    const middleDirection = localMiddleDIP.subtract(localMiddlePIP).normalize()
-    const reference = new Vector3(-0.8395301057522512, -0.5427397736393517, 0.024954751962689228).normalize()
-
-    return {
-      name: "右中指２",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, middleDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("right_middle_1", "右中指２", new Vector3(0.03, 0.0, 0.996).normalize(), 0.9)
   }
 
   private solveRightMiddle3(): BoneState {
-    const middleDIP = this.getRightHandLandmark("middle_dip")
-    const middleTip = this.getRightHandLandmark("middle_tip")
-    if (!middleDIP || !middleTip) return { name: "右中指３", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightMiddle1Quat = this.boneStates["right_middle_1"].rotation
-    const rightMiddle2Quat = this.boneStates["right_middle_2"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-      .multiply(rightMiddle1Quat)
-      .multiply(rightMiddle2Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localMiddleDIP = Vector3.TransformCoordinates(middleDIP, worldToFullParent)
-    const localMiddleTip = Vector3.TransformCoordinates(middleTip, worldToFullParent)
-
-    const middleDirection = localMiddleTip.subtract(localMiddleDIP).normalize()
-    const reference = new Vector3(-0.84308631622587, -0.5371932648835979, 0.02507707232499044).normalize()
-
-    return {
-      name: "右中指３",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, middleDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("right_middle_1", "右中指３", new Vector3(0.03, 0.0, 0.996).normalize(), 0.65)
   }
 
   private solveRightRing1(): BoneState {
@@ -1536,75 +1087,11 @@ export class Solver {
   }
 
   private solveRightRing2(): BoneState {
-    const ringPIP = this.getRightHandLandmark("ring_pip")
-    const ringDIP = this.getRightHandLandmark("ring_dip")
-    if (!ringPIP || !ringDIP) return { name: "右薬指２", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightRing1Quat = this.boneStates["right_ring_1"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-      .multiply(rightRing1Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRingPIP = Vector3.TransformCoordinates(ringPIP, worldToFullParent)
-    const localRingDIP = Vector3.TransformCoordinates(ringDIP, worldToFullParent)
-
-    const ringDirection = localRingDIP.subtract(localRingPIP).normalize()
-    const reference = new Vector3(-0.8125366462679537, -0.5814880212962473, 0.040692500053461825).normalize()
-
-    return {
-      name: "右薬指２",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, ringDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("right_ring_1", "右薬指２", new Vector3(0.048, 0.0, 0.997).normalize(), 0.88)
   }
 
   private solveRightRing3(): BoneState {
-    const ringDIP = this.getRightHandLandmark("ring_dip")
-    const ringTip = this.getRightHandLandmark("ring_tip")
-    if (!ringDIP || !ringTip) return { name: "右薬指３", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightRing1Quat = this.boneStates["right_ring_1"].rotation
-    const rightRing2Quat = this.boneStates["right_ring_2"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightRing1Quat)
-      .multiply(rightRing2Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRingDIP = Vector3.TransformCoordinates(ringDIP, worldToFullParent)
-    const localRingTip = Vector3.TransformCoordinates(ringTip, worldToFullParent)
-
-    const ringDirection = localRingTip.subtract(localRingDIP).normalize()
-    const reference = new Vector3(-0.8136825589798424, -0.5798522905807838, 0.04113410167043191).normalize()
-
-    return {
-      name: "右薬指３",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, ringDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("right_ring_1", "右薬指３", new Vector3(0.048, 0.0, 0.997).normalize(), 0.6)
   }
 
   private solveRightPinky1(): BoneState {
@@ -1641,74 +1128,43 @@ export class Solver {
   }
 
   private solveRightPinky2(): BoneState {
-    const pinkyPIP = this.getRightHandLandmark("pinky_pip")
-    const pinkyDIP = this.getRightHandLandmark("pinky_dip")
-    if (!pinkyPIP || !pinkyDIP) return { name: "右小指２", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightPinky1Quat = this.boneStates["right_pinky_1"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-      .multiply(rightPinky1Quat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localPinkyPIP = Vector3.TransformCoordinates(pinkyPIP, worldToFullParent)
-    const localPinkyDIP = Vector3.TransformCoordinates(pinkyDIP, worldToFullParent)
-
-    const pinkyDirection = localPinkyDIP.subtract(localPinkyPIP).normalize()
-    const reference = new Vector3(-0.8480806127883251, -0.5244388349554634, 0.07565171910231294).normalize()
-
-    return {
-      name: "右小指２",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, pinkyDirection, new Quaternion()),
-    }
+    return this.solveFingerJoint("right_pinky_1", "右小指２", new Vector3(0.088, 0.0, 0.997).normalize(), 0.85)
   }
 
   private solveRightPinky3(): BoneState {
-    const pinkyDIP = this.getRightHandLandmark("pinky_dip")
-    const pinkyTip = this.getRightHandLandmark("pinky_tip")
-    if (!pinkyDIP || !pinkyTip) return { name: "右小指３", rotation: Quaternion.Identity() }
+    return this.solveFingerJoint("right_pinky_1", "右小指３", new Vector3(0.088, 0.0, 0.997).normalize(), 0.55)
+  }
 
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightPinky1Quat = this.boneStates["right_pinky_1"].rotation
-    const rightPinky2Quat = this.boneStates["right_pinky_2"].rotation
+  private solveFingerJoint(baseJointName: string, jointName: string, bendAxis: Vector3, ratio: number): BoneState {
+    // Extract bend degrees from base joint quaternion
+    const baseRotation = this.boneStates[baseJointName].rotation
+    const bendDegrees = this.extractBendDegrees(baseRotation, bendAxis)
 
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-      .multiply(rightPinky1Quat)
-      .multiply(rightPinky2Quat)
+    // Apply ratio to get degrees for this joint
+    const adjustedDegrees = bendDegrees * ratio
 
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
+    // Create quaternion directly from degrees (following MPL approach)
+    const radians = (adjustedDegrees * Math.PI) / 180
+    const halfAngle = radians / 2
+    const sin = Math.sin(halfAngle)
+    const cos = Math.cos(halfAngle)
 
-    const localPinkyDIP = Vector3.TransformCoordinates(pinkyDIP, worldToFullParent)
-    const localPinkyTip = Vector3.TransformCoordinates(pinkyTip, worldToFullParent)
-
-    const pinkyDirection = localPinkyTip.subtract(localPinkyDIP).normalize()
-    const reference = new Vector3(-0.8327717876184499, -0.5496348867012903, 0.06627700255466351).normalize()
+    const rotation = new Quaternion(bendAxis.x * sin, bendAxis.y * sin, bendAxis.z * sin, cos)
 
     return {
-      name: "右小指３",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, pinkyDirection, new Quaternion()),
+      name: jointName,
+      rotation: rotation,
     }
+  }
+
+  private extractBendDegrees(quat: Quaternion, bendAxis: Vector3): number {
+    // Extract the total rotation angle from quaternion in degrees
+    const totalAngle = 2 * Math.acos(Math.abs(quat.w)) * (180 / Math.PI)
+
+    // Determine the sign based on the bend axis component
+    const axisComponent = quat.x * bendAxis.x + quat.y * bendAxis.y + quat.z * bendAxis.z
+    const sign = axisComponent < 0 ? -1 : 1
+
+    return totalAngle * sign
   }
 }
