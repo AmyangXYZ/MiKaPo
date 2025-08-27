@@ -1,5 +1,6 @@
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core"
 import { HolisticLandmarkerResult, Landmark } from "@mediapipe/tasks-vision"
+import Encoding from "encoding-japanese"
 
 export interface BoneState {
   name: string
@@ -198,6 +199,11 @@ export class Solver {
     this.boneStates["right_pinky_3"] = this.solveRightPinky3()
 
     return Object.values(this.boneStates)
+  }
+
+  exportToVpdBlob(modelName: string = "MotionCapture"): Blob {
+    const poseData = Object.values(this.boneStates)
+    return VpdWriter.ConvertToVpdBlob(poseData, modelName)
   }
 
   private getPoseLandmark(name: string): Vector3 | null {
@@ -1166,5 +1172,43 @@ export class Solver {
     const sign = axisComponent < 0 ? -1 : 1
 
     return totalAngle * sign
+  }
+}
+
+class VpdWriter {
+  private static readonly _Signature = "Vocaloid Pose Data file"
+
+  private static encodeShiftJIS(str: string): Uint8Array {
+    const unicodeArray = Encoding.stringToCode(str)
+    const sjisArray = Encoding.convert(unicodeArray, {
+      to: "SJIS",
+      from: "UNICODE",
+    })
+    return new Uint8Array(sjisArray)
+  }
+
+  public static ConvertToVpdBlob(poseData: BoneState[], modelName: string = "Model"): Blob {
+    const lines: string[] = []
+
+    lines.push(this._Signature)
+    lines.push("")
+    lines.push(`${modelName};\t\t// モデルファイル名`)
+    lines.push(`${poseData.length};\t\t\t// ボーンフレーム数`)
+    lines.push("")
+
+    poseData.forEach((boneState, index) => {
+      lines.push(`Bone${index}{${boneState.name}`)
+      lines.push(`  0.000000,0.000000,0.000000;\t\t\t\t// trans x,y,z`)
+      lines.push(
+        `  ${boneState.rotation.x},${boneState.rotation.y},${boneState.rotation.z},${boneState.rotation.w};\t\t// Quaternion x,y,z,w`
+      )
+      lines.push(`}`)
+      lines.push("")
+    })
+
+    const content = lines.join("\n")
+    const sjisBytes = this.encodeShiftJIS(content)
+
+    return new Blob([sjisBytes], { type: "text/plain; charset=shift_jis" })
   }
 }
