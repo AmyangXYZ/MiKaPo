@@ -9,7 +9,7 @@ A web-based tool that enables real-time motion capture for MikuMikuDance (MMD) m
 **MiKaPo 2.0** introduces a completely rewritten solver with hierarchical bone transformations, migrating from Vite to Next.js for improved performance and maintainability. The renderer backend is also evolved from [babylon.js](https://www.babylonjs.com/) and [babylon-mmd](https://github.com/noname0310/babylon-mmd) to my dedicate WebGPU MMD render [RezeEngine](https://github.com/AmyangXYZ/reze-engine).
 
 ![](./screenshots/1.png)
-![](./screenshots/2.png)
+![](./screenshots/3.webp)
 
 Demo model: 深空之眼 - 裁暗之锋·塞尔凯特
 
