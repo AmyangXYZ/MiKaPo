@@ -4,18 +4,15 @@ import Image from "next/image"
 import { BoneState, Solver } from "@/lib/solver"
 import { Button } from "@/components/ui/button"
 import { Camera, Image as ImageIcon, Video, Webcam, Pause } from "lucide-react"
-import DebugScene from "./debug-scene"
 
 type InputMode = "image" | "video" | "camera" | null
 
 export const MotionCapture = ({
   applyPose,
   modelLoaded,
-  setLerp,
 }: {
   applyPose: (boneStates: BoneState[]) => void
   modelLoaded: boolean
-  setLerp: (lerp: number) => void
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
@@ -102,7 +99,6 @@ export const MotionCapture = ({
     if (file && file.type.includes("image")) {
       const url = URL.createObjectURL(file)
       holisticLandmarkerRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
-        setLerp(1)
         setCurrentImage(url)
         setVideoSrc("")
         setInputMode("image")
@@ -118,7 +114,6 @@ export const MotionCapture = ({
       const url = URL.createObjectURL(file)
       if (lastMedia === "IMAGE") {
         holisticLandmarkerRef.current?.setOptions({ runningMode: "VIDEO" }).then(() => {
-          setLerp(0.7)
           setVideoSrc(url)
           setCurrentImage("")
           setInputMode("video")
@@ -262,8 +257,6 @@ export const MotionCapture = ({
             </div>
           )}
         </div>
-
-        <DebugScene landmarks={landmarks} />
       </div>
     </div>
   )

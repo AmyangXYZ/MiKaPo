@@ -15,37 +15,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "MiKaPo - MMD Motion Capture",
-  description:
-    "Transform video input into real-time MMD model poses using MediaPipe 3D landmarks and hierarchical bone transformations. Web-based motion capture for MikuMikuDance with face, hand, and body tracking.",
-  keywords: [
-    "MMD",
-    "MikuMikuDance",
-    "motion capture",
-    "real-time",
-    "MediaPipe",
-    "3D landmarks",
-    "pose estimation",
-    "bone rotations",
-    "quaternions",
-    "Babylon.js",
-    "web-based",
-    "computer vision",
-    "animation",
-    "character posing",
-  ],
-  authors: [{ name: "MiKaPo Team" }],
-  openGraph: {
-    title: "MiKaPo - Real-time MMD Motion Capture",
-    description:
-      "Transform video input into real-time MMD model poses using advanced 3D landmark detection and hierarchical bone transformations.",
-    type: "website",
-    url: "https://mikapo.vercel.app",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "MiKaPo - Real-time MMD Motion Capture",
-    description: "Web-based motion capture for MMD models using MediaPipe and hierarchical bone transformations.",
-  },
+  description: "Real-time motion capture for MMD models.",
+  keywords: ["MMD", "MikuMikuDance", "motion capture", "mediapipe", "landmarks", "pose estimation"],
 }
 
 export default function RootLayout({
@@ -55,7 +26,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="select-none outline-none">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>{children}</body>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        style={{ backgroundColor: "#4a044e" }}
+      >
+        {children}
+      </body>
       <Analytics />
     </html>
   )

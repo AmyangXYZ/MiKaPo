@@ -6,14 +6,12 @@ A web-based tool that enables real-time motion capture for MikuMikuDance (MMD) m
 
 [MiKaPo](https://mikapo.vercel.app) transforms video input into real-time MMD model poses by detecting 3D landmarks and converting them to bone rotations. The core technical challenge lies in accurately mapping world-space 3D landmarks from MediaPipe to MMD bone quaternion rotations, accounting for MMD's specific bone coordinate system and directional conventions.
 
-**MiKaPo 2.0** introduces a completely rewritten solver with hierarchical bone transformations, migrating from Vite to Next.js for improved performance and maintainability.
+**MiKaPo 2.0** introduces a completely rewritten solver with hierarchical bone transformations, migrating from Vite to Next.js for improved performance and maintainability. The renderer backend is also evolved from [babylon.js](https://www.babylonjs.com/) and [babylon-mmd](https://github.com/noname0310/babylon-mmd) to my dedicate WebGPU MMD render [RezeEngine](https://github.com/AmyangXYZ/reze-engine).
 
 ![](./screenshots/1.png)
 ![](./screenshots/2.png)
 
-## Related Project
-
-Check out [**PoPo**](https://popo.love) - AI-powered text-to-MMD pose generation. Transform natural language descriptions into MMD poses instantly.
+Demo model: 深空之眼 - 裁暗之锋·塞尔凯特
 
 ## Key Features
 
@@ -22,13 +20,10 @@ Check out [**PoPo**](https://popo.love) - AI-powered text-to-MMD pose generation
 - **Multiple input sources**: webcam, video files, and image uploads
 - **Live MMD model rendering** with synchronized bone animations
 
-_Legacy features from v1.0 (VMD export, bone manipulation, 360° scene environment) will be added in future updates._
-
 ## Technical Stack
 
 - **3D Pose Detection**: [MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker/web_js)
-- **3D Graphics Engine**: [Babylon.js](https://www.babylonjs.com/)
-- **MMD Integration**: [babylon-mmd](https://github.com/noname0310/babylon-mmd)
+- **3D MMD Render**: [Reze-Engine](https://github.com/AmyangXYZ/reze-engine)
 - **Web Framework**: [Next.js](https://nextjs.org/)
 
 ## Core Challenge
