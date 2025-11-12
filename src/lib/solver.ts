@@ -1209,6 +1209,6 @@ class VpdWriter {
     const content = lines.join("\n")
     const sjisBytes = this.encodeShiftJIS(content)
 
-    return new Blob([sjisBytes], { type: "text/plain; charset=shift_jis" })
+    return new Blob([sjisBytes.buffer as ArrayBuffer], { type: "text/plain; charset=shift_jis" })
   }
 }
