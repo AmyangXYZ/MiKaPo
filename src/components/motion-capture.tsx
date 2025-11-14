@@ -177,22 +177,22 @@ export const MotionCapture = ({
   }
 
   return (
-    <div className="absolute top-0 left-0 z-10 p-4 max-w-sm w-full">
-      <div className="bg-white/30 backdrop-blur-xs shadow-sm rounded-lg p-4">
+    <div className="absolute top-0 left-0 z-10 p-4 max-w-[180px] md:max-w-sm w-full">
+      <div className="bg-white/30 backdrop-blur-xs shadow-sm rounded-lg p-1 md:p-4">
         {/* Controls */}
-        <div className="flex justify-between items-center mb-4">
-          <div className="text-black font-medium">Motion Capture</div>
+        <div className="flex justify-center md:justify-between items-center mb-2">
+          <div className="text-white text-lg font-medium hidden md:block">Motion Capture</div>
 
-          <div className="flex gap-2">
-            <Button onClick={toggleCamera} variant={isStreamActive ? "destructive" : "secondary"} size="sm">
-              {isStreamActive ? <Pause className="h-4 w-4" /> : <Webcam className="h-4 w-4" />}
+          <div className="flex gap-2 items-center justify-center">
+            <Button onClick={toggleCamera} variant={isStreamActive ? "destructive" : "secondary"} className="size-6 md:size-8">
+              {isStreamActive ? <Pause /> : <Webcam />}
             </Button>
 
-            <Button onClick={() => imageInputRef.current?.click()} variant="secondary" size="sm">
+            <Button onClick={() => imageInputRef.current?.click()} variant="secondary" className="size-6 md:size-8">
               <ImageIcon className="h-4 w-4" />
             </Button>
 
-            <Button onClick={() => videoInputRef.current?.click()} variant="secondary" size="sm">
+            <Button onClick={() => videoInputRef.current?.click()} variant="secondary" className="size-6 md:size-8">
               <Video className="h-4 w-4" />
             </Button>
           </div>
@@ -215,7 +215,7 @@ export const MotionCapture = ({
         </div>
 
         {/* Media Container */}
-        <div className="w-full h-80 bg-black/10 rounded-lg border border-white/20 overflow-hidden">
+        <div className="w-full h-28 md:h-80 bg-black/10 rounded-lg border border-white/20 overflow-hidden">
           {inputMode === "image" && (
             <div className="w-full h-full flex items-center justify-center">
               <Image
