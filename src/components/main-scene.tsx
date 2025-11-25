@@ -21,7 +21,9 @@ export default function MainScene() {
     if (canvasRef.current) {
       // Initialize engine
       try {
-        const engine = new Engine(canvasRef.current)
+        const engine = new Engine(canvasRef.current, {
+          bloomIntensity: 0.06,
+        })
         engineRef.current = engine
         await engine.init()
         await engine.loadModel("/models/塞尔凯特/塞尔凯特.pmx")
