@@ -59,15 +59,22 @@ export const MotionCapture = ({
 
         let lastTime = performance.now()
         let lastImgSrc = ""
+        let frameCounter = 0
+        const FRAME_SKIP = 5
 
         const detect = () => {
+          frameCounter++
+          const shouldProcess = frameCounter % FRAME_SKIP === 0
+
           if (videoRef.current && lastTime !== videoRef.current.currentTime && videoRef.current.videoWidth > 0) {
             lastTime = videoRef.current.currentTime
-            holisticLandmarkerRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
-              if (result.poseWorldLandmarks[0]) {
-                setLandmarks(result)
-              }
-            })
+            if (shouldProcess) {
+              holisticLandmarkerRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
+                if (result.poseWorldLandmarks[0]) {
+                  setLandmarks(result)
+                }
+              })
+            }
           } else if (
             imageRef.current &&
             imageRef.current.src.length > 0 &&
