@@ -21,9 +21,7 @@ export default function MainScene() {
     if (canvasRef.current) {
       // Initialize engine
       try {
-        const engine = new Engine(canvasRef.current, {
-          bloomIntensity: 0.06,
-        })
+        const engine = new Engine(canvasRef.current)
         engineRef.current = engine
         await engine.init()
         await engine.loadModel("/models/塞尔凯特/塞尔凯特.pmx")
@@ -73,6 +71,11 @@ export default function MainScene() {
           </Link>
         </Button>
       </div>
+
+      <div className="absolute p-6 bottom-0 left-0 w-full z-10 flex flex-row items-center justify-start gap-4">
+        <div className="text-white z-10 font-medium text-sm">Powered by <Link href="https://reze.one" target="_blank" className="text-blue-500">Reze Engine</Link></div>
+      </div>
+
 
       <MotionCapture applyPose={applyPose} modelLoaded={modelLoaded} />
 
