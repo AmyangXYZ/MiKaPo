@@ -5,7 +5,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 
-import { Engine, EngineStats, Quat } from "reze-engine"
+import { Engine, EngineStats, Quat, Vec3 } from "reze-engine"
 
 import { MotionCapture } from "./motion-capture"
 import { BoneState } from "@/lib/solver"
@@ -21,7 +21,9 @@ export default function MainScene() {
     if (canvasRef.current) {
       // Initialize engine
       try {
-        const engine = new Engine(canvasRef.current)
+        const engine = new Engine(canvasRef.current, {
+          ambientColor: new Vec3(0.85, 0.9, 1.0),
+        })
         engineRef.current = engine
         await engine.init()
         await engine.loadModel("/models/塞尔凯特/塞尔凯特.pmx")
@@ -73,9 +75,17 @@ export default function MainScene() {
       </div>
 
       <div className="absolute p-6 bottom-0 left-0 w-full z-10 flex flex-row items-center justify-start gap-4">
-        <div className="text-white z-10 font-medium text-sm">Powered by <Link href="https://reze.one" target="_blank" className="text-blue-500">Reze Engine</Link></div>
+        <div className="text-white z-10 font-medium text-sm">
+          Powered by{" "}
+          <Link
+            href="https://reze.one"
+            target="_blank"
+            className="text-blue-400 shadow-lg bg-white/10 rounded-md px-2 py-1"
+          >
+            Reze Engine
+          </Link>
+        </div>
       </div>
-
 
       <MotionCapture applyPose={applyPose} modelLoaded={modelLoaded} />
 
