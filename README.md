@@ -26,6 +26,24 @@ Demo model: 深空之眼 - 裁暗之锋·塞尔凯特
 - **3D MMD Render**: [Reze-Engine](https://github.com/AmyangXYZ/reze-engine)
 - **Web Framework**: [Next.js](https://nextjs.org/)
 
+## Local Deployment
+
+```bash
+npm install
+npm run dev
+```
+
+Then open [http://localhost:4000](http://localhost:4000) in your browser.
+
+## Using Your Own Model
+
+1. Place your MMD model folder in `public/models/`
+2. Update the model path in `src/components/main-scene.tsx`:
+
+```typescript
+await engine.loadModel("/models/your-model-folder/your-model.pmx")
+```
+
 ## Core Challenge
 
 The primary technical challenge involves solving the complex transformation from world-space 3D landmarks to MMD bone quaternion rotations. This requires:
