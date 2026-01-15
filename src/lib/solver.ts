@@ -828,8 +828,8 @@ export class Solver {
     const fullParentQuat = upperBodyQuat
       .multiply(leftArmQuat)
       .multiply(leftElbowQuat)
-      .multiply(leftWristQuat)
       .multiply(leftWristTwistQuat)
+      .multiply(leftWristQuat)
 
     const fullParentMatrix = new Matrix()
     Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
