@@ -2,16 +2,20 @@ import { FilesetResolver, HolisticLandmarker, HolisticLandmarkerResult } from "@
 import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import { BoneState, Solver } from "@/lib/solver"
+import { FaceBlendshapeSolver, FaceSolverResult } from "@/lib/face-blendshape-solver"
 import { Button } from "@/components/ui/button"
 import { Camera, Image as ImageIcon, Video, Webcam, Pause } from "lucide-react"
+import DebugScene from "./debug-scene"
 
 type InputMode = "image" | "video" | "camera" | null
 
 export const MotionCapture = ({
   applyPose,
+  applyFace,
   modelLoaded,
 }: {
   applyPose: (boneStates: BoneState[]) => void
+  applyFace: (faceResult: FaceSolverResult) => void
   modelLoaded: boolean
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -26,19 +30,32 @@ export const MotionCapture = ({
   const [videoSrc, setVideoSrc] = useState<string>("/flash.mp4")
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
   const solverRef = useRef<Solver | null>(null)
+  const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver | null>(null)
 
-  // Initialize solver
+  // Initialize solvers
   useEffect(() => {
     if (!solverRef.current) {
       solverRef.current = new Solver()
     }
-    if (landmarks && solverRef.current && modelLoaded) {
-      const pose = solverRef.current?.solve(landmarks)
-      if (pose) {
-        applyPose(pose)
+    if (!faceBlendshapeSolverRef.current) {
+      faceBlendshapeSolverRef.current = new FaceBlendshapeSolver({ smoothingFactor: 0.4 })
+    }
+    if (landmarks && modelLoaded) {
+      // Apply body pose
+      if (solverRef.current) {
+        const pose = solverRef.current.solve(landmarks)
+        if (pose) {
+          applyPose(pose)
+        }
+      }
+      // Apply face (eye rotations + morphs)
+      // Debug: check if faceLandmarks exist
+      if (faceBlendshapeSolverRef.current && landmarks.faceLandmarks?.[0]) {
+        const faceResult = faceBlendshapeSolverRef.current.solve(landmarks.faceLandmarks[0])
+        applyFace(faceResult)
       }
     }
-  }, [landmarks, applyPose, modelLoaded])
+  }, [landmarks, applyPose, applyFace, modelLoaded])
 
   // Initialize MediaPipe landmarker
   useEffect(() => {
@@ -52,7 +69,7 @@ export const MotionCapture = ({
           },
           minPosePresenceConfidence: 0.7,
           minPoseDetectionConfidence: 0.7,
-          minFaceDetectionConfidence: 0.95,
+          minFaceDetectionConfidence: 0.4,
           minHandLandmarksConfidence: 0.95,
           runningMode: "VIDEO",
         })
@@ -185,9 +202,9 @@ export const MotionCapture = ({
 
   return (
     <div className="absolute top-0 left-0 z-10 p-4 max-w-[180px] md:max-w-sm w-full">
-      <div className="bg-white/30 backdrop-blur-xs shadow-sm rounded-lg p-1 md:p-4">
+      <div className="bg-white/30 backdrop-blur-xs shadow-sm rounded-lg p-1 md:p-4 flex flex-col items-center justify-center">
         {/* Controls */}
-        <div className="flex justify-center md:justify-between items-center mb-2">
+        <div className="w-full flex justify-center md:justify-between items-center mb-1 md:mb-2">
           <div className="text-white text-lg font-medium hidden md:block">Motion Capture</div>
 
           <div className="flex gap-2 items-center justify-center">
@@ -263,6 +280,9 @@ export const MotionCapture = ({
               <Camera className="h-12 w-12 text-white/50" />
             </div>
           )}
+        </div>
+        <div className="md:block hidden w-[320px] h-[200px] rounded-lg overflow-hidden z-10 mt-2">
+          <DebugScene landmarks={landmarks} />
         </div>
       </div>
     </div>
