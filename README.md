@@ -10,6 +10,7 @@ A web-based tool that enables real-time motion capture for MikuMikuDance (MMD) m
 
 ![](./screenshots/1.png)
 ![](./screenshots/3.webp)
+![](./screenshots/4.webp)
 
 Demo model: 深空之眼 - 裁暗之锋·塞尔凯特
 
