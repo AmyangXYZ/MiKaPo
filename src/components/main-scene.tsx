@@ -23,7 +23,7 @@ export default function MainScene() {
       // Initialize engine
       try {
         const engine = new Engine(canvasRef.current, {
-          ambientColor: new Vec3(0.8, 0.84, 0.92),
+          ambientColor: new Vec3(0.88, 0.88, 0.99),
         })
         engineRef.current = engine
         await engine.init()
