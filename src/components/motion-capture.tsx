@@ -59,20 +59,42 @@ export const MotionCapture = ({
 
   // Initialize MediaPipe landmarker
   useEffect(() => {
-    FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm").then(
-      async (vision) => {
-        holisticLandmarkerRef.current = await HolisticLandmarker.createFromOptions(vision, {
+    let isMounted = true
+    
+    const initLandmarker = async () => {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm"
+        )
+        
+        // Prevent double initialization
+        if (!isMounted || holisticLandmarkerRef.current) return
+        
+        const createOptions = {
           baseOptions: {
             modelAssetPath:
               "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task",
-            delegate: "GPU",
+            delegate: "GPU" as const,
           },
           minPosePresenceConfidence: 0.7,
           minPoseDetectionConfidence: 0.7,
           minFaceDetectionConfidence: 0.4,
           minHandLandmarksConfidence: 0.95,
-          runningMode: "VIDEO",
-        })
+          runningMode: "VIDEO" as const,
+        }
+        
+        try {
+          holisticLandmarkerRef.current = await HolisticLandmarker.createFromOptions(vision, createOptions)
+        } catch (gpuError) {
+          console.warn("GPU delegate failed, falling back to CPU:", gpuError)
+          // Fallback to CPU if GPU fails
+          holisticLandmarkerRef.current = await HolisticLandmarker.createFromOptions(vision, {
+            ...createOptions,
+            baseOptions: { ...createOptions.baseOptions, delegate: "CPU" },
+          })
+        }
+        
+        if (!isMounted) return
 
         let lastTime = performance.now()
         let lastImgSrc = ""
@@ -109,11 +131,17 @@ export const MotionCapture = ({
           requestAnimationFrame(detect)
         }
         detect()
+      } catch (error) {
+        console.error("Failed to initialize MediaPipe:", error)
       }
-    )
+    }
+    
+    initLandmarker()
 
     return () => {
+      isMounted = false
       holisticLandmarkerRef.current?.close()
+      holisticLandmarkerRef.current = null
     }
   }, [])
 
