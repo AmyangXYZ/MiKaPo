@@ -32,6 +32,9 @@ export default function MainScene() {
         engine.runRenderLoop(() => {
           setStats(engine.getStats())
         })
+
+        await engine.loadAnimation("/mikapo_animation.vmd")
+        engine.playAnimation()
       } catch (error) {
         setEngineError(error instanceof Error ? error.message : "Unknown error")
       }
