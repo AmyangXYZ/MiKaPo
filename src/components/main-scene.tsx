@@ -5,7 +5,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 
-import { Engine, EngineStats, Quat, Vec3 } from "reze-engine"
+import { Engine, EngineStats, Model, Quat, Vec3 } from "reze-engine"
 
 import { MotionCapture } from "./motion-capture"
 import { BoneState } from "@/lib/solver"
@@ -13,6 +13,7 @@ import { FaceSolverResult } from "@/lib/face-blendshape-solver"
 
 export default function MainScene() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const modelRef = useRef<Model | null>(null)
   const engineRef = useRef<Engine | null>(null)
   const [modelLoaded, setModelLoaded] = useState(false)
   const [engineError, setEngineError] = useState<string | null>(null)
@@ -23,11 +24,15 @@ export default function MainScene() {
       // Initialize engine
       try {
         const engine = new Engine(canvasRef.current, {
-          ambientColor: new Vec3(0.88, 0.88, 0.99),
+          ambientColor: new Vec3(0.9, 0.9, 0.99),
         })
         engineRef.current = engine
         await engine.init()
-        await engine.loadModel("/models/塞尔凯特/塞尔凯特.pmx")
+        modelRef.current = await engine.loadModel("/models/塞尔凯特/塞尔凯特.pmx")
+        engine.addGround(
+          { diffuseColor: new Vec3(0.9, 0.1, 0.9) }
+        )
+        engine.setIKEnabled(false)
         setModelLoaded(true)
         engine.runRenderLoop(() => {
           setStats(engine.getStats())
@@ -57,12 +62,12 @@ export default function MainScene() {
   const applyPose = useCallback(
     (boneStates: BoneState[]) => {
       if (!engineRef.current) return
-      const pose:Record<string, Quat> = {}
+      const pose: Record<string, Quat> = {}
       for (const bone of boneStates) {
         pose[bone.name] = new Quat(bone.rotation.x, bone.rotation.y, bone.rotation.z, bone.rotation.w)
       }
       if (Object.keys(pose).length > 0) {
-        engineRef.current.rotateBones(pose, 60)
+        modelRef.current?.rotateBones(pose, 60)
       }
     },
     [engineRef]
@@ -83,20 +88,20 @@ export default function MainScene() {
             bone.rotation.w
           )
         }
-        engineRef.current.rotateBones(pose, 30)
+        modelRef.current?.rotateBones(pose, 30)
       }
 
       // Apply morph weights to MMD model
       const morphWeights = faceResult.morphWeights
 
       // Eye morphs
-      engineRef.current.setMorphWeight("まばたき", morphWeights.まばたき, 30)
-      engineRef.current.setMorphWeight("ウィンク", morphWeights.ウィンク, 30)
-      engineRef.current.setMorphWeight("ウィンク右", morphWeights.ウィンク右, 30)
-      
+      modelRef.current?.setMorphWeight("まばたき", morphWeights.まばたき, 30)
+      modelRef.current?.setMorphWeight("ウィンク", morphWeights.ウィンク, 30)
+      modelRef.current?.setMorphWeight("ウィンク右", morphWeights.ウィンク右, 30)
+
       // Mouth morphs
-      engineRef.current.setMorphWeight("あ", morphWeights.あ, 30)
-      engineRef.current.setMorphWeight("ワ", morphWeights.ワ, 30)
+      modelRef.current?.setMorphWeight("あ", morphWeights.あ, 30)
+      modelRef.current?.setMorphWeight("ワ", morphWeights.ワ, 30)
     },
     [engineRef]
   )

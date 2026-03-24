@@ -157,7 +157,7 @@ export const MotionCapture = ({
         let lastTime = performance.now()
         let lastImgSrc = ""
         let frameCounter = 0
-        const FRAME_SKIP = 2
+        const FRAME_SKIP = 4
 
         const detect = () => {
           frameCounter++
@@ -292,7 +292,7 @@ export const MotionCapture = ({
       // Stop recording and auto-export
       setIsRecordingVMD(false)
       isRecordingRef.current = false
-      
+
       // Auto export after a small delay to ensure last frames are captured
       setTimeout(() => {
         const frames = recordedFramesRef.current
@@ -305,7 +305,7 @@ export const MotionCapture = ({
           link.download = "mikapo_animation.vmd"
           link.click()
           URL.revokeObjectURL(url)
-          
+
           // Clear recorded frames
           recordedFramesRef.current = []
           setRecordedFrameCount(0)
@@ -510,7 +510,7 @@ function createVMD(frames: RecordedFrame[], frameMultiplier: number = 1): Blob {
 
   const frameCount = frames.length
   const boneCnt = frames[0].boneStates.length
-  
+
   // Count morph frames (only if we have morph data)
   const morphNames = frames[0].morphWeights ? Object.keys(frames[0].morphWeights) : []
   const morphCnt = morphNames.length
