@@ -36,15 +36,6 @@ npm run dev
 
 Then open [http://localhost:4000](http://localhost:4000) in your browser.
 
-## Using Your Own Model
-
-1. Place your MMD model folder in `public/models/`
-2. Update the model path in `src/components/main-scene.tsx`:
-
-```typescript
-await engine.loadModel("/models/your-model-folder/your-model.pmx")
-```
-
 ## Core Challenge
 
 The primary technical challenge involves solving the complex transformation from world-space 3D landmarks to MMD bone quaternion rotations. This requires:
@@ -60,30 +51,36 @@ The solver implements a hierarchical transformation approach that maps MediaPipe
 
 ```typescript
 // Key Algorithm Pseudocode
-function solveBoneRotation(landmarkName: string, parentChain: string[]): Quaternion {
+function solveBoneRotation(
+  landmarkName: string,
+  parentChain: string[],
+): Quaternion {
   // 1. Get world-space landmarks from MediaPipe
-  const worldLandmark = getMediaPipeLandmark(landmarkName)
-  const worldTarget = getMediaPipeLandmark(targetLandmarkName)
+  const worldLandmark = getMediaPipeLandmark(landmarkName);
+  const worldTarget = getMediaPipeLandmark(targetLandmarkName);
 
   // 2. Build full parent bone hierarchy chain (not just immediate parent)
   const fullParentQuat = parentChain.reduce(
     (acc, parent) => acc.multiply(boneStates[parent].rotation),
-    Quaternion.Identity()
-  )
+    Quaternion.Identity(),
+  );
 
   // 3. Transform world landmarks to parent's local space
-  const parentMatrix = Matrix.FromQuaternion(fullParentQuat).invert()
-  const localLandmark = Vector3.TransformCoordinates(worldLandmark, parentMatrix)
-  const localTarget = Vector3.TransformCoordinates(worldTarget, parentMatrix)
+  const parentMatrix = Matrix.FromQuaternion(fullParentQuat).invert();
+  const localLandmark = Vector3.TransformCoordinates(
+    worldLandmark,
+    parentMatrix,
+  );
+  const localTarget = Vector3.TransformCoordinates(worldTarget, parentMatrix);
 
   // 4. Calculate bone direction in local space
-  const boneDirection = localTarget.subtract(localLandmark).normalize()
+  const boneDirection = localTarget.subtract(localLandmark).normalize();
 
   // 5. Set MMD bone's default A-pose reference direction
-  const mmdReferenceDirection = getMMDDefaultDirection(boneName)
+  const mmdReferenceDirection = getMMDDefaultDirection(boneName);
 
   // 6. Compute quaternion rotation from reference to current direction
-  return Quaternion.FromUnitVectors(referenceDirection, boneDirection)
+  return Quaternion.FromUnitVectors(referenceDirection, boneDirection);
 }
 
 // Example: Left wrist transformation chain
