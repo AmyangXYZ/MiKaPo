@@ -1,27 +1,12 @@
 "use client"
 
-import {
-  useRef,
-  useEffect,
-  useCallback,
-  useState,
-  type ChangeEvent,
-  type InputHTMLAttributes,
-} from "react"
+import { useRef, useEffect, useCallback, useState, type ChangeEvent, type InputHTMLAttributes } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { FolderOpen } from "lucide-react"
+import { FolderOpen, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-import {
-  Engine,
-  EngineStats,
-  Model,
-  Quat,
-  Vec3,
-  parsePmxFolderInput,
-  pmxFileAtRelativePath,
-} from "reze-engine"
+import { Engine, EngineStats, Model, Quat, Vec3, parsePmxFolderInput, pmxFileAtRelativePath } from "reze-engine"
 
 import { MotionCapture } from "./motion-capture"
 import { BoneState } from "@/lib/solver"
@@ -62,9 +47,7 @@ export default function MainScene() {
   const initEngine = useCallback(async () => {
     if (canvasRef.current) {
       try {
-        const engine = new Engine(canvasRef.current, {
-          ambientColor: new Vec3(0.9, 0.9, 0.99),
-        })
+        const engine = new Engine(canvasRef.current, { bloom: { color: new Vec3(0.5, 0.1, 0.9), intensity: 0.03 } })
         engineRef.current = engine
         await engine.init()
         setEngineInited(true)
@@ -76,10 +59,7 @@ export default function MainScene() {
 
         const genBeforeDefault = loadGenerationRef.current
         try {
-          const model = await engine.loadModel(
-            DEFAULT_MODEL_KEY,
-            "/models/塞尔凯特/塞尔凯特.pmx"
-          )
+          const model = await engine.loadModel(DEFAULT_MODEL_KEY, "/models/塞尔凯特/塞尔凯特.pmx")
           if (genBeforeDefault !== loadGenerationRef.current) {
             try {
               engine.removeModel(DEFAULT_MODEL_KEY)
@@ -88,8 +68,39 @@ export default function MainScene() {
             }
             return
           }
+
           modelRef.current = model
           loadedModelNameRef.current = DEFAULT_MODEL_KEY
+          console.log(model.getMaterials())
+          engine.setMaterialPresets(loadedModelNameRef.current, {
+            eye: ["眼睛", "眼白", "目白", "右瞳", "左瞳", "眉毛", "eyebrow", "eyelash"],
+            face: ["脸", "face01"],
+            body: ["皮肤", "skin"],
+            hair: ["头发", "hair_f"],
+            cloth_smooth: [
+              "衣服",
+              "裙子",
+              "裙带",
+              "裙布",
+              "外套",
+              "外套饰",
+              "裤子",
+              "裤子0",
+              "腿环",
+              "发饰",
+              "鞋子",
+              "鞋子饰",
+              "shirt",
+              "shoes",
+              "shorts",
+              "trigger",
+              "dress",
+              "hair_accessory",
+              "cloth01_shoes",
+            ],
+            stockings: ["袜子", "stockings"],
+            metal: ["metal01", "earring"],
+          })
           setModelLoaded(true)
           setEngineError(null)
         } catch (loadErr) {
@@ -137,6 +148,35 @@ export default function MainScene() {
       model.setName(stem)
       modelRef.current = model
       loadedModelNameRef.current = instanceKey
+      engine.setMaterialPresets(loadedModelNameRef.current, {
+        eye: ["眼睛", "眼白", "目白", "右瞳", "左瞳", "眉毛", "eyebrow", "eyelash"],
+        face: ["脸", "face01"],
+        body: ["皮肤", "skin"],
+        hair: ["头发", "hair_f"],
+        cloth_smooth: [
+          "衣服",
+          "裙子",
+          "裙带",
+          "裙布",
+          "外套",
+          "外套饰",
+          "裤子",
+          "裤子0",
+          "腿环",
+          "发饰",
+          "鞋子",
+          "鞋子饰",
+          "shirt",
+          "shoes",
+          "shorts",
+          "trigger",
+          "dress",
+          "hair_accessory",
+          "cloth01_shoes",
+        ],
+        stockings: ["袜子", "stockings"],
+        metal: ["metal01", "earring"],
+      })
       setModelLoaded(true)
       setEngineError(null)
     } catch (e) {
@@ -195,6 +235,23 @@ export default function MainScene() {
     setPmxPickSelected("")
   }, [loadPmxFromFolder, pmxPickFiles, pmxPickSelected])
 
+  const dismissPmxPickDialog = useCallback(() => {
+    setPmxPickFiles(null)
+    setPmxPickPaths([])
+    setPmxPickSelected("")
+  }, [])
+
+  const pmxPickDialogOpen = Boolean(pmxPickFiles && pmxPickPaths.length > 1)
+
+  useEffect(() => {
+    if (!pmxPickDialogOpen) return
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") dismissPmxPickDialog()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [dismissPmxPickDialog, pmxPickDialogOpen])
+
   const applyPose = useCallback(
     (boneStates: BoneState[]) => {
       if (!engineRef.current) return
@@ -206,7 +263,7 @@ export default function MainScene() {
         modelRef.current?.rotateBones(pose, 60)
       }
     },
-    [engineRef]
+    [engineRef],
   )
 
   const applyFace = useCallback(
@@ -217,12 +274,7 @@ export default function MainScene() {
       if (faceResult.boneStates.length > 0) {
         const pose: Record<string, Quat> = {}
         for (const bone of faceResult.boneStates) {
-          pose[bone.name] = new Quat(
-            bone.rotation.x,
-            bone.rotation.y,
-            bone.rotation.z,
-            bone.rotation.w
-          )
+          pose[bone.name] = new Quat(bone.rotation.x, bone.rotation.y, bone.rotation.z, bone.rotation.w)
         }
         modelRef.current?.rotateBones(pose, 30)
       }
@@ -239,7 +291,7 @@ export default function MainScene() {
       modelRef.current?.setMorphWeight("あ", morphWeights.あ, 30)
       modelRef.current?.setMorphWeight("ワ", morphWeights.ワ, 30)
     },
-    [engineRef]
+    [engineRef],
   )
 
   return (
@@ -247,44 +299,19 @@ export default function MainScene() {
       <input
         ref={pmxFolderInputRef}
         type="file"
-        className="fixed left-0 top-0 -z-10 h-px w-px opacity-0"
+        className="fixed right-0 top-0 -z-10 h-px w-px opacity-0"
         multiple
         {...pmxFolderInputAttrs}
         onChange={onPickPmxFolder}
       />
 
-      <div className="absolute p-4 top-0 left-0 w-full z-10 flex flex-row items-center justify-between gap-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
-          
-          {pmxPickFiles && pmxPickPaths.length > 1 ? (
-            <div className="flex max-w-full flex-col gap-1.5 rounded-md border border-white/20 bg-black/50 px-2 py-1.5 text-[11px] text-white backdrop-blur-sm sm:max-w-md sm:flex-row sm:items-center">
-              <span className="shrink-0 text-white/80">Multiple .pmx — pick one:</span>
-              <select
-                className="min-w-0 flex-1 rounded border border-white/30 bg-black/60 px-1 py-0.5 text-[11px]"
-                value={pmxPickSelected}
-                onChange={(ev) => setPmxPickSelected(ev.target.value)}
-              >
-                {pmxPickPaths.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-7 shrink-0 text-[11px]"
-                onClick={() => void onConfirmPmxPick()}
-              >
-                Load selected
-              </Button>
+      <div className="absolute right-0 top-0 z-10 flex w-full flex-row items-center justify-end gap-4 p-4">
+        <div className="flex min-w-0 max-w-full shrink-0 flex-row flex-wrap items-center justify-end gap-x-3 gap-y-2">
+          {stats && (
+            <div className="z-10 flex h-8 mt-0.5 shrink-0 items-center text-sm font-medium leading-none text-white tabular-nums">
+              FPS: {stats.fps}
             </div>
-          ) : null}
-        </div>
-
-        <div className="flex shrink-0 flex-row items-center gap-2">
-          {stats && <div className="text-white z-10 font-medium text-sm">FPS: {stats.fps}</div>}
+          )}
 
           <div className="flex flex-row items-center gap-2 hidden sm:flex">
             <Button variant="link" size="sm" asChild className="sm:hidden md:flex z-10 text-white underline">
@@ -300,25 +327,89 @@ export default function MainScene() {
             </Button>
           </div>
 
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={!engineInited}
-            className=" h-8 shrink-0 gap-1.5 bg-white/90 text-xs text-foreground hover:bg-white disabled:opacity-50 hidden sm:flex"
-            onClick={() => pmxFolderInputRef.current?.click()}
-          >
-            <FolderOpen className="size-4" />
-            Load Your Model
-          </Button>
+          <div className="hidden shrink-0 flex-row items-center gap-2 sm:flex">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={!engineInited}
+              className="h-8 shrink-0 gap-1.5 bg-white/90 text-xs text-foreground hover:bg-white disabled:opacity-50"
+              onClick={() => pmxFolderInputRef.current?.click()}
+            >
+              <FolderOpen className="size-4" />
+              Load Your Model
+            </Button>
 
-          <Button size="icon" asChild className="bg-white text-black size-7 rounded-full z-10 hover:bg-gray-200">
-            <Link href="https://github.com/AmyangXYZ/MiKaPo" target="_blank">
-              <Image src="/github-mark.svg" alt="GitHub" width={18} height={18} />
-            </Link>
-          </Button>
+            <Button
+              size="icon"
+              asChild
+              className="bg-white text-black size-7 shrink-0 rounded-full z-10 hover:bg-gray-200"
+            >
+              <Link href="https://github.com/AmyangXYZ/MiKaPo" target="_blank">
+                <Image src="/github-mark.svg" alt="GitHub" width={18} height={18} />
+              </Link>
+            </Button>
+          </div>
         </div>
       </div>
+
+      {pmxPickDialogOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Dismiss"
+            className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+            onClick={dismissPmxPickDialog}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pmx-picker-title"
+            className="relative z-[1] w-full max-w-md rounded-xl border border-white/15 bg-zinc-950/95 p-4 text-white shadow-2xl shadow-black/50 backdrop-blur-md"
+          >
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <h2 id="pmx-picker-title" className="text-sm font-semibold leading-tight">
+                Multiple .pmx files in folder
+              </h2>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0 text-white hover:bg-white/10"
+                aria-label="Close"
+                onClick={dismissPmxPickDialog}
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+            <p className="mb-2 text-xs text-white/70">Pick which model to load.</p>
+            <select
+              className="mb-4 w-full rounded-md border border-white/25 bg-black/50 px-2 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+              value={pmxPickSelected}
+              onChange={(ev) => setPmxPickSelected(ev.target.value)}
+            >
+              {pmxPickPaths.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+            <div className="flex flex-row justify-end gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={dismissPmxPickDialog}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-white text-black hover:bg-white/90"
+                onClick={() => void onConfirmPmxPick()}
+              >
+                Load selected
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <MotionCapture applyPose={applyPose} applyFace={applyFace} modelLoaded={modelLoaded} />
 
