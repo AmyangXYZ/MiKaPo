@@ -120,3 +120,16 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Composited indeterminate sweep — opacity/transform animations keep running
+   when the main thread is blocked by PMX parsing or MediaPipe shader compile. */
+@keyframes progress-sweep {
+  0% { transform: translate3d(-100%, 0, 0); }
+  100% { transform: translate3d(300%, 0, 0); }
+}
+
+@keyframes loading-dot {
+  0%, 20% { opacity: 0; }
+  40% { opacity: 1; }
+  100% { opacity: 0; }
+}

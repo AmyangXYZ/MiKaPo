@@ -249,9 +249,13 @@ export class Solver {
 
     const shoulderCenter = leftShoulder.add(rightShoulder).scale(0.5)
 
-    const shoulderX = leftShoulder.subtract(rightShoulder).normalize()
-
     const spineY = shoulderCenter.normalize()
+
+    // Gram-Schmidt: shoulderX from landmarks isn't guaranteed perpendicular to
+    // spineY, which was leaving the matrix slightly sheared and tilting the torso.
+    // Project out the spineY component so all three axes are orthonormal.
+    const rawShoulderX = leftShoulder.subtract(rightShoulder).normalize()
+    const shoulderX = rawShoulderX.subtract(spineY.scale(Vector3.Dot(rawShoulderX, spineY))).normalize()
 
     const upperBodyZ = Vector3.Cross(shoulderX, spineY).normalize()
 
@@ -706,7 +710,7 @@ export class Solver {
 
   private solveRightWrist(): BoneState {
     const worldRightWrist = this.getRightHandLandmark("wrist")
-    const worldRightMiddleMcp = this.getRightHandLandmark("index_mcp")
+    const worldRightMiddleMcp = this.getRightHandLandmark("middle_mcp")
 
     if (!worldRightWrist || !worldRightMiddleMcp) return { name: "右手首", rotation: Quaternion.Identity() }
 

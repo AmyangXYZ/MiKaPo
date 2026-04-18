@@ -6,7 +6,8 @@ import Encoding from "encoding-japanese"
 import { BoneState, Solver } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
 import { Button } from "@/components/ui/button"
-import { Camera, Image as ImageIcon, Video, Webcam, Pause, Circle, Loader2 } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Camera, Image as ImageIcon, Video, Webcam, Pause, Circle } from "lucide-react"
 import DebugScene from "./debug-scene"
 
 type InputMode = "image" | "video" | "camera" | null
@@ -20,10 +21,12 @@ export const MotionCapture = ({
   applyPose,
   applyFace,
   modelLoaded,
+  onMediaPipeReadyChange,
 }: {
   applyPose: (boneStates: BoneState[]) => void
   applyFace: (faceResult: FaceSolverResult) => void
   modelLoaded: boolean
+  onMediaPipeReadyChange?: (ready: boolean) => void
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
@@ -39,6 +42,10 @@ export const MotionCapture = ({
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
   const solverRef = useRef<Solver | null>(null)
   const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver | null>(null)
+  const onMediaPipeReadyChangeRef = useRef(onMediaPipeReadyChange)
+  useEffect(() => {
+    onMediaPipeReadyChangeRef.current = onMediaPipeReadyChange
+  }, [onMediaPipeReadyChange])
 
   // VMD Recording state
   const [isRecordingVMD, setIsRecordingVMD] = useState(false)
@@ -178,6 +185,7 @@ export const MotionCapture = ({
 
         if (!isMounted) return
         setMediaPipeReady(true)
+        onMediaPipeReadyChangeRef.current?.(true)
 
         let lastTime = performance.now()
         let lastImgSrc = ""
@@ -349,48 +357,78 @@ export const MotionCapture = ({
         <div className="w-full flex justify-center md:justify-between items-center mb-1 md:mb-2">
           <div className="text-white text-lg font-medium hidden md:block">Motion Capture</div>
 
-          <div className="flex gap-1 md:gap-2 items-center justify-center flex-wrap">
-            <Button
-              onClick={toggleCamera}
-              variant={isStreamActive ? "destructive" : "secondary"}
-              className="size-6 md:size-8"
-              disabled={!mediaPipeReady}
-              title={!mediaPipeReady ? "Loading AI model..." : undefined}
-            >
-              {isStreamActive ? <Pause /> : <Webcam />}
-            </Button>
+          <TooltipProvider delayDuration={150}>
+            <div className="flex gap-1 md:gap-2 items-center justify-center flex-wrap">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={toggleCamera}
+                    variant={isStreamActive ? "destructive" : "secondary"}
+                    className="size-6 md:size-8"
+                    disabled={!mediaPipeReady}
+                  >
+                    {isStreamActive ? <Pause /> : <Webcam />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {!mediaPipeReady
+                    ? "Loading AI model..."
+                    : isStreamActive
+                      ? "Stop webcam"
+                      : "Start webcam"}
+                </TooltipContent>
+              </Tooltip>
 
-            <Button
-              onClick={() => imageInputRef.current?.click()}
-              variant="secondary"
-              className="size-6 md:size-8"
-              disabled={!mediaPipeReady}
-              title={!mediaPipeReady ? "Loading AI model..." : undefined}
-            >
-              <ImageIcon className="h-4 w-4" />
-            </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => imageInputRef.current?.click()}
+                    variant="secondary"
+                    className="size-6 md:size-8"
+                    disabled={!mediaPipeReady}
+                  >
+                    <ImageIcon className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {!mediaPipeReady ? "Loading AI model..." : "Upload image"}
+                </TooltipContent>
+              </Tooltip>
 
-            <Button
-              onClick={() => videoInputRef.current?.click()}
-              variant="secondary"
-              className="size-6 md:size-8"
-              disabled={!mediaPipeReady}
-              title={!mediaPipeReady ? "Loading AI model..." : undefined}
-            >
-              <Video className="h-4 w-4" />
-            </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => videoInputRef.current?.click()}
+                    variant="secondary"
+                    className="size-6 md:size-8"
+                    disabled={!mediaPipeReady}
+                  >
+                    <Video className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {!mediaPipeReady ? "Loading AI model..." : "Upload video"}
+                </TooltipContent>
+              </Tooltip>
 
-            {/* Record VMD button - always allow stopping if recording */}
-            <Button
-              onClick={toggleRecording}
-              variant={isRecordingVMD ? "destructive" : "secondary"}
-              className="size-6 md:size-8 hidden md:flex"
-              disabled={!isRecordingVMD && inputMode === "image"}
-              title={isRecordingVMD ? "Stop recording & export VMD" : "Start VMD recording"}
-            >
-              <Circle className={`h-4 w-4 ${isRecordingVMD ? "fill-current" : ""}`} />
-            </Button>
-          </div>
+              {/* Record VMD button - always allow stopping if recording */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={toggleRecording}
+                    variant={isRecordingVMD ? "destructive" : "secondary"}
+                    className="size-6 md:size-8 hidden md:flex"
+                    disabled={!isRecordingVMD && inputMode === "image"}
+                  >
+                    <Circle className={`h-4 w-4 ${isRecordingVMD ? "fill-current" : ""}`} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {isRecordingVMD ? "Stop recording & export VMD" : "Start VMD recording"}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
 
           <input
             ref={imageInputRef}
@@ -421,12 +459,6 @@ export const MotionCapture = ({
 
         {/* Media Container */}
         <div className="relative w-full h-28 md:h-80 bg-black/10 rounded-lg border border-white/20 overflow-hidden">
-          {!mediaPipeReady && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 md:gap-2 bg-black/60 backdrop-blur-[2px] text-white">
-              <Loader2 className="h-5 w-5 md:h-6 md:w-6 animate-spin" />
-              <div className="text-[10px] md:text-xs font-medium text-center px-2">Loading AI model...</div>
-            </div>
-          )}
           {inputMode === "image" && (
             <div className="w-full h-full flex items-center justify-center">
               <Image
