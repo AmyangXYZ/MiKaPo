@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Engine, EngineStats, Model, Quat, Vec3, parsePmxFolderInput, pmxFileAtRelativePath } from "reze-engine"
 
 import { MotionCapture } from "./motion-capture"
+import Loading from "./loading"
 import { BoneState } from "@/lib/solver"
 import { FaceSolverResult } from "@/lib/face-blendshape-solver"
 
@@ -36,6 +37,7 @@ export default function MainScene() {
   /** Bumped on folder upload so a still-in-flight default `loadModel` can discard its result. */
   const loadGenerationRef = useRef(0)
   const [modelLoaded, setModelLoaded] = useState(false)
+  const [mediaPipeReady, setMediaPipeReady] = useState(false)
   /** After `engine.init()` — folder picker is safe (loadModel still async for default PMX). */
   const [engineInited, setEngineInited] = useState(false)
   const [engineError, setEngineError] = useState<string | null>(null)
@@ -337,7 +339,7 @@ export default function MainScene() {
               onClick={() => pmxFolderInputRef.current?.click()}
             >
               <FolderOpen className="size-4" />
-              Load Your Model
+              Use Your Model
             </Button>
 
             <Button
@@ -411,7 +413,14 @@ export default function MainScene() {
         </div>
       ) : null}
 
-      <MotionCapture applyPose={applyPose} applyFace={applyFace} modelLoaded={modelLoaded} />
+      <MotionCapture
+        applyPose={applyPose}
+        applyFace={applyFace}
+        modelLoaded={modelLoaded}
+        onMediaPipeReadyChange={setMediaPipeReady}
+      />
+
+      <Loading modelLoaded={modelLoaded} mediaPipeReady={mediaPipeReady} />
 
       {engineError && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-medium text-white z-10">
