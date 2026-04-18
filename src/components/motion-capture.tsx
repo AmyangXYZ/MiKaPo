@@ -22,11 +22,13 @@ export const MotionCapture = ({
   applyFace,
   modelLoaded,
   onMediaPipeReadyChange,
+  resetModel,
 }: {
   applyPose: (boneStates: BoneState[]) => void
   applyFace: (faceResult: FaceSolverResult) => void
   modelLoaded: boolean
   onMediaPipeReadyChange?: (ready: boolean) => void
+  resetModel?: () => void
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
@@ -241,6 +243,7 @@ export const MotionCapture = ({
     const file = event.target.files?.[0]
     if (file && file.type.includes("image")) {
       const url = URL.createObjectURL(file)
+      resetModel?.()
       holisticLandmarkerRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
         setCurrentImage(url)
         setVideoSrc("")
@@ -255,6 +258,7 @@ export const MotionCapture = ({
     const file = event.target.files?.[0]
     if (file && file.type.includes("video")) {
       const url = URL.createObjectURL(file)
+      resetModel?.()
       if (lastMedia === "IMAGE") {
         holisticLandmarkerRef.current?.setOptions({ runningMode: "VIDEO" }).then(() => {
           setVideoSrc(url)
@@ -298,6 +302,7 @@ export const MotionCapture = ({
     } else {
       try {
         stopCurrentInput()
+        resetModel?.()
         setInputMode("camera")
         setIsStreamActive(true)
 

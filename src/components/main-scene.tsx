@@ -268,6 +268,11 @@ export default function MainScene() {
     [engineRef],
   )
 
+  const resetModel = useCallback(() => {
+    modelRef.current?.resetAllBones()
+    modelRef.current?.resetAllMorphs()
+  }, [])
+
   const applyFace = useCallback(
     (faceResult: FaceSolverResult) => {
       if (!engineRef.current) return
@@ -418,6 +423,7 @@ export default function MainScene() {
         applyFace={applyFace}
         modelLoaded={modelLoaded}
         onMediaPipeReadyChange={setMediaPipeReady}
+        resetModel={resetModel}
       />
 
       <Loading modelLoaded={modelLoaded} mediaPipeReady={mediaPipeReady} />
