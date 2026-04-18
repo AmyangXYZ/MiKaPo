@@ -6,7 +6,7 @@ import Encoding from "encoding-japanese"
 import { BoneState, Solver } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
 import { Button } from "@/components/ui/button"
-import { Camera, Image as ImageIcon, Video, Webcam, Pause, Circle } from "lucide-react"
+import { Camera, Image as ImageIcon, Video, Webcam, Pause, Circle, Loader2 } from "lucide-react"
 import DebugScene from "./debug-scene"
 
 type InputMode = "image" | "video" | "camera" | null
@@ -30,6 +30,7 @@ export const MotionCapture = ({
   const imageInputRef = useRef<HTMLInputElement>(null)
   const videoInputRef = useRef<HTMLInputElement>(null)
   const holisticLandmarkerRef = useRef<HolisticLandmarker | null>(null)
+  const [mediaPipeReady, setMediaPipeReady] = useState(false)
   const [landmarks, setLandmarks] = useState<HolisticLandmarkerResult | null>(null)
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
@@ -94,7 +95,7 @@ export const MotionCapture = ({
           // Record current pose and morph state
           if (currentBoneStatesRef.current.length > 0) {
             const frame: RecordedFrame = {
-              boneStates: currentBoneStatesRef.current.map(bs => ({
+              boneStates: currentBoneStatesRef.current.map((bs) => ({
                 name: bs.name,
                 rotation: bs.rotation.clone(),
               })),
@@ -124,7 +125,7 @@ export const MotionCapture = ({
     const initLandmarker = async () => {
       try {
         const vision = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm"
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm",
         )
 
         if (!isMounted || holisticLandmarkerRef.current) return
@@ -153,6 +154,30 @@ export const MotionCapture = ({
         }
 
         if (!isMounted) return
+
+        // Warm up: force GPU shader compilation / tensor allocation now, not on the
+        // user's first real frame. Result is discarded — `mediaPipeReady` is still
+        // false so the detect loop below isn't running yet.
+        try {
+          const warmupCanvas = document.createElement("canvas")
+          warmupCanvas.width = 256
+          warmupCanvas.height = 256
+          const ctx = warmupCanvas.getContext("2d")
+          if (ctx) {
+            ctx.fillStyle = "#808080"
+            ctx.fillRect(0, 0, 256, 256)
+          }
+          await new Promise<void>((resolve) => {
+            holisticLandmarkerRef.current!.detectForVideo(warmupCanvas, performance.now(), () => {
+              resolve()
+            })
+          })
+        } catch (warmupError) {
+          console.warn("MediaPipe warmup failed (non-fatal):", warmupError)
+        }
+
+        if (!isMounted) return
+        setMediaPipeReady(true)
 
         let lastTime = performance.now()
         let lastImgSrc = ""
@@ -317,7 +342,6 @@ export const MotionCapture = ({
     }
   }, [isRecordingVMD])
 
-
   return (
     <div className="absolute top-0 left-0 z-10 p-4 max-w-[180px] md:max-w-sm w-full">
       <div className="bg-white/30 backdrop-blur-xs shadow-sm rounded-lg p-1 md:p-4 flex flex-col items-center justify-center">
@@ -326,15 +350,33 @@ export const MotionCapture = ({
           <div className="text-white text-lg font-medium hidden md:block">Motion Capture</div>
 
           <div className="flex gap-1 md:gap-2 items-center justify-center flex-wrap">
-            <Button onClick={toggleCamera} variant={isStreamActive ? "destructive" : "secondary"} className="size-6 md:size-8">
+            <Button
+              onClick={toggleCamera}
+              variant={isStreamActive ? "destructive" : "secondary"}
+              className="size-6 md:size-8"
+              disabled={!mediaPipeReady}
+              title={!mediaPipeReady ? "Loading AI model..." : undefined}
+            >
               {isStreamActive ? <Pause /> : <Webcam />}
             </Button>
 
-            <Button onClick={() => imageInputRef.current?.click()} variant="secondary" className="size-6 md:size-8">
+            <Button
+              onClick={() => imageInputRef.current?.click()}
+              variant="secondary"
+              className="size-6 md:size-8"
+              disabled={!mediaPipeReady}
+              title={!mediaPipeReady ? "Loading AI model..." : undefined}
+            >
               <ImageIcon className="h-4 w-4" />
             </Button>
 
-            <Button onClick={() => videoInputRef.current?.click()} variant="secondary" className="size-6 md:size-8">
+            <Button
+              onClick={() => videoInputRef.current?.click()}
+              variant="secondary"
+              className="size-6 md:size-8"
+              disabled={!mediaPipeReady}
+              title={!mediaPipeReady ? "Loading AI model..." : undefined}
+            >
               <Video className="h-4 w-4" />
             </Button>
 
@@ -378,7 +420,13 @@ export const MotionCapture = ({
         )}
 
         {/* Media Container */}
-        <div className="w-full h-28 md:h-80 bg-black/10 rounded-lg border border-white/20 overflow-hidden">
+        <div className="relative w-full h-28 md:h-80 bg-black/10 rounded-lg border border-white/20 overflow-hidden">
+          {!mediaPipeReady && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 md:gap-2 bg-black/60 backdrop-blur-[2px] text-white">
+              <Loader2 className="h-5 w-5 md:h-6 md:w-6 animate-spin" />
+              <div className="text-[10px] md:text-xs font-medium text-center px-2">Loading AI model...</div>
+            </div>
+          )}
           {inputMode === "image" && (
             <div className="w-full h-full flex items-center justify-center">
               <Image
@@ -398,7 +446,6 @@ export const MotionCapture = ({
               <video
                 ref={videoRef}
                 className={`w-full h-full object-contain ${inputMode === "camera" ? "scale-x-[-1]" : ""}`}
-                muted
                 playsInline
                 autoPlay={inputMode === "camera"}
                 controls={inputMode === "video"}
@@ -450,7 +497,7 @@ function createVMD(frames: RecordedFrame[], frameMultiplier: number = 1): Blob {
     name: string,
     frame: number,
     position: Vector3,
-    rotation: Quaternion
+    rotation: Quaternion,
   ): number => {
     const nameBytes = encodeShiftJIS(name)
     for (let i = 0; i < 15; i++) {
@@ -486,13 +533,7 @@ function createVMD(frames: RecordedFrame[], frameMultiplier: number = 1): Blob {
     return offset
   }
 
-  const writeMorphFrame = (
-    dataView: DataView,
-    offset: number,
-    name: string,
-    frame: number,
-    weight: number
-  ): number => {
+  const writeMorphFrame = (dataView: DataView, offset: number, name: string, frame: number, weight: number): number => {
     const nameBytes = encodeShiftJIS(name)
     for (let i = 0; i < 15; i++) {
       dataView.setUint8(offset + i, i < nameBytes.length ? nameBytes[i] : 0)
@@ -554,7 +595,7 @@ function createVMD(frames: RecordedFrame[], frameMultiplier: number = 1): Blob {
         boneState.name,
         frameNumber,
         new Vector3(0, 0, 0), // No translation
-        boneState.rotation
+        boneState.rotation,
       )
     }
   }

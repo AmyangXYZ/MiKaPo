@@ -35,6 +35,8 @@ function DebugScene({ landmarks }: { landmarks: HolisticLandmarkerResult | null 
       ground.material = groundMaterial
 
       engine.runRenderLoop(() => {
+        const c = canvasRef.current
+        if (!c || c.clientWidth === 0 || c.clientHeight === 0) return
         engine.resize()
         scene!.render()
       })
@@ -57,27 +59,30 @@ function DebugScene({ landmarks }: { landmarks: HolisticLandmarkerResult | null 
 
       if (!landmarks || landmarks.length === 0) return
 
-      // Only clear existing meshes when we have new landmarks to draw
-      lineMeshesRef.current.forEach((mesh, key) => {
-        if (key.startsWith(meshNamePrefix)) {
-          mesh.dispose()
-          lineMeshesRef.current.delete(key)
-        }
-      })
-
       const points = landmarks.map((lm) => new Vector3(lm.x, -lm.y, lm.z))
       connections.forEach((connection, index) => {
         const start = points[connection.start]
         const end = points[connection.end]
         const meshKey = `${meshNamePrefix}_${index}`
+        const existing = lineMeshesRef.current.get(meshKey)
 
-        const lineMesh = MeshBuilder.CreateLines(
-          `debug_lines_${meshNamePrefix}_${index}`,
-          { points: [start, end] },
-          sceneRef.current
-        )
-        lineMesh.color = color
-        lineMeshesRef.current.set(meshKey, lineMesh)
+        if (existing) {
+          // Update points in place — avoids the dispose/recreate frame gap
+          // that was causing the debug lines to flicker.
+          MeshBuilder.CreateLines(
+            `debug_lines_${meshNamePrefix}_${index}`,
+            { points: [start, end], instance: existing },
+            sceneRef.current
+          )
+        } else {
+          const lineMesh = MeshBuilder.CreateLines(
+            `debug_lines_${meshNamePrefix}_${index}`,
+            { points: [start, end], updatable: true },
+            sceneRef.current
+          )
+          lineMesh.color = color
+          lineMeshesRef.current.set(meshKey, lineMesh)
+        }
       })
     },
     []
