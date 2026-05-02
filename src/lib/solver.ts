@@ -122,13 +122,117 @@ const HandIndexTable: Record<string, number> = {
   pinky_tip: 20,
 }
 
+class OneEuroFilter {
+  private prev: number | null = null
+  private prevDeriv = 0
+  private prevTs: number | null = null
+
+  constructor(
+    private minCutoff: number,
+    private beta: number,
+    private dCutoff: number,
+  ) {}
+
+  filter(value: number, ts: number): number {
+    if (this.prev === null || this.prevTs === null) {
+      this.prev = value
+      this.prevTs = ts
+      return value
+    }
+    const dt = (ts - this.prevTs) / 1000
+    if (dt <= 0) return this.prev
+
+    const rawDeriv = (value - this.prev) / dt
+    const aD = OneEuroFilter.smoothing(this.dCutoff, dt)
+    const filteredDeriv = aD * rawDeriv + (1 - aD) * this.prevDeriv
+
+    const cutoff = this.minCutoff + this.beta * Math.abs(filteredDeriv)
+    const a = OneEuroFilter.smoothing(cutoff, dt)
+    const filtered = a * value + (1 - a) * this.prev
+
+    this.prev = filtered
+    this.prevDeriv = filteredDeriv
+    this.prevTs = ts
+    return filtered
+  }
+
+  reset(): void {
+    this.prev = null
+    this.prevDeriv = 0
+    this.prevTs = null
+  }
+
+  private static smoothing(cutoff: number, dt: number): number {
+    const tau = 1 / (2 * Math.PI * cutoff)
+    return 1 / (1 + tau / dt)
+  }
+}
+
+class QuaternionOneEuroFilter {
+  private fx: OneEuroFilter
+  private fy: OneEuroFilter
+  private fz: OneEuroFilter
+  private fw: OneEuroFilter
+  private prev: Quaternion | null = null
+
+  constructor(minCutoff: number, beta: number, dCutoff: number) {
+    this.fx = new OneEuroFilter(minCutoff, beta, dCutoff)
+    this.fy = new OneEuroFilter(minCutoff, beta, dCutoff)
+    this.fz = new OneEuroFilter(minCutoff, beta, dCutoff)
+    this.fw = new OneEuroFilter(minCutoff, beta, dCutoff)
+  }
+
+  filter(q: Quaternion, ts: number): Quaternion {
+    let x = q.x,
+      y = q.y,
+      z = q.z,
+      w = q.w
+    // Hemisphere flip: keep dot(prev, raw) >= 0 so component-wise filtering
+    // doesn't take the long way around the 4D sphere.
+    if (this.prev) {
+      const dot = this.prev.x * x + this.prev.y * y + this.prev.z * z + this.prev.w * w
+      if (dot < 0) {
+        x = -x
+        y = -y
+        z = -z
+        w = -w
+      }
+    }
+    const out = new Quaternion(
+      this.fx.filter(x, ts),
+      this.fy.filter(y, ts),
+      this.fz.filter(z, ts),
+      this.fw.filter(w, ts),
+    )
+    out.normalize()
+    this.prev = out
+    return out
+  }
+
+  reset(): void {
+    this.fx.reset()
+    this.fy.reset()
+    this.fz.reset()
+    this.fw.reset()
+    this.prev = null
+  }
+}
+
 export class Solver {
   private poseWorldLandmarks: Landmark[] | null = null
   private leftHandWorldLandmarks: Landmark[] | null = null
   private rightHandWorldLandmarks: Landmark[] | null = null
   private boneStates: Record<string, BoneState> = {}
+  private filters: Record<string, QuaternionOneEuroFilter> = {}
+  private smoothing = { minCutoff: 1.5, beta: 0.5, dCutoff: 1.0 }
 
   constructor() {}
+
+  reset(): void {
+    for (const key of Object.keys(this.filters)) {
+      this.filters[key].reset()
+    }
+  }
 
   solve(landmarks: HolisticLandmarkerResult): BoneState[] | null {
     this.boneStates = {}
@@ -197,6 +301,19 @@ export class Solver {
     this.boneStates["right_pinky_1"] = this.solveRightPinky1()
     this.boneStates["right_pinky_2"] = this.solveRightPinky2()
     this.boneStates["right_pinky_3"] = this.solveRightPinky3()
+
+    // One-Euro filter pass. Applied as a post-pass on the final outputs so the
+    // hierarchical chain (child computed in unfiltered parent's local space)
+    // stays mathematically consistent — only the displayed rotations are smoothed.
+    const ts = performance.now()
+    for (const key of Object.keys(this.boneStates)) {
+      let f = this.filters[key]
+      if (!f) {
+        f = new QuaternionOneEuroFilter(this.smoothing.minCutoff, this.smoothing.beta, this.smoothing.dCutoff)
+        this.filters[key] = f
+      }
+      this.boneStates[key].rotation = f.filter(this.boneStates[key].rotation, ts)
+    }
 
     return Object.values(this.boneStates)
   }
@@ -275,7 +392,7 @@ export class Solver {
       0,
       0,
       0,
-      1
+      1,
     )
 
     const scaling = new Vector3()
@@ -1204,7 +1321,7 @@ class VpdWriter {
       lines.push(`Bone${index}{${boneState.name}`)
       lines.push(`  0.000000,0.000000,0.000000;\t\t\t\t// trans x,y,z`)
       lines.push(
-        `  ${boneState.rotation.x},${boneState.rotation.y},${boneState.rotation.z},${boneState.rotation.w};\t\t// Quaternion x,y,z,w`
+        `  ${boneState.rotation.x},${boneState.rotation.y},${boneState.rotation.z},${boneState.rotation.w};\t\t// Quaternion x,y,z,w`,
       )
       lines.push(`}`)
       lines.push("")

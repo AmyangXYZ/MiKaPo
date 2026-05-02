@@ -262,7 +262,7 @@ export default function MainScene() {
         pose[bone.name] = new Quat(bone.rotation.x, bone.rotation.y, bone.rotation.z, bone.rotation.w)
       }
       if (Object.keys(pose).length > 0) {
-        modelRef.current?.rotateBones(pose, 60)
+        modelRef.current?.rotateBones(pose, 30)
       }
     },
     [engineRef],
