@@ -192,7 +192,7 @@ export const MotionCapture = ({
         let lastTime = performance.now()
         let lastImgSrc = ""
         let frameCounter = 0
-        const FRAME_SKIP = 4
+        const FRAME_SKIP = 2
 
         const detect = () => {
           frameCounter++
@@ -244,6 +244,7 @@ export const MotionCapture = ({
     if (file && file.type.includes("image")) {
       const url = URL.createObjectURL(file)
       resetModel?.()
+      solverRef.current?.reset()
       holisticLandmarkerRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
         setCurrentImage(url)
         setVideoSrc("")
@@ -259,6 +260,7 @@ export const MotionCapture = ({
     if (file && file.type.includes("video")) {
       const url = URL.createObjectURL(file)
       resetModel?.()
+      solverRef.current?.reset()
       if (lastMedia === "IMAGE") {
         holisticLandmarkerRef.current?.setOptions({ runningMode: "VIDEO" }).then(() => {
           setVideoSrc(url)
@@ -303,6 +305,7 @@ export const MotionCapture = ({
       try {
         stopCurrentInput()
         resetModel?.()
+        solverRef.current?.reset()
         setInputMode("camera")
         setIsStreamActive(true)
 
@@ -376,11 +379,7 @@ export const MotionCapture = ({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {!mediaPipeReady
-                    ? "Loading AI model..."
-                    : isStreamActive
-                      ? "Stop webcam"
-                      : "Start webcam"}
+                  {!mediaPipeReady ? "Loading AI model..." : isStreamActive ? "Stop webcam" : "Start webcam"}
                 </TooltipContent>
               </Tooltip>
 
@@ -395,9 +394,7 @@ export const MotionCapture = ({
                     <ImageIcon className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {!mediaPipeReady ? "Loading AI model..." : "Upload image"}
-                </TooltipContent>
+                <TooltipContent>{!mediaPipeReady ? "Loading AI model..." : "Upload image"}</TooltipContent>
               </Tooltip>
 
               <Tooltip>
@@ -411,9 +408,7 @@ export const MotionCapture = ({
                     <Video className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {!mediaPipeReady ? "Loading AI model..." : "Upload video"}
-                </TooltipContent>
+                <TooltipContent>{!mediaPipeReady ? "Loading AI model..." : "Upload video"}</TooltipContent>
               </Tooltip>
 
               {/* Record VMD button - always allow stopping if recording */}
