@@ -320,6 +320,13 @@ export class Solver {
     set("左手首", dir("左手首", "左中指１"))
     set("右手首", dir("右手首", "右中指１"))
 
+    // Wrist-twist witness axis: index_mcp − ring_mcp at rest. solveWristTwist
+    // compares the live hand axis to this reference and projects onto the
+    // forearm to extract twist. Without calibration, the (0, 0, -1) fallback
+    // bakes in a 90°-ish baseline twist for every frame including rest.
+    set("左手捩", dir("左薬指１", "左人指１"))
+    set("右手捩", dir("右薬指１", "右人指１"))
+
     // Finger base joints (proximal phalanges)
     set("左親指１", dir("左親指１", "左親指２"))
     set("右親指１", dir("右親指１", "右親指２"))
@@ -336,6 +343,19 @@ export class Solver {
   // Calibrated reference for `key` if available, else the static default.
   private getRef(key: string): Vector3 {
     return this.refs[key] ?? DEFAULT_REFS[key]
+  }
+
+  // Swing-twist decomposition: returns the twist component of `q` around unit
+  // axis `a`. `q = swing * twist`; the swing has zero rotation around `a`.
+  // Singular when q is ~180° around an axis perpendicular to a — return identity.
+  private static twistAroundAxis(q: Quaternion, a: Vector3): Quaternion {
+    const d = q.x * a.x + q.y * a.y + q.z * a.z
+    const px = a.x * d
+    const py = a.y * d
+    const pz = a.z * d
+    const len = Math.sqrt(px * px + py * py + pz * pz + q.w * q.w)
+    if (len < 1e-8) return Quaternion.Identity()
+    return new Quaternion(px / len, py / len, pz / len, q.w / len)
   }
 
   solve(landmarks: HolisticLandmarkerResult): BoneState[] | null {
@@ -857,13 +877,16 @@ export class Solver {
     const handDirection = localLeftIndex.subtract(localLeftRing).normalize()
     const reference = this.getRef("左手捩")
 
+    // Total rotation aligning rest hand axis to current. Includes wrist twist + swing.
     const fullRotation = Quaternion.FromUnitVectorsToRef(reference, handDirection, new Quaternion())
-    const eulerAngles = fullRotation.toEulerAngles()
-    const rollOnly = Quaternion.RotationYawPitchRoll(eulerAngles.z, 0, 0)
+    // Forearm direction in this local frame at rest = elbow's reference (parent-local).
+    // Project the rotation onto this axis to keep only the twist; the residual swing
+    // is absorbed by 左手首 since its parent chain includes 左手捩.
+    const twist = Solver.twistAroundAxis(fullRotation, this.getRef("左ひじ"))
 
     return {
       name: "左手捩",
-      rotation: rollOnly,
+      rotation: twist,
     }
   }
 
@@ -889,14 +912,13 @@ export class Solver {
     const handDirection = localRightIndex.subtract(localRightRing).normalize()
     const reference = this.getRef("右手捩")
 
+    // See solveLeftWristTwist. Twist axis = forearm = right elbow's reference direction.
     const fullRotation = Quaternion.FromUnitVectorsToRef(reference, handDirection, new Quaternion())
-
-    const eulerAngles = fullRotation.toEulerAngles()
-    const rollOnly = Quaternion.RotationYawPitchRoll(eulerAngles.z, 0, 0)
+    const twist = Solver.twistAroundAxis(fullRotation, this.getRef("右ひじ"))
 
     return {
       name: "右手捩",
-      rotation: rollOnly,
+      rotation: twist,
     }
   }
 
