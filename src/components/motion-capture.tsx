@@ -7,7 +7,7 @@ import { BoneState, Solver } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Camera, Image as ImageIcon, Video, Webcam, Pause, Circle } from "lucide-react"
+import { Camera, Image as ImageIcon, Video, Webcam, Pause, Play, Circle } from "lucide-react"
 import DebugScene from "./debug-scene"
 
 type InputMode = "image" | "video" | "camera" | null
@@ -61,6 +61,22 @@ export const MotionCapture = ({
   // Current pose/face state for recording
   const currentBoneStatesRef = useRef<BoneState[]>([])
   const currentMorphWeightsRef = useRef<FaceMorphWeights | null>(null)
+
+  // Custom video controls — replaces native browser chrome to match the panel style.
+  const [videoPlaying, setVideoPlaying] = useState(false)
+  const [videoTime, setVideoTime] = useState(0)
+  const [videoDuration, setVideoDuration] = useState(0)
+  const formatTime = (s: number): string => {
+    if (!Number.isFinite(s) || s < 0) return "0:00"
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${sec.toString().padStart(2, "0")}`
+  }
+  const toggleVideoPlay = () => {
+    if (!videoRef.current) return
+    if (videoRef.current.paused) videoRef.current.play()
+    else videoRef.current.pause()
+  }
 
   // Initialize solvers and apply poses
   useEffect(() => {
@@ -364,109 +380,117 @@ export const MotionCapture = ({
     }
   }, [isRecordingVMD])
 
+  const statusPill =
+    inputMode === "camera" ? (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-red-300">
+        <span className="size-1.5 animate-pulse rounded-full bg-red-500" />
+        Live
+      </span>
+    ) : inputMode === "video" ? (
+      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/60">
+        Video
+      </span>
+    ) : inputMode === "image" ? (
+      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/60">
+        Image
+      </span>
+    ) : null
+
   return (
-    <div className="absolute top-0 left-0 z-10 p-4 max-w-[180px] md:max-w-sm w-full">
-      <div className="bg-white/30 backdrop-blur-xs shadow-sm rounded-lg p-1 md:p-4 flex flex-col items-center justify-center">
-        {/* Controls */}
-        <div className="w-full flex justify-center md:justify-between items-center mb-1 md:mb-2">
-          <div className="text-white text-lg font-medium hidden md:block">Motion Capture</div>
-
+    <div className="absolute left-2 top-2 z-10 w-[148px] max-w-[calc(100vw-1rem)] md:left-3 md:top-12 md:w-[300px]">
+      <div className="overflow-hidden rounded-xl border border-white/10 bg-zinc-950/35 shadow-2xl shadow-black/40 backdrop-blur-md md:bg-zinc-950/60">
+        {/* Toolbar — mode buttons + status + record (status/record desktop-only). */}
+        <div className="flex items-center gap-0.5 border-b border-white/5 px-1.5 py-1.5 md:gap-1 md:px-3 md:py-2">
           <TooltipProvider delayDuration={150}>
-            <div className="flex gap-1 md:gap-2 items-center justify-center flex-wrap">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={toggleCamera}
-                    variant={isStreamActive ? "destructive" : "secondary"}
-                    className="size-6 md:size-8"
-                    disabled={!mediaPipeReady}
-                  >
-                    {isStreamActive ? <Pause /> : <Webcam />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {!mediaPipeReady ? "Loading AI model..." : isStreamActive ? "Stop webcam" : "Start webcam"}
-                </TooltipContent>
-              </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={toggleCamera}
+                  variant="ghost"
+                  size="icon"
+                  className={`size-7 ${
+                    isStreamActive
+                      ? "bg-white/10 text-white hover:bg-white/15"
+                      : "text-white/70 hover:bg-white/10 hover:text-white"
+                  }`}
+                  disabled={!mediaPipeReady}
+                >
+                  {isStreamActive ? <Pause className="size-3.5" /> : <Webcam className="size-3.5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {!mediaPipeReady ? "Loading…" : isStreamActive ? "Stop webcam" : "Start webcam"}
+              </TooltipContent>
+            </Tooltip>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() => imageInputRef.current?.click()}
-                    variant="secondary"
-                    className="size-6 md:size-8"
-                    disabled={!mediaPipeReady}
-                  >
-                    <ImageIcon className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{!mediaPipeReady ? "Loading AI model..." : "Upload image"}</TooltipContent>
-              </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() => imageInputRef.current?.click()}
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 text-white/70 hover:bg-white/10 hover:text-white"
+                  disabled={!mediaPipeReady}
+                >
+                  <ImageIcon className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{!mediaPipeReady ? "Loading…" : "Upload image"}</TooltipContent>
+            </Tooltip>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() => videoInputRef.current?.click()}
-                    variant="secondary"
-                    className="size-6 md:size-8"
-                    disabled={!mediaPipeReady}
-                  >
-                    <Video className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{!mediaPipeReady ? "Loading AI model..." : "Upload video"}</TooltipContent>
-              </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() => videoInputRef.current?.click()}
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 text-white/70 hover:bg-white/10 hover:text-white"
+                  disabled={!mediaPipeReady}
+                >
+                  <Video className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{!mediaPipeReady ? "Loading…" : "Upload video"}</TooltipContent>
+            </Tooltip>
 
-              {/* Record VMD button - always allow stopping if recording */}
+            <div className="ml-auto hidden items-center gap-1.5 md:flex">
+              {isRecordingVMD ? (
+                <span className="font-mono text-[10px] tabular-nums text-red-300/90">
+                  {recordedFrameCount}f · {(recordedFrameCount / 30).toFixed(1)}s
+                </span>
+              ) : (
+                statusPill
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     onClick={toggleRecording}
-                    variant={isRecordingVMD ? "destructive" : "secondary"}
-                    className="size-6 md:size-8 hidden md:flex"
+                    variant="ghost"
+                    size="icon"
+                    className={`size-7 ${
+                      isRecordingVMD
+                        ? "bg-red-500/10 text-red-400 hover:bg-red-500/15 hover:text-red-300"
+                        : "text-white/70 hover:bg-white/10 hover:text-white"
+                    }`}
                     disabled={!isRecordingVMD && inputMode === "image"}
                   >
-                    <Circle className={`h-4 w-4 ${isRecordingVMD ? "fill-current" : ""}`} />
+                    <Circle className={`size-3.5 ${isRecordingVMD ? "fill-current" : ""}`} />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {isRecordingVMD ? "Stop recording & export VMD" : "Start VMD recording"}
-                </TooltipContent>
+                <TooltipContent>{isRecordingVMD ? "Stop & export VMD" : "Record VMD"}</TooltipContent>
               </Tooltip>
             </div>
           </TooltipProvider>
-
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleImageUpload}
-            style={{ display: "none" }}
-          />
-
-          <input
-            ref={videoInputRef}
-            type="file"
-            accept="video/*"
-            onChange={handleVideoUpload}
-            style={{ display: "none" }}
-          />
         </div>
 
-        {/* Recording indicator */}
-        {isRecordingVMD && (
-          <div className="w-full mb-2 px-2">
-            <div className="text-white text-xs text-center flex items-center justify-center gap-2">
-              <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-              Recording: {recordedFrameCount} frames ({(recordedFrameCount / 30).toFixed(1)}s)
-            </div>
-          </div>
-        )}
+        <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageUpload} hidden />
+        <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoUpload} hidden />
 
-        {/* Media Container */}
-        <div className="relative w-full h-28 md:h-80 bg-black/10 rounded-lg border border-white/20 overflow-hidden">
+        {/* Media — mobile uses opacity-70 so the model bleeds through; tap/hover restores
+            full clarity. Desktop stays opaque. */}
+        <div className="group/media relative aspect-video bg-black/30 opacity-70 transition-opacity duration-200 hover:opacity-100 active:opacity-100 md:bg-black/50 md:opacity-100">
           {inputMode === "image" && (
-            <div className="w-full h-full flex items-center justify-center">
+            <div className="flex h-full w-full items-center justify-center">
               <Image
                 src={currentImage}
                 alt="Motion capture input"
@@ -474,38 +498,65 @@ export const MotionCapture = ({
                 width={320}
                 height={320}
                 priority
-                className="max-w-full max-h-full object-contain"
+                className="max-h-full max-w-full object-contain"
               />
             </div>
           )}
 
           {(inputMode === "video" || inputMode === "camera") && (
-            <div className="relative w-full h-full">
+            <>
               <video
                 ref={videoRef}
-                className={`w-full h-full object-contain ${inputMode === "camera" ? "scale-x-[-1]" : ""}`}
+                className={`h-full w-full object-contain ${inputMode === "camera" ? "scale-x-[-1]" : ""}`}
                 playsInline
                 autoPlay={inputMode === "camera"}
-                controls={inputMode === "video"}
                 disablePictureInPicture
-                controlsList="nofullscreen noremoteplayback"
+                controlsList="nofullscreen noremoteplayback nodownload"
                 src={isStreamActive ? undefined : videoSrc}
+                onPlay={() => setVideoPlaying(true)}
+                onPause={() => setVideoPlaying(false)}
+                onTimeUpdate={(e) => setVideoTime(e.currentTarget.currentTime)}
+                onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration || 0)}
               />
-              {inputMode === "camera" && (
-                <div className="absolute top-2 right-2">
-                  <div className="bg-red-500 text-white text-xs px-2 py-1 rounded-full animate-pulse">LIVE</div>
+
+              {inputMode === "video" && videoSrc && (
+                <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-2 py-1.5">
+                  <button
+                    type="button"
+                    onClick={toggleVideoPlay}
+                    className="flex size-6 shrink-0 items-center justify-center rounded text-white/90 transition-colors hover:bg-white/10 hover:text-white"
+                    aria-label={videoPlaying ? "Pause" : "Play"}
+                  >
+                    {videoPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5 translate-x-[1px]" />}
+                  </button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={videoDuration || 1}
+                    step={0.01}
+                    value={videoTime}
+                    onChange={(e) => {
+                      if (videoRef.current) videoRef.current.currentTime = Number(e.target.value)
+                    }}
+                    className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/20 accent-white outline-none [&::-moz-range-thumb]:size-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:size-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                  />
+                  <span className="hidden font-mono text-[10px] tabular-nums text-white/70 sm:block">
+                    {formatTime(videoTime)} / {formatTime(videoDuration)}
+                  </span>
                 </div>
               )}
-            </div>
+            </>
           )}
 
           {!inputMode && (
-            <div className="w-full h-full flex items-center justify-center">
-              <Camera className="h-12 w-12 text-white/50" />
+            <div className="flex h-full w-full items-center justify-center">
+              <Camera className="size-8 text-white/30" />
             </div>
           )}
         </div>
-        <div className="md:block hidden w-[320px] h-[200px] rounded-lg overflow-hidden z-10 mt-2">
+
+        {/* Skeleton preview — desktop only */}
+        <div className="hidden aspect-[16/10] border-t border-white/5 bg-black/50 md:block">
           <DebugScene landmarks={landmarks} />
         </div>
       </div>

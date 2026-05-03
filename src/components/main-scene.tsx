@@ -1,9 +1,8 @@
 "use client"
 
 import { useRef, useEffect, useCallback, useState, type ChangeEvent, type InputHTMLAttributes } from "react"
-import Image from "next/image"
 import Link from "next/link"
-import { FolderOpen, X } from "lucide-react"
+import { FolderOpen, Github, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 import { Engine, EngineStats, Model, Quat, Vec3, parsePmxFolderInput, pmxFileAtRelativePath } from "reze-engine"
@@ -150,63 +149,66 @@ export default function MainScene() {
     }
   }, [initEngine])
 
-  const loadPmxFromFolder = useCallback(async (files: File[], pmxFile: File) => {
-    const engine = engineRef.current
-    if (!engine) {
-      window.alert("Viewport is not ready yet. Wait for initialization, then try again.")
-      return
-    }
-    loadGenerationRef.current += 1
-    const stem = fileStem(pmxFile.name)
-    const instanceKey = `u_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`
-    try {
-      try {
-        engine.removeModel(loadedModelNameRef.current)
-      } catch {
-        /* removeModel no-op if name stale */
+  const loadPmxFromFolder = useCallback(
+    async (files: File[], pmxFile: File) => {
+      const engine = engineRef.current
+      if (!engine) {
+        window.alert("Viewport is not ready yet. Wait for initialization, then try again.")
+        return
       }
-      const model = await engine.loadModel(instanceKey, { files, pmxFile })
-      await new Promise((resolve) => requestAnimationFrame(resolve))
-      model.setName(stem)
-      modelRef.current = model
-      loadedModelNameRef.current = instanceKey
-      engine.setMaterialPresets(loadedModelNameRef.current, {
-        eye: ["眼睛", "眼白", "目白", "右瞳", "左瞳", "眉毛", "eyebrow", "eyelash"],
-        face: ["脸", "face01"],
-        body: ["皮肤", "skin"],
-        hair: ["头发", "hair_f"],
-        cloth_smooth: [
-          "衣服",
-          "裙子",
-          "裙带",
-          "裙布",
-          "外套",
-          "外套饰",
-          "裤子",
-          "裤子0",
-          "腿环",
-          "发饰",
-          "鞋子",
-          "鞋子饰",
-          "shirt",
-          "shoes",
-          "shorts",
-          "trigger",
-          "dress",
-          "hair_accessory",
-          "cloth01_shoes",
-        ],
-        stockings: ["袜子", "stockings"],
-        metal: ["metal01", "earring"],
-      })
-      setModelLoaded(true)
-      buildRestPose(model)
-      setEngineError(null)
-    } catch (e) {
-      console.error("[pmx-upload] loadModel failed:", e)
-      window.alert(e instanceof Error ? e.message : String(e))
-    }
-  }, [buildRestPose])
+      loadGenerationRef.current += 1
+      const stem = fileStem(pmxFile.name)
+      const instanceKey = `u_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`
+      try {
+        try {
+          engine.removeModel(loadedModelNameRef.current)
+        } catch {
+          /* removeModel no-op if name stale */
+        }
+        const model = await engine.loadModel(instanceKey, { files, pmxFile })
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        model.setName(stem)
+        modelRef.current = model
+        loadedModelNameRef.current = instanceKey
+        engine.setMaterialPresets(loadedModelNameRef.current, {
+          eye: ["眼睛", "眼白", "目白", "右瞳", "左瞳", "眉毛", "eyebrow", "eyelash"],
+          face: ["脸", "face01"],
+          body: ["皮肤", "skin"],
+          hair: ["头发", "hair_f"],
+          cloth_smooth: [
+            "衣服",
+            "裙子",
+            "裙带",
+            "裙布",
+            "外套",
+            "外套饰",
+            "裤子",
+            "裤子0",
+            "腿环",
+            "发饰",
+            "鞋子",
+            "鞋子饰",
+            "shirt",
+            "shoes",
+            "shorts",
+            "trigger",
+            "dress",
+            "hair_accessory",
+            "cloth01_shoes",
+          ],
+          stockings: ["袜子", "stockings"],
+          metal: ["metal01", "earring"],
+        })
+        setModelLoaded(true)
+        buildRestPose(model)
+        setEngineError(null)
+      } catch (e) {
+        console.error("[pmx-upload] loadModel failed:", e)
+        window.alert(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [buildRestPose],
+  )
 
   const onPickPmxFolder = useCallback(
     async (e: ChangeEvent<HTMLInputElement>) => {
@@ -333,103 +335,135 @@ export default function MainScene() {
         onChange={onPickPmxFolder}
       />
 
-      <div className="absolute right-0 top-0 z-10 flex w-full flex-row items-center justify-end gap-4 p-4">
-        <div className="flex min-w-0 max-w-full shrink-0 flex-row flex-wrap items-center justify-end gap-x-3 gap-y-2">
-          {stats && (
-            <div className="z-10 flex h-8 mt-0.5 shrink-0 items-center text-sm font-medium leading-none text-white tabular-nums">
-              FPS: {stats.fps}
+      <header className="absolute inset-x-0 top-0 z-20 flex h-12 items-center justify-between gap-3 px-4">
+        {/* Left brand — desktop only. Hidden on mobile (takes no width via `hidden`),
+            so `justify-between` snaps the right cluster to the corner. */}
+        <div className="hidden items-baseline gap-2 md:flex">
+          <span className="text-sm font-semibold tracking-tight text-white">MiKaPo</span>
+          <span className="hidden text-xs text-white/50 lg:inline">Real-time MMD motion capture</span>
+        </div>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          {/* Desktop-only cluster */}
+          <div className="hidden items-center gap-1.5 md:flex">
+            {stats && (
+              <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-mono text-[11px] tabular-nums text-white/70">
+                {stats.fps} FPS
+              </span>
+            )}
+
+            <div className="h-4 w-px bg-white/10" />
+
+            <div className="flex items-center">
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+                className="h-8 px-2.5 text-xs font-normal text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <Link href="https://reze.one" target="_blank">
+                  Engine
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+                className="h-8 px-2.5 text-xs font-normal text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <Link href="https://reze.studio" target="_blank">
+                  Animation
+                </Link>
+              </Button>
             </div>
-          )}
 
-          <div className="flex flex-row items-center gap-2 hidden sm:flex">
-            <Button variant="link" size="sm" asChild className="sm:hidden md:flex z-10 text-white underline">
-              <Link href="https://reze.one" target="_blank">
-                <span className="text-sm">Rendering Engine</span>
-              </Link>
-            </Button>
+            <div className="h-4 w-px bg-white/10" />
 
-            <Button variant="link" size="sm" asChild className="sm:hidden md:flex z-10 text-white underline">
-              <Link href="https://reze.studio" target="_blank">
-                <span className="text-sm">Animation Editor</span>
-              </Link>
-            </Button>
-          </div>
-
-          <div className="hidden shrink-0 flex-row items-center gap-2 sm:flex">
             <Button
               type="button"
               variant="secondary"
               size="sm"
               disabled={!engineInited}
-              className="h-8 shrink-0 gap-1.5 bg-white/90 text-xs text-foreground hover:bg-white disabled:opacity-50"
+              className="h-8 gap-1 border border-white/10 bg-white/10 px-2 text-xs font-normal text-white hover:bg-white/15 disabled:opacity-50 has-[>svg]:px-2"
               onClick={() => pmxFolderInputRef.current?.click()}
             >
-              <FolderOpen className="size-4" />
+              <FolderOpen className="size-3.5" />
               Use Your Model
             </Button>
-
-            <Button
-              size="icon"
-              asChild
-              className="bg-white text-black size-7 shrink-0 rounded-full z-10 hover:bg-gray-200"
-            >
-              <Link href="https://github.com/AmyangXYZ/MiKaPo" target="_blank">
-                <Image src="/github-mark.svg" alt="GitHub" width={18} height={18} />
-              </Link>
-            </Button>
           </div>
+
+          {/* Mobile-only brand — sits next to GitHub icon */}
+          <span className="text-sm font-semibold tracking-tight text-white md:hidden">MiKaPo</span>
+
+          {/* GitHub — always visible (mobile + desktop) */}
+          <Button
+            variant="ghost"
+            size="icon"
+            asChild
+            className="size-8 text-white/70 hover:bg-white/10 hover:text-white"
+          >
+            <Link href="https://github.com/AmyangXYZ/MiKaPo" target="_blank" aria-label="GitHub">
+              <Github className="size-4" />
+            </Link>
+          </Button>
         </div>
-      </div>
+      </header>
 
       {pmxPickDialogOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button
             type="button"
             aria-label="Dismiss"
-            className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={dismissPmxPickDialog}
           />
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="pmx-picker-title"
-            className="relative z-[1] w-full max-w-md rounded-xl border border-white/15 bg-zinc-950/95 p-4 text-white shadow-2xl shadow-black/50 backdrop-blur-md"
+            className="relative z-[1] w-full max-w-md rounded-xl border border-white/10 bg-zinc-950/85 p-5 text-white shadow-2xl shadow-black/50 backdrop-blur-xl"
           >
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <h2 id="pmx-picker-title" className="text-sm font-semibold leading-tight">
+            <div className="mb-1 flex items-start justify-between gap-3">
+              <h2 id="pmx-picker-title" className="text-sm font-semibold tracking-tight">
                 Multiple .pmx files in folder
               </h2>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-8 shrink-0 text-white hover:bg-white/10"
+                className="-mr-1 -mt-1 size-7 shrink-0 text-white/70 hover:bg-white/10 hover:text-white"
                 aria-label="Close"
                 onClick={dismissPmxPickDialog}
               >
                 <X className="size-4" />
               </Button>
             </div>
-            <p className="mb-2 text-xs text-white/70">Pick which model to load.</p>
+            <p className="mb-4 text-xs text-white/60">Pick which model to load.</p>
             <select
-              className="mb-4 w-full rounded-md border border-white/25 bg-black/50 px-2 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+              className="mb-5 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-sm text-white outline-none focus-visible:border-white/30 focus-visible:ring-2 focus-visible:ring-white/20"
               value={pmxPickSelected}
               onChange={(ev) => setPmxPickSelected(ev.target.value)}
             >
               {pmxPickPaths.map((p) => (
-                <option key={p} value={p}>
+                <option key={p} value={p} className="bg-zinc-900 text-white">
                   {p}
                 </option>
               ))}
             </select>
             <div className="flex flex-row justify-end gap-2">
-              <Button type="button" variant="secondary" size="sm" onClick={dismissPmxPickDialog}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs text-white/70 hover:bg-white/10 hover:text-white"
+                onClick={dismissPmxPickDialog}
+              >
                 Cancel
               </Button>
               <Button
                 type="button"
                 size="sm"
-                className="bg-white text-black hover:bg-white/90"
+                className="h-8 bg-white text-xs text-black hover:bg-white/90"
                 onClick={() => void onConfirmPmxPick()}
               >
                 Load selected
