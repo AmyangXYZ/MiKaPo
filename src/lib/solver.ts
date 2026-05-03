@@ -218,6 +218,55 @@ class QuaternionOneEuroFilter {
   }
 }
 
+// Bones whose rest world positions calibrate() reads. Caller queries each
+// from the loaded MMD model and passes them as `restWorldPos`.
+export const SOLVER_REST_BONES: readonly string[] = [
+  "左足", "右足", "左ひざ", "右ひざ", "左足首", "右足首",
+  "首", "頭",
+  "左腕", "右腕", "左ひじ", "右ひじ", "左手首", "右手首",
+  "左中指１", "右中指１",
+  "左親指１", "左親指２", "右親指１", "右親指２",
+  "左人指１", "左人指２", "右人指１", "右人指２",
+  "左中指２", "右中指２",
+  "左薬指１", "左薬指２", "右薬指１", "右薬指２",
+  "左小指１", "左小指２", "右小指１", "右小指２",
+]
+
+// Fallback reference directions in each bone's parent-local frame at rest.
+// `Solver.calibrate()` overrides any of these from the loaded model's rest pose.
+// 左足首/右足首 use MediaPipe heel→foot_index, 左手捩/右手捩 use a canonical
+// hand-local axis, so calibrate() can't derive them — they always come from here.
+const DEFAULT_REFS: Record<string, Vector3> = {
+  左腕: new Vector3(0.80917156, -0.58753001, -0.00706277).normalize(),
+  右腕: new Vector3(-0.80917129, -0.58753035, -0.00706463).normalize(),
+  左ひじ: new Vector3(0.80886214, -0.58772615, -0.01788871).normalize(),
+  右ひじ: new Vector3(-0.80886264, -0.58772542, -0.01789011).normalize(),
+  左足: new Vector3(-0.01338665, -0.99819434, 0.05855645).normalize(),
+  右足: new Vector3(0.01338609, -0.99819433, 0.05855677).normalize(),
+  左ひざ: new Vector3(-0.01333798, -0.98954426, 0.14361147).normalize(),
+  右ひざ: new Vector3(0.01333724, -0.98954425, 0.14361163).normalize(),
+  首: new Vector3(0.00000033, 0.98101922, -0.19391053).normalize(),
+  左手首: new Vector3(0.81635913, -0.57754444, -0.00043314).normalize(),
+  右手首: new Vector3(-0.81635927, -0.57754425, -0.00043491).normalize(),
+  左親指１: new Vector3(0.62716533, -0.72577692, -0.28268623).normalize(),
+  右親指１: new Vector3(-0.62716428, -0.72578107, -0.28267792).normalize(),
+  左人指１: new Vector3(0.84121176, -0.54001806, 0.02726296).normalize(),
+  右人指１: new Vector3(-0.84121092, -0.54001943, 0.02726177).normalize(),
+  左中指１: new Vector3(0.82851523, -0.55942638, 0.02458950).normalize(),
+  右中指１: new Vector3(-0.82851643, -0.55942465, 0.02458833).normalize(),
+  左薬指１: new Vector3(0.80448878, -0.59258445, 0.04051516).normalize(),
+  右薬指１: new Vector3(-0.80448680, -0.59258726, 0.04051333).normalize(),
+  左小指１: new Vector3(0.86110206, -0.49661517, 0.10897986).normalize(),
+  右小指１: new Vector3(-0.86110169, -0.49661597, 0.10897917).normalize(),
+  // Non-bone references (kept from legacy values).
+  // 左足首/右足首: heel→foot_index direction in MediaPipe pose space.
+  // 左手捩/右手捩: canonical hand-local axis used for wrist twist roll extraction.
+  左足首: new Vector3(0, -0.65728916525082, -0.7536384764884819).normalize(),
+  右足首: new Vector3(0, -0.65728916525082, -0.7536384764884819).normalize(),
+  左手捩: new Vector3(0, 0, -1).normalize(),
+  右手捩: new Vector3(0, 0, -1).normalize(),
+}
+
 export class Solver {
   private poseWorldLandmarks: Landmark[] | null = null
   private leftHandWorldLandmarks: Landmark[] | null = null
@@ -225,6 +274,9 @@ export class Solver {
   private boneStates: Record<string, BoneState> = {}
   private filters: Record<string, QuaternionOneEuroFilter> = {}
   private smoothing = { minCutoff: 1.5, beta: 0.5, dCutoff: 1.0 }
+  // Calibrated reference directions in each bone's parent-local frame at rest.
+  // Populated by calibrate() from the loaded model. Falls through to DEFAULT_REFS.
+  private refs: Record<string, Vector3> = {}
 
   constructor() {}
 
@@ -232,6 +284,58 @@ export class Solver {
     for (const key of Object.keys(this.filters)) {
       this.filters[key].reset()
     }
+  }
+
+  // Calibrate reference directions from the model's rest-pose world bone positions.
+  // Parent chains are identity at rest, so world-space (child − parent) IS the
+  // parent-local reference direction.
+  calibrate(restWorldPos: Record<string, Vector3>): void {
+    const dir = (parent: string, child: string): Vector3 | null => {
+      const p = restWorldPos[parent]
+      const c = restWorldPos[child]
+      if (!p || !c) return null
+      const v = c.subtract(p)
+      const len = v.length()
+      if (len < 1e-6) return null
+      return v.scale(1 / len)
+    }
+    const set = (key: string, v: Vector3 | null): void => {
+      if (v) this.refs[key] = v
+    }
+
+    // Limbs
+    set("左腕", dir("左腕", "左ひじ"))
+    set("右腕", dir("右腕", "右ひじ"))
+    set("左ひじ", dir("左ひじ", "左手首"))
+    set("右ひじ", dir("右ひじ", "右手首"))
+    set("左足", dir("左足", "左ひざ"))
+    set("右足", dir("右足", "右ひざ"))
+    set("左ひざ", dir("左ひざ", "左足首"))
+    set("右ひざ", dir("右ひざ", "右足首"))
+
+    // Spine / head
+    set("首", dir("首", "頭"))
+
+    // Wrists — middle finger root is the natural "forward" axis of the hand
+    set("左手首", dir("左手首", "左中指１"))
+    set("右手首", dir("右手首", "右中指１"))
+
+    // Finger base joints (proximal phalanges)
+    set("左親指１", dir("左親指１", "左親指２"))
+    set("右親指１", dir("右親指１", "右親指２"))
+    set("左人指１", dir("左人指１", "左人指２"))
+    set("右人指１", dir("右人指１", "右人指２"))
+    set("左中指１", dir("左中指１", "左中指２"))
+    set("右中指１", dir("右中指１", "右中指２"))
+    set("左薬指１", dir("左薬指１", "左薬指２"))
+    set("右薬指１", dir("右薬指１", "右薬指２"))
+    set("左小指１", dir("左小指１", "左小指２"))
+    set("右小指１", dir("右小指１", "右小指２"))
+  }
+
+  // Calibrated reference for `key` if available, else the static default.
+  private getRef(key: string): Vector3 {
+    return this.refs[key] ?? DEFAULT_REFS[key]
   }
 
   solve(landmarks: HolisticLandmarkerResult): BoneState[] | null {
@@ -429,7 +533,7 @@ export class Solver {
     const localEarCenter = localLeftEar.add(localRightEar).scale(0.5)
     const localShoulderCenter = localLeftShoulder.add(localRightShoulder).scale(0.5)
     const neckDirection = localEarCenter.subtract(localShoulderCenter).normalize()
-    const reference = new Vector3(0, 0.9758578206707508, -0.21840676233975218).normalize()
+    const reference = this.getRef("首")
 
     return {
       name: "首",
@@ -494,7 +598,7 @@ export class Solver {
 
     const leftLegDirection = localLeftKnee.subtract(localLeftHip).normalize()
 
-    const reference = new Vector3(-0.009540689177369048, -0.998440855265296, 0.05499848895310636).normalize()
+    const reference = this.getRef("左足")
 
     return {
       name: "左足",
@@ -518,7 +622,7 @@ export class Solver {
 
     const rightLegDirection = localRightKnee.subtract(localRightHip).normalize()
 
-    const reference = new Vector3(-0.009540689177369048, -0.998440855265296, 0.05499848895310636).normalize()
+    const reference = this.getRef("右足")
 
     return {
       name: "右足",
@@ -544,7 +648,7 @@ export class Solver {
     const localLeftAnkle = Vector3.TransformCoordinates(worldLeftAnkle, worldToFullParent)
 
     const kneeDirection = localLeftAnkle.subtract(localLeftKnee).normalize()
-    const reference = new Vector3(-0.0007085292291306043, -0.9908517790187175, 0.1349527695224302).normalize()
+    const reference = this.getRef("左ひざ")
 
     return {
       name: "左ひざ",
@@ -570,7 +674,7 @@ export class Solver {
     const localRightAnkle = Vector3.TransformCoordinates(worldRightAnkle, worldToFullParent)
 
     const kneeDirection = localRightAnkle.subtract(localRightKnee).normalize()
-    const reference = new Vector3(0.0007079817891811808, -0.9908517794028981, 0.13495276957475513).normalize()
+    const reference = this.getRef("右ひざ")
 
     return {
       name: "右ひざ",
@@ -597,7 +701,7 @@ export class Solver {
     const localLeftFootIndex = Vector3.TransformCoordinates(worldLeftFootIndex, worldToFullParent)
 
     const ankleDirection = localLeftFootIndex.subtract(localLeftHeel).normalize()
-    const reference = new Vector3(0, -0.65728916525082, -0.7536384764884819).normalize()
+    const reference = this.getRef("左足首")
 
     return {
       name: "左足首",
@@ -625,7 +729,7 @@ export class Solver {
     const localRightFootIndex = Vector3.TransformCoordinates(worldRightFootIndex, worldToFullParent)
 
     const ankleDirection = localRightFootIndex.subtract(localRightHeel).normalize()
-    const reference = new Vector3(0, -0.65728916525082, -0.7536384764884819).normalize()
+    const reference = this.getRef("右足首")
 
     return {
       name: "右足首",
@@ -648,7 +752,7 @@ export class Solver {
     const localLeftElbow = Vector3.TransformCoordinates(worldLeftElbow, worldToUpperBody)
 
     const leftArmDirection = localLeftElbow.subtract(localLeftShoulder).normalize()
-    const reference = new Vector3(0.8012514930735141, -0.5966378711527615, -0.04493657256361681).normalize()
+    const reference = this.getRef("左腕")
 
     return {
       name: "左腕",
@@ -671,7 +775,7 @@ export class Solver {
     const localRightElbow = Vector3.TransformCoordinates(worldRightElbow, worldToUpperBody)
 
     const rightArmDirection = localRightElbow.subtract(localRightShoulder).normalize()
-    const reference = new Vector3(-0.8020376176381924, -0.5972232450219962, -0.007749548286792409).normalize()
+    const reference = this.getRef("右腕")
 
     return {
       name: "右腕",
@@ -697,7 +801,7 @@ export class Solver {
     const localLeftWrist = Vector3.TransformCoordinates(worldLeftWrist, worldToFullParent)
 
     const leftElbowDirection = localLeftWrist.subtract(localLeftElbow).normalize()
-    const reference = new Vector3(0.7991214493734219, -0.600241324846603, -0.03339552511514752).normalize()
+    const reference = this.getRef("左ひじ")
 
     return {
       name: "左ひじ",
@@ -723,7 +827,7 @@ export class Solver {
     const localRightWrist = Vector3.TransformCoordinates(worldRightWrist, worldToFullParent)
 
     const rightElbowDirection = localRightWrist.subtract(localRightElbow).normalize()
-    const reference = new Vector3(-0.7991213083626819, -0.6002415122251716, -0.03339553147285845).normalize()
+    const reference = this.getRef("右ひじ")
 
     return {
       name: "右ひじ",
@@ -751,7 +855,7 @@ export class Solver {
     const localLeftRing = Vector3.TransformCoordinates(worldLeftRing, worldToFullParent)
 
     const handDirection = localLeftIndex.subtract(localLeftRing).normalize()
-    const reference = new Vector3(0, 0, -1).normalize()
+    const reference = this.getRef("左手捩")
 
     const fullRotation = Quaternion.FromUnitVectorsToRef(reference, handDirection, new Quaternion())
     const eulerAngles = fullRotation.toEulerAngles()
@@ -783,7 +887,7 @@ export class Solver {
     const localRightRing = Vector3.TransformCoordinates(worldRightRing, worldToFullParent)
 
     const handDirection = localRightIndex.subtract(localRightRing).normalize()
-    const reference = new Vector3(0, 0, -1).normalize()
+    const reference = this.getRef("右手捩")
 
     const fullRotation = Quaternion.FromUnitVectorsToRef(reference, handDirection, new Quaternion())
 
@@ -817,7 +921,7 @@ export class Solver {
     const localLeftMiddleMcp = Vector3.TransformCoordinates(worldLeftMiddleMcp, worldToFullParent)
 
     const wristDirection = localLeftMiddleMcp.subtract(localLeftWrist).normalize()
-    const reference = new Vector3(0.72573996, -0.40247154, -0.01692206).normalize()
+    const reference = this.getRef("左手首")
 
     return {
       name: "左手首",
@@ -846,7 +950,7 @@ export class Solver {
     const localRightMiddleMcp = Vector3.TransformCoordinates(worldRightMiddleMcp, worldToFullParent)
 
     const wristDirection = localRightMiddleMcp.subtract(localRightWrist).normalize()
-    const reference = new Vector3(-0.72573996, -0.40247154, 0.01692206).normalize()
+    const reference = this.getRef("右手首")
 
     return {
       name: "右手首",
@@ -880,7 +984,7 @@ export class Solver {
     const localThumbIP = Vector3.TransformCoordinates(thumbIP, worldToFullParent)
 
     const thumbDirection = localThumbIP.subtract(localThumbMCP).normalize()
-    const reference = new Vector3(0.6236582921350833, -0.7035050354478427, -0.34077998730952624).normalize()
+    const reference = this.getRef("左親指１")
     return {
       name: "左親指１",
       rotation: Quaternion.FromUnitVectorsToRef(reference, thumbDirection, new Quaternion()),
@@ -918,7 +1022,7 @@ export class Solver {
     const localIndexPIP = Vector3.TransformCoordinates(indexPIP, worldToFullParent)
 
     const indexDirection = localIndexPIP.subtract(localIndexMCP).normalize()
-    const reference = new Vector3(0.8432431728071625, -0.5368768421934949, 0.026536914486258466).normalize()
+    const reference = this.getRef("左人指１")
 
     return {
       name: "左人指１",
@@ -960,7 +1064,7 @@ export class Solver {
     const localMiddlePIP = Vector3.TransformCoordinates(middlePIP, worldToFullParent)
 
     const middleDirection = localMiddlePIP.subtract(localMiddleMCP).normalize()
-    const reference = new Vector3(0.8303922987881693, -0.5566343204926274, 0.02463459687127938).normalize()
+    const reference = this.getRef("左中指１")
 
     return {
       name: "左中指１",
@@ -1001,7 +1105,7 @@ export class Solver {
     const localRingPIP = Vector3.TransformCoordinates(ringPIP, worldToFullParent)
 
     const ringDirection = localRingPIP.subtract(localRingMCP).normalize()
-    const reference = new Vector3(0.8076445279586488, -0.5883930602992032, 0.038780446750771254).normalize()
+    const reference = this.getRef("左薬指１")
 
     return {
       name: "左薬指１",
@@ -1043,7 +1147,7 @@ export class Solver {
     const localPinkyPIP = Vector3.TransformCoordinates(pinkyPIP, worldToFullParent)
 
     const pinkyDirection = localPinkyPIP.subtract(localPinkyMCP).normalize()
-    const reference = new Vector3(0.8462256262210587, -0.5275922475926769, 0.07448899117913084).normalize()
+    const reference = this.getRef("左小指１")
 
     return {
       name: "左小指１",
@@ -1085,7 +1189,7 @@ export class Solver {
     const localThumbIP = Vector3.TransformCoordinates(thumbIP, worldToFullParent)
 
     const thumbDirection = localThumbIP.subtract(localThumbMCP).normalize()
-    const reference = new Vector3(-0.6236753178947897, -0.7034896546159694, -0.34078057998826367).normalize()
+    const reference = this.getRef("右親指１")
 
     return {
       name: "右親指１",
@@ -1123,7 +1227,7 @@ export class Solver {
     const localIndexPIP = Vector3.TransformCoordinates(indexPIP, worldToWristSpace)
 
     const indexDirection = localIndexPIP.subtract(localIndexMCP).normalize()
-    const reference = new Vector3(-0.8432487044803304, -0.5368678957658006, 0.026542134206687714).normalize()
+    const reference = this.getRef("右人指１")
 
     return {
       name: "右人指１",
@@ -1164,7 +1268,7 @@ export class Solver {
     const localMiddlePIP = Vector3.TransformCoordinates(middlePIP, worldToFullParent)
 
     const middleDirection = localMiddlePIP.subtract(localMiddleMCP).normalize()
-    const reference = new Vector3(-0.830394244494938, -0.5566311582035673, 0.024640463198495298).normalize()
+    const reference = this.getRef("右中指１")
 
     return {
       name: "右中指１",
@@ -1205,7 +1309,7 @@ export class Solver {
     const localRingPIP = Vector3.TransformCoordinates(ringPIP, worldToFullParent)
 
     const ringDirection = localRingPIP.subtract(localRingMCP).normalize()
-    const reference = new Vector3(-0.8076382239720394, -0.5884013252930373, 0.03878633229228).normalize()
+    const reference = this.getRef("右薬指１")
 
     return {
       name: "右薬指１",
@@ -1246,7 +1350,7 @@ export class Solver {
     const localPinkyPIP = Vector3.TransformCoordinates(pinkyPIP, worldToFullParent)
 
     const pinkyDirection = localPinkyPIP.subtract(localPinkyMCP).normalize()
-    const reference = new Vector3(-0.8462155810704232, -0.5276077240369134, 0.07449348891167894).normalize()
+    const reference = this.getRef("右小指１")
 
     return {
       name: "右小指１",
