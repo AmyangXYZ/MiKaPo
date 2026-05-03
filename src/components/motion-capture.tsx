@@ -23,12 +23,15 @@ export const MotionCapture = ({
   modelLoaded,
   onMediaPipeReadyChange,
   resetModel,
+  restPose,
 }: {
   applyPose: (boneStates: BoneState[]) => void
   applyFace: (faceResult: FaceSolverResult) => void
   modelLoaded: boolean
   onMediaPipeReadyChange?: (ready: boolean) => void
   resetModel?: () => void
+  // MMD rest-pose world bone positions, keyed by Japanese bone name.
+  restPose?: Record<string, Vector3> | null
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
@@ -67,6 +70,9 @@ export const MotionCapture = ({
     if (!faceBlendshapeSolverRef.current) {
       faceBlendshapeSolverRef.current = new FaceBlendshapeSolver({ smoothingFactor: 0.4 })
     }
+    if (restPose && solverRef.current) {
+      solverRef.current.calibrate(restPose)
+    }
     if (landmarks && modelLoaded) {
       // Apply body pose
       if (solverRef.current) {
@@ -83,7 +89,7 @@ export const MotionCapture = ({
         applyFace(faceResult)
       }
     }
-  }, [landmarks, applyPose, applyFace, modelLoaded])
+  }, [landmarks, applyPose, applyFace, modelLoaded, restPose])
 
   // VMD Recording loop
   useEffect(() => {

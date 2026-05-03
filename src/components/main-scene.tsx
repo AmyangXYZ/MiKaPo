@@ -7,10 +7,11 @@ import { FolderOpen, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 import { Engine, EngineStats, Model, Quat, Vec3, parsePmxFolderInput, pmxFileAtRelativePath } from "reze-engine"
+import { Vector3 } from "@babylonjs/core"
 
 import { MotionCapture } from "./motion-capture"
 import Loading from "./loading"
-import { BoneState } from "@/lib/solver"
+import { BoneState, SOLVER_REST_BONES } from "@/lib/solver"
 import { FaceSolverResult } from "@/lib/face-blendshape-solver"
 
 /** Stable engine key for the bundled default PMX — folder uploads swap via removeModel + new id. */
@@ -37,6 +38,7 @@ export default function MainScene() {
   /** Bumped on folder upload so a still-in-flight default `loadModel` can discard its result. */
   const loadGenerationRef = useRef(0)
   const [modelLoaded, setModelLoaded] = useState(false)
+  const [restPose, setRestPose] = useState<Record<string, Vector3> | null>(null)
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
   /** After `engine.init()` — folder picker is safe (loadModel still async for default PMX). */
   const [engineInited, setEngineInited] = useState(false)
@@ -46,6 +48,21 @@ export default function MainScene() {
   const [pmxPickPaths, setPmxPickPaths] = useState<string[]>([])
   const [pmxPickSelected, setPmxPickSelected] = useState("")
 
+  // Build a rest-pose dict from the model's bone world positions. Solver uses
+  // these to derive per-bone reference directions instead of the static defaults.
+  const buildRestPose = useCallback((model: Model) => {
+    const dict: Record<string, Vector3> = {}
+    for (const name of SOLVER_REST_BONES) {
+      try {
+        const p = model.getBoneWorldPosition(name)
+        if (p) dict[name] = new Vector3(p.x, p.y, p.z)
+      } catch {
+        // bone missing — solver falls back to DEFAULT_REFS
+      }
+    }
+    setRestPose(dict)
+  }, [])
+
   const initEngine = useCallback(async () => {
     if (canvasRef.current) {
       try {
@@ -53,7 +70,6 @@ export default function MainScene() {
         engineRef.current = engine
         await engine.init()
         setEngineInited(true)
-        engine.addGround({ diffuseColor: new Vec3(0.9, 0.1, 0.9) })
         engine.setIKEnabled(false)
         engine.runRenderLoop(() => {
           setStats(engine.getStats())
@@ -74,6 +90,7 @@ export default function MainScene() {
           modelRef.current = model
           loadedModelNameRef.current = DEFAULT_MODEL_KEY
           console.log(model.getMaterials())
+
           engine.setMaterialPresets(loadedModelNameRef.current, {
             eye: ["眼睛", "眼白", "目白", "右瞳", "左瞳", "眉毛", "eyebrow", "eyelash"],
             face: ["脸", "face01"],
@@ -104,6 +121,9 @@ export default function MainScene() {
             metal: ["metal01", "earring"],
           })
           setModelLoaded(true)
+          await new Promise((r) => requestAnimationFrame(r))
+          buildRestPose(model)
+          engine.addGround({ diffuseColor: new Vec3(0.9, 0.1, 0.9) })
           setEngineError(null)
         } catch (loadErr) {
           setEngineError(loadErr instanceof Error ? loadErr.message : "Unknown error")
@@ -115,7 +135,7 @@ export default function MainScene() {
         setEngineError(error instanceof Error ? error.message : "Unknown error")
       }
     }
-  }, [])
+  }, [buildRestPose])
 
   useEffect(() => {
     void (async () => {
@@ -180,12 +200,13 @@ export default function MainScene() {
         metal: ["metal01", "earring"],
       })
       setModelLoaded(true)
+      buildRestPose(model)
       setEngineError(null)
     } catch (e) {
       console.error("[pmx-upload] loadModel failed:", e)
       window.alert(e instanceof Error ? e.message : String(e))
     }
-  }, [])
+  }, [buildRestPose])
 
   const onPickPmxFolder = useCallback(
     async (e: ChangeEvent<HTMLInputElement>) => {
@@ -424,6 +445,7 @@ export default function MainScene() {
         modelLoaded={modelLoaded}
         onMediaPipeReadyChange={setMediaPipeReady}
         resetModel={resetModel}
+        restPose={restPose}
       />
 
       <Loading modelLoaded={modelLoaded} mediaPipeReady={mediaPipeReady} />
