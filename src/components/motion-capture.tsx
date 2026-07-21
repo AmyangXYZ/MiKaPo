@@ -1,21 +1,20 @@
-import { FilesetResolver, HolisticLandmarker, HolisticLandmarkerResult } from "@mediapipe/tasks-vision"
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback, type ComponentType } from "react"
 import Image from "next/image"
-import { Quaternion, Vector3 } from "@babylonjs/core"
-import Encoding from "encoding-japanese"
 import { BoneState, Solver } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
+import { createVMD, RecordedFrame } from "@/lib/vmd"
+import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Camera, Image as ImageIcon, Video, Webcam, Pause, Play, Circle } from "lucide-react"
-import DebugScene from "./debug-scene"
+
+type DebugSceneProps = { landmarks: PoseWorkerResult | null }
 
 type InputMode = "image" | "video" | "camera" | null
 
-interface RecordedFrame {
-  boneStates: BoneState[]
-  morphWeights: FaceMorphWeights | null
-}
+/** Debug skeleton preview refresh (React re-render); the model itself is driven
+ * directly from the detection callback and doesn't wait for React. */
+const DEBUG_PREVIEW_INTERVAL_MS = 66
 
 export const MotionCapture = ({
   applyPose,
@@ -24,29 +23,32 @@ export const MotionCapture = ({
   onMediaPipeReadyChange,
   resetModel,
   restPose,
+  modelMorphs,
 }: {
-  applyPose: (boneStates: BoneState[]) => void
-  applyFace: (faceResult: FaceSolverResult) => void
+  applyPose: (boneStates: BoneState[], tweenMs: number) => void
+  applyFace: (faceResult: FaceSolverResult, tweenMs: number) => void
   modelLoaded: boolean
   onMediaPipeReadyChange?: (ready: boolean) => void
   resetModel?: () => void
   // MMD rest-pose world bone positions, keyed by Japanese bone name.
-  restPose?: Record<string, Vector3> | null
+  restPose?: Record<string, { x: number; y: number; z: number }> | null
+  // Morph names present on the loaded model — resolves blendshape mappings.
+  modelMorphs?: string[] | null
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const videoInputRef = useRef<HTMLInputElement>(null)
-  const holisticLandmarkerRef = useRef<HolisticLandmarker | null>(null)
+  const workerRef = useRef<Worker | null>(null)
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
-  const [landmarks, setLandmarks] = useState<HolisticLandmarkerResult | null>(null)
+  const [landmarks, setLandmarks] = useState<PoseWorkerResult | null>(null)
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
   const [currentImage, setCurrentImage] = useState<string>("/4.png")
   const [videoSrc, setVideoSrc] = useState<string>("/flash.mp4")
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
-  const solverRef = useRef<Solver | null>(null)
-  const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver | null>(null)
+  const solverRef = useRef<Solver>(new Solver())
+  const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver>(new FaceBlendshapeSolver())
   const onMediaPipeReadyChangeRef = useRef(onMediaPipeReadyChange)
   useEffect(() => {
     onMediaPipeReadyChangeRef.current = onMediaPipeReadyChange
@@ -78,34 +80,80 @@ export const MotionCapture = ({
     else videoRef.current.pause()
   }
 
-  // Initialize solvers and apply poses
+  // Babylon-based skeleton preview, loaded client-side only so @babylonjs/*
+  // code-splits out of the initial bundle (the main viewport is reze-engine/WebGPU).
+  const [DebugScene, setDebugScene] = useState<ComponentType<DebugSceneProps> | null>(null)
   useEffect(() => {
-    if (!solverRef.current) {
-      solverRef.current = new Solver()
+    let mounted = true
+    import("./debug-scene").then((mod) => {
+      if (mounted) setDebugScene(() => mod.default)
+    })
+    return () => {
+      mounted = false
     }
-    if (!faceBlendshapeSolverRef.current) {
-      faceBlendshapeSolverRef.current = new FaceBlendshapeSolver({ smoothingFactor: 0.4 })
+  }, [])
+
+  // Re-calibrate solver reference directions when a (new) model's rest pose arrives.
+  useEffect(() => {
+    if (restPose) solverRef.current.calibrate(restPose)
+  }, [restPose])
+
+  // Resolve blendshape→morph mappings against the loaded model's morph list.
+  useEffect(() => {
+    if (modelMorphs && modelMorphs.length > 0) faceBlendshapeSolverRef.current.configure(modelMorphs)
+  }, [modelMorphs])
+
+  // Hot path: detection result → solve → apply, all through refs — no React
+  // state or effects between a video frame and the model moving.
+  const modelLoadedRef = useRef(modelLoaded)
+  useEffect(() => {
+    modelLoadedRef.current = modelLoaded
+  }, [modelLoaded])
+  const applyPoseRef = useRef(applyPose)
+  const applyFaceRef = useRef(applyFace)
+  useEffect(() => {
+    applyPoseRef.current = applyPose
+    applyFaceRef.current = applyFace
+  }, [applyPose, applyFace])
+
+  const lastDebugUpdateRef = useRef(0)
+  // Detection results arrive at ~25-35 Hz while the renderer runs at 60 —
+  // tween each pose over the measured inter-result interval (EMA, slight
+  // overlap) so the model is always mid-motion between results instead of
+  // reaching its target early and stepping.
+  const lastResultAtRef = useRef(0)
+  const resultIntervalEmaRef = useRef(33)
+  const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
+    // Throttled React update — feeds only the debug skeleton preview.
+    const now = performance.now()
+    if (now - lastDebugUpdateRef.current >= DEBUG_PREVIEW_INTERVAL_MS) {
+      lastDebugUpdateRef.current = now
+      setLandmarks(result)
     }
-    if (restPose && solverRef.current) {
-      solverRef.current.calibrate(restPose)
+
+    if (lastResultAtRef.current > 0) {
+      const dt = now - lastResultAtRef.current
+      if (dt < 500) resultIntervalEmaRef.current = resultIntervalEmaRef.current * 0.8 + dt * 0.2
     }
-    if (landmarks && modelLoaded) {
-      // Apply body pose
-      if (solverRef.current) {
-        const pose = solverRef.current.solve(landmarks)
-        if (pose) {
-          currentBoneStatesRef.current = pose
-          applyPose(pose)
-        }
-      }
-      // Apply face (eye rotations + morphs)
-      if (faceBlendshapeSolverRef.current && landmarks.faceLandmarks?.[0]) {
-        const faceResult = faceBlendshapeSolverRef.current.solve(landmarks.faceLandmarks[0])
-        currentMorphWeightsRef.current = faceResult.morphWeights
-        applyFace(faceResult)
-      }
+    lastResultAtRef.current = now
+    // 0.9×: finish the tween just before the average next result — chasing with
+    // a longer duration compounds into extra latency and shaved motion peaks.
+    const tweenMs = Math.min(100, resultIntervalEmaRef.current * 0.9)
+
+    if (!modelLoadedRef.current) return
+
+    const pose = solverRef.current.solve(result, timestampMs)
+    currentBoneStatesRef.current = pose
+    applyPoseRef.current(pose, tweenMs)
+
+    if (result.faceLandmarks?.[0]) {
+      const faceResult = faceBlendshapeSolverRef.current.solve(result.faceLandmarks[0], timestampMs)
+      currentMorphWeightsRef.current = faceResult.morphWeights
+      applyFaceRef.current(faceResult, tweenMs)
     }
-  }, [landmarks, applyPose, applyFace, modelLoaded, restPose])
+  }, [])
+  const handleResultRef = useRef(handleResult)
+  handleResultRef.current = handleResult
 
   // VMD Recording loop
   useEffect(() => {
@@ -149,114 +197,94 @@ export const MotionCapture = ({
     }
   }, [isRecordingVMD])
 
-  // Initialize MediaPipe landmarker
+  // Initialize the MediaPipe detection worker and the frame-feed loop.
+  // Detection runs off the main thread so the WebGPU render loop never blocks
+  // on it; this loop only snapshots frames (createImageBitmap) and ships them.
   useEffect(() => {
-    let isMounted = true
+    let rafId = 0
+    let ready = false
+    // In-flight guard: never queue a second frame while the worker is busy —
+    // detection latency then paces capture instead of building a frame backlog.
+    let pending = false
+    let pendingSince = 0
 
-    const initLandmarker = async () => {
-      try {
-        const vision = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm",
-        )
+    const worker = new Worker(new URL("../lib/pose-worker.ts", import.meta.url))
+    workerRef.current = worker
+    const send = (msg: PoseWorkerRequest, transfer?: Transferable[]) =>
+      worker.postMessage(msg, transfer ?? [])
 
-        if (!isMounted || holisticLandmarkerRef.current) return
-
-        const createOptions = {
-          baseOptions: {
-            modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task",
-            delegate: "GPU" as const,
-          },
-          minPosePresenceConfidence: 0.7,
-          minPoseDetectionConfidence: 0.7,
-          minFaceDetectionConfidence: 0.4,
-          minHandLandmarksConfidence: 0.95,
-          runningMode: "VIDEO" as const,
-        }
-
-        try {
-          holisticLandmarkerRef.current = await HolisticLandmarker.createFromOptions(vision, createOptions)
-        } catch (gpuError) {
-          console.warn("GPU delegate failed, falling back to CPU:", gpuError)
-          holisticLandmarkerRef.current = await HolisticLandmarker.createFromOptions(vision, {
-            ...createOptions,
-            baseOptions: { ...createOptions.baseOptions, delegate: "CPU" },
-          })
-        }
-
-        if (!isMounted) return
-
-        // Warm up: force GPU shader compilation / tensor allocation now, not on the
-        // user's first real frame. Result is discarded — `mediaPipeReady` is still
-        // false so the detect loop below isn't running yet.
-        try {
-          const warmupCanvas = document.createElement("canvas")
-          warmupCanvas.width = 256
-          warmupCanvas.height = 256
-          const ctx = warmupCanvas.getContext("2d")
-          if (ctx) {
-            ctx.fillStyle = "#808080"
-            ctx.fillRect(0, 0, 256, 256)
-          }
-          await new Promise<void>((resolve) => {
-            holisticLandmarkerRef.current!.detectForVideo(warmupCanvas, performance.now(), () => {
-              resolve()
-            })
-          })
-        } catch (warmupError) {
-          console.warn("MediaPipe warmup failed (non-fatal):", warmupError)
-        }
-
-        if (!isMounted) return
+    worker.onmessage = (e: MessageEvent<PoseWorkerResponse>) => {
+      const msg = e.data
+      if (msg.type === "ready") {
+        ready = true
         setMediaPipeReady(true)
         onMediaPipeReadyChangeRef.current?.(true)
-
-        let lastTime = performance.now()
-        let lastImgSrc = ""
-        let frameCounter = 0
-        const FRAME_SKIP = 2
-
-        const detect = () => {
-          frameCounter++
-          const shouldProcess = frameCounter % FRAME_SKIP === 0
-
-          if (videoRef.current && lastTime !== videoRef.current.currentTime && videoRef.current.videoWidth > 0) {
-            lastTime = videoRef.current.currentTime
-            if (shouldProcess) {
-              holisticLandmarkerRef.current!.detectForVideo(videoRef.current, performance.now(), (result) => {
-                if (result.poseWorldLandmarks[0]) {
-                  setLandmarks(result)
-                }
-              })
-            }
-          } else if (
-            imageRef.current &&
-            imageRef.current.src.length > 0 &&
-            imageRef.current.src !== lastImgSrc &&
-            imageRef.current.complete &&
-            imageRef.current.naturalWidth > 0
-          ) {
-            lastImgSrc = imageRef.current.src
-            holisticLandmarkerRef.current!.detect(imageRef.current, (result) => {
-              if (result.poseWorldLandmarks.length > 0) {
-                setLandmarks(result)
-              }
-            })
-          }
-          requestAnimationFrame(detect)
+      } else if (msg.type === "result") {
+        pending = false
+        if (msg.result.poseWorldLandmarks[0]) {
+          handleResultRef.current(msg.result, msg.mediaTs)
         }
-        detect()
-      } catch (error) {
-        console.error("Failed to initialize MediaPipe:", error)
+      } else if (msg.type === "error") {
+        pending = false
+        console.error("Pose worker error:", msg.message)
       }
     }
+    worker.onerror = (e) => console.error("Failed to initialize pose worker:", e.message)
+    send({ type: "init" })
 
-    initLandmarker()
+    let lastVideoTime = -1
+    let lastImgSrc = ""
+
+    const detect = () => {
+      rafId = requestAnimationFrame(detect)
+      if (!ready) return
+      const now = performance.now()
+      if (pending) {
+        // Recover if the worker dropped a frame (e.g. mode switch mid-flight).
+        if (now - pendingSince > 2000) pending = false
+        else return
+      }
+      const video = videoRef.current
+      if (video && video.videoWidth > 0 && video.currentTime !== lastVideoTime) {
+        // Pacing: the in-flight guard above (one frame in the worker at a time)
+        // plus the new-frame gate (source fps) — no artificial rate floor, so
+        // result cadence stays as steady as the worker can deliver.
+        lastVideoTime = video.currentTime
+        // Media time drives the solver's smoothing filters so pause/seek
+        // reset them correctly; detectForVideo gets wall time because it
+        // requires a monotonically increasing clock.
+        const mediaTs = video.currentTime * 1000
+        pending = true
+        pendingSince = now
+        createImageBitmap(video)
+          .then((bitmap) => send({ type: "video", bitmap, ts: performance.now(), mediaTs }, [bitmap]))
+          .catch(() => {
+            pending = false
+          })
+      } else if (
+        imageRef.current &&
+        imageRef.current.src.length > 0 &&
+        imageRef.current.src !== lastImgSrc &&
+        imageRef.current.complete &&
+        imageRef.current.naturalWidth > 0
+      ) {
+        const img = imageRef.current
+        lastImgSrc = img.src
+        pending = true
+        pendingSince = now
+        createImageBitmap(img)
+          .then((bitmap) => send({ type: "image", bitmap, mediaTs: performance.now() }, [bitmap]))
+          .catch(() => {
+            pending = false
+          })
+      }
+    }
+    detect()
 
     return () => {
-      isMounted = false
-      holisticLandmarkerRef.current?.close()
-      holisticLandmarkerRef.current = null
+      cancelAnimationFrame(rafId)
+      worker.terminate()
+      workerRef.current = null
     }
   }, [])
 
@@ -266,12 +294,13 @@ export const MotionCapture = ({
     if (file && file.type.includes("image")) {
       const url = URL.createObjectURL(file)
       resetModel?.()
-      solverRef.current?.reset()
-      holisticLandmarkerRef.current?.setOptions({ runningMode: "IMAGE" }).then(() => {
-        setCurrentImage(url)
-        setVideoSrc("")
-        setInputMode("image")
-      })
+      solverRef.current.reset()
+      faceBlendshapeSolverRef.current.reset()
+      // Worker messages are FIFO — the mode switch lands before the next frame.
+      workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
+      setCurrentImage(url)
+      setVideoSrc("")
+      setInputMode("image")
       setLastMedia("IMAGE")
     }
   }
@@ -282,22 +311,16 @@ export const MotionCapture = ({
     if (file && file.type.includes("video")) {
       const url = URL.createObjectURL(file)
       resetModel?.()
-      solverRef.current?.reset()
+      solverRef.current.reset()
+      faceBlendshapeSolverRef.current.reset()
       if (lastMedia === "IMAGE") {
-        holisticLandmarkerRef.current?.setOptions({ runningMode: "VIDEO" }).then(() => {
-          setVideoSrc(url)
-          setCurrentImage("")
-          setInputMode("video")
-          if (videoRef.current) {
-            videoRef.current.currentTime = 0
-          }
-        })
-      } else {
-        setVideoSrc(url)
-        setInputMode("video")
-        if (videoRef.current) {
-          videoRef.current.currentTime = 0
-        }
+        workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
+        setCurrentImage("")
+      }
+      setVideoSrc(url)
+      setInputMode("video")
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0
       }
       setLastMedia("VIDEO")
     }
@@ -327,12 +350,13 @@ export const MotionCapture = ({
       try {
         stopCurrentInput()
         resetModel?.()
-        solverRef.current?.reset()
+        solverRef.current.reset()
+      faceBlendshapeSolverRef.current.reset()
         setInputMode("camera")
         setIsStreamActive(true)
 
         if (lastMedia === "IMAGE") {
-          await holisticLandmarkerRef.current?.setOptions({ runningMode: "VIDEO" })
+          workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
         }
 
         const stream = await navigator.mediaDevices.getUserMedia({ video: true })
@@ -557,161 +581,9 @@ export const MotionCapture = ({
 
         {/* Skeleton preview — desktop only */}
         <div className="hidden aspect-[16/10] border-t border-white/5 bg-black/50 md:block">
-          <DebugScene landmarks={landmarks} />
+          {DebugScene && <DebugScene landmarks={landmarks} />}
         </div>
       </div>
     </div>
   )
-}
-
-// VMD file creation
-// frameMultiplier: 1 = 30fps, 2 = 15fps effective (slower), etc.
-function createVMD(frames: RecordedFrame[], frameMultiplier: number = 1): Blob {
-  if (frames.length === 0) {
-    return new Blob()
-  }
-
-  function encodeShiftJIS(str: string): Uint8Array {
-    const unicodeArray = Encoding.stringToCode(str)
-    const sjisArray = Encoding.convert(unicodeArray, {
-      to: "SJIS",
-      from: "UNICODE",
-    })
-    return new Uint8Array(sjisArray)
-  }
-
-  const writeBoneFrame = (
-    dataView: DataView,
-    offset: number,
-    name: string,
-    frame: number,
-    position: Vector3,
-    rotation: Quaternion,
-  ): number => {
-    const nameBytes = encodeShiftJIS(name)
-    for (let i = 0; i < 15; i++) {
-      dataView.setUint8(offset + i, i < nameBytes.length ? nameBytes[i] : 0)
-    }
-    offset += 15
-
-    dataView.setUint32(offset, frame, true)
-    offset += 4
-
-    dataView.setFloat32(offset, position.x, true)
-    offset += 4
-    dataView.setFloat32(offset, position.y, true)
-    offset += 4
-    dataView.setFloat32(offset, position.z, true)
-    offset += 4
-
-    dataView.setFloat32(offset, rotation.x, true)
-    offset += 4
-    dataView.setFloat32(offset, rotation.y, true)
-    offset += 4
-    dataView.setFloat32(offset, rotation.z, true)
-    offset += 4
-    dataView.setFloat32(offset, rotation.w, true)
-    offset += 4
-
-    // Interpolation parameters (64 bytes) - linear interpolation
-    for (let i = 0; i < 64; i++) {
-      dataView.setUint8(offset + i, 20)
-    }
-    offset += 64
-
-    return offset
-  }
-
-  const writeMorphFrame = (dataView: DataView, offset: number, name: string, frame: number, weight: number): number => {
-    const nameBytes = encodeShiftJIS(name)
-    for (let i = 0; i < 15; i++) {
-      dataView.setUint8(offset + i, i < nameBytes.length ? nameBytes[i] : 0)
-    }
-    offset += 15
-
-    dataView.setUint32(offset, frame, true)
-    offset += 4
-
-    dataView.setFloat32(offset, weight, true)
-    offset += 4
-
-    return offset
-  }
-
-  const frameCount = frames.length
-  const boneCnt = frames[0].boneStates.length
-
-  // Count morph frames (only if we have morph data)
-  const morphNames = frames[0].morphWeights ? Object.keys(frames[0].morphWeights) : []
-  const morphCnt = morphNames.length
-
-  const headerSize = 30 + 20
-  const boneFrameSize = 15 + 4 + 12 + 16 + 64
-  const morphFrameSize = 15 + 4 + 4
-  const totalSize =
-    headerSize + 4 + boneFrameSize * frameCount * boneCnt + 4 + morphFrameSize * frameCount * morphCnt + 4 + 4 + 4
-
-  const buffer = new ArrayBuffer(totalSize)
-  const dataView = new DataView(buffer)
-  let offset = 0
-
-  // Write header
-  const header = "Vocaloid Motion Data 0002"
-  for (let i = 0; i < 30; i++) {
-    dataView.setUint8(offset + i, i < header.length ? header.charCodeAt(i) : 0)
-  }
-  offset += 30
-
-  // Write model name (empty)
-  for (let i = 0; i < 20; i++) {
-    dataView.setUint8(offset + i, 0)
-  }
-  offset += 20
-
-  // Write bone frame count
-  dataView.setUint32(offset, frameCount * boneCnt, true)
-  offset += 4
-
-  // Generate bone keyframes
-  // Frame numbers are multiplied to adjust playback speed
-  // frameMultiplier=1 means 30fps, frameMultiplier=2 means 15fps effective (slower)
-  for (let i = 0; i < frameCount; i++) {
-    const frameNumber = i * frameMultiplier
-    for (const boneState of frames[i].boneStates) {
-      offset = writeBoneFrame(
-        dataView,
-        offset,
-        boneState.name,
-        frameNumber,
-        new Vector3(0, 0, 0), // No translation
-        boneState.rotation,
-      )
-    }
-  }
-
-  // Write morph frame count
-  dataView.setUint32(offset, frameCount * morphCnt, true)
-  offset += 4
-
-  // Generate morph keyframes
-  for (let i = 0; i < frameCount; i++) {
-    const frameNumber = i * frameMultiplier
-    const morphWeights = frames[i].morphWeights
-    if (morphWeights) {
-      for (const morphName of morphNames) {
-        const weight = morphWeights[morphName as keyof FaceMorphWeights] ?? 0
-        offset = writeMorphFrame(dataView, offset, morphName, frameNumber, weight)
-      }
-    }
-  }
-
-  // Write counts for other frame types (all 0)
-  dataView.setUint32(offset, 0, true) // Camera keyframe count
-  offset += 4
-  dataView.setUint32(offset, 0, true) // Light keyframe count
-  offset += 4
-  dataView.setUint32(offset, 0, true) // Self shadow keyframe count
-  offset += 4
-
-  return new Blob([buffer], { type: "application/octet-stream" })
 }

@@ -1,222 +1,212 @@
-import { Matrix, Quaternion, Vector3 } from "@babylonjs/core"
-import { HolisticLandmarkerResult, Landmark } from "@mediapipe/tasks-vision"
-import Encoding from "encoding-japanese"
+import { Landmark } from "@mediapipe/tasks-vision"
+import { Quat, Vec3 } from "reze-engine"
+import { QuaternionOneEuroFilter } from "./filters"
+import { HandIndexTable, PoseLandmarksTable } from "./landmarks"
+import { quatFromBasis, quatFromUnitVectors, quatNlerp, quatDot, quatTwistAroundAxis, rotateVecInv } from "./math-utils"
 
 export interface BoneState {
   name: string
-  rotation: Quaternion
+  rotation: Quat
 }
 
-export const KeyBones: string[] = [
-  "首",
-  "頭",
-  "上半身",
-  "下半身",
-  "左足",
-  "右足",
-  "左ひざ",
-  "右ひざ",
-  "左足首",
-  "右足首",
-  "左腕",
-  "右腕",
-  "左ひじ",
-  "右ひじ",
-  "左足ＩＫ",
-  "右足ＩＫ",
-  "右つま先ＩＫ",
-  "左つま先ＩＫ",
-  "左目",
-  "右目",
-  "左手首",
-  "右手首",
-  "左手捩",
-  "右手捩",
-  "右親指１",
-  "右親指２",
-  "右人指１",
-  "右人指２",
-  "右人指３",
-  "右中指１",
-  "右中指２",
-  "右中指３",
-  "右薬指１",
-  "右薬指２",
-  "右薬指３",
-  "右小指１",
-  "右小指２",
-  "右小指３",
-  "左親指１",
-  "左親指２",
-  "左人指１",
-  "左人指２",
-  "左人指３",
-  "左中指１",
-  "左中指２",
-  "左中指３",
-  "左薬指１",
-  "左薬指２",
-  "左薬指３",
-  "左小指１",
-  "左小指２",
-  "左小指３",
+/** The landmark arrays the solver reads — HolisticLandmarkerResult and the
+ * worker's trimmed payload both satisfy this structurally. */
+export interface SolverInput {
+  poseWorldLandmarks: Landmark[][]
+  leftHandWorldLandmarks: Landmark[][]
+  rightHandWorldLandmarks: Landmark[][]
+}
+
+// ---------------------------------------------------------------------------
+// Bone definitions
+//
+// The solver is a single generic pipeline over this table. Each entry solves one
+// MMD bone in its parent's local frame; parent world rotations accumulate in
+// solve order, so every chain product is computed exactly once per frame.
+// ---------------------------------------------------------------------------
+
+type LandmarkSource = "pose" | "leftHand" | "rightHand"
+/** A landmark name, or a pair whose midpoint is used. */
+type Point = string | [string, string]
+
+interface BasisDef {
+  kind: "basis"
+  name: "上半身" | "下半身" | "頭"
+  parent: string | null
+}
+
+interface BendLimit {
+  /** Flexion axis in the bone's parent-local frame; positive twist = curl toward palm. */
+  axis: Vec3
+  /** Flexion range in radians (min < 0 allows slight hyperextension). */
+  min: number
+  max: number
+  /** Max out-of-plane swing (spread/abduction) in radians. */
+  spreadMax: number
+}
+
+interface DirectionDef {
+  kind: "direction"
+  name: string
+  parent: string | null
+  source: LandmarkSource
+  from: Point
+  to: Point
+  /**
+   * Roll witness: name of the child-segment def whose live direction pins the
+   * rotation around this bone's axis (e.g. the forearm orients upper-arm roll).
+   * Direction-only solving (shortest-arc) leaves that degree of freedom to
+   * chance; the witness resolves it whenever the child joint is bent enough
+   * for the roll to be observable, blending back to shortest-arc when straight.
+   */
+  witness?: string
+  /**
+   * Anatomical clamp (fingers): shortest-arc solving happily bends a joint the
+   * wrong way when a noisy landmark frame lands on the extension side — clamp
+   * flexion and spread to human ranges so glitches can't produce backward curls.
+   */
+  bend?: BendLimit
+}
+
+interface TwistDef {
+  kind: "twist"
+  name: string
+  parent: string
+  source: LandmarkSource
+  from: string
+  to: string
+  /** Ref key of the bone whose rest direction is the twist axis (the forearm). */
+  axisRef: string
+}
+
+interface FingerRatioDef {
+  kind: "fingerRatio"
+  name: string
+  /** Base joint (proximal phalanx) whose bend this joint follows at a fixed ratio. */
+  base: string
+  bendAxis: Vec3
+  ratio: number
+}
+
+type BoneDef = BasisDef | DirectionDef | TwistDef | FingerRatioDef
+
+const fingerCurl = (side: "左" | "右", finger: string, axis: Vec3, ratios: [number, number]): FingerRatioDef[] => [
+  { kind: "fingerRatio", name: `${side}${finger}２`, base: `${side}${finger}１`, bendAxis: axis, ratio: ratios[0] },
+  { kind: "fingerRatio", name: `${side}${finger}３`, base: `${side}${finger}１`, bendAxis: axis, ratio: ratios[1] },
 ]
 
-const PoseLandmarksTable: Record<string, number> = {
-  nose: 0,
-  left_eye_inner: 1,
-  left_eye: 2,
-  left_eye_outer: 3,
-  right_eye_inner: 4,
-  right_eye: 5,
-  right_eye_outer: 6,
-  left_ear: 7,
-  right_ear: 8,
-  mouth_left: 9,
-  mouth_right: 10,
-  left_shoulder: 11,
-  right_shoulder: 12,
-  left_elbow: 13,
-  right_elbow: 14,
-  left_wrist: 15,
-  right_wrist: 16,
-  left_pinky: 17,
-  right_pinky: 18,
-  left_index: 19,
-  right_index: 20,
-  left_thumb: 21,
-  right_thumb: 22,
-  left_hip: 23,
-  right_hip: 24,
-  left_knee: 25,
-  right_knee: 26,
-  left_ankle: 27,
-  right_ankle: 28,
-  left_heel: 29,
-  right_heel: 30,
-  left_foot_index: 31,
-  right_foot_index: 32,
+const DEG = Math.PI / 180
+/** Finger flexion axes: fingers point ±X at rest, palms face inward/down, so
+ * curl-toward-palm is a rotation about ∓Z (mirrored between hands). */
+const FINGER_BEND: Record<"左" | "右", BendLimit> = {
+  左: { axis: new Vec3(0, 0, -1), min: -15 * DEG, max: 110 * DEG, spreadMax: 22 * DEG },
+  右: { axis: new Vec3(0, 0, 1), min: -15 * DEG, max: 110 * DEG, spreadMax: 22 * DEG },
+}
+const THUMB_BEND: Record<"左" | "右", BendLimit> = {
+  左: { axis: new Vec3(-1, -1, 0).normalize(), min: -25 * DEG, max: 80 * DEG, spreadMax: 40 * DEG },
+  右: { axis: new Vec3(-1, 1, 0).normalize(), min: -25 * DEG, max: 80 * DEG, spreadMax: 40 * DEG },
 }
 
-const HandIndexTable: Record<string, number> = {
-  wrist: 0,
-  thumb_cmc: 1,
-  thumb_mcp: 2,
-  thumb_ip: 3,
-  thumb_tip: 4,
-  index_mcp: 5,
-  index_pip: 6,
-  index_dip: 7,
-  index_tip: 8,
-  middle_mcp: 9,
-  middle_pip: 10,
-  middle_dip: 11,
-  middle_tip: 12,
-  ring_mcp: 13,
-  ring_pip: 14,
-  ring_dip: 15,
-  ring_tip: 16,
-  pinky_mcp: 17,
-  pinky_pip: 18,
-  pinky_dip: 19,
-  pinky_tip: 20,
+const fingerBase = (side: "左" | "右", source: LandmarkSource, finger: string, mcp: string, pip: string): DirectionDef => ({
+  kind: "direction",
+  name: `${side}${finger}１`,
+  parent: `${side}手首`,
+  source,
+  from: mcp,
+  to: pip,
+  bend: FINGER_BEND[side],
+})
+
+const BONE_DEFS: BoneDef[] = [
+  { kind: "basis", name: "上半身", parent: null },
+  {
+    kind: "direction",
+    name: "首",
+    parent: "上半身",
+    source: "pose",
+    from: ["left_shoulder", "right_shoulder"],
+    to: ["left_ear", "right_ear"],
+  },
+  { kind: "basis", name: "頭", parent: "首" },
+  { kind: "basis", name: "下半身", parent: null },
+
+  { kind: "direction", name: "左足", parent: "下半身", source: "pose", from: "left_hip", to: "left_knee", witness: "左ひざ" },
+  { kind: "direction", name: "右足", parent: "下半身", source: "pose", from: "right_hip", to: "right_knee", witness: "右ひざ" },
+  { kind: "direction", name: "左ひざ", parent: "左足", source: "pose", from: "left_knee", to: "left_ankle" },
+  { kind: "direction", name: "右ひざ", parent: "右足", source: "pose", from: "right_knee", to: "right_ankle" },
+  // ankle→foot_index matches the calibrated 足首→つま先 bone reference (ankle is
+  // above heel; a heel baseline tilts the rest direction ~30° off the bone ref)
+  { kind: "direction", name: "左足首", parent: "左ひざ", source: "pose", from: "left_ankle", to: "left_foot_index" },
+  { kind: "direction", name: "右足首", parent: "右ひざ", source: "pose", from: "right_ankle", to: "right_foot_index" },
+
+  { kind: "direction", name: "左腕", parent: "上半身", source: "pose", from: "left_shoulder", to: "left_elbow", witness: "左ひじ" },
+  { kind: "direction", name: "右腕", parent: "上半身", source: "pose", from: "right_shoulder", to: "right_elbow", witness: "右ひじ" },
+  { kind: "direction", name: "左ひじ", parent: "左腕", source: "pose", from: "left_elbow", to: "left_wrist" },
+  { kind: "direction", name: "右ひじ", parent: "右腕", source: "pose", from: "right_elbow", to: "right_wrist" },
+
+  // Wrist twist: rotation of the hand's index−ring axis about the forearm.
+  // Swing residue is absorbed by 手首, whose parent chain includes 手捩.
+  { kind: "twist", name: "左手捩", parent: "左ひじ", source: "leftHand", from: "ring_mcp", to: "index_mcp", axisRef: "左ひじ" },
+  { kind: "twist", name: "右手捩", parent: "右ひじ", source: "rightHand", from: "ring_mcp", to: "index_mcp", axisRef: "右ひじ" },
+  { kind: "direction", name: "左手首", parent: "左手捩", source: "leftHand", from: "wrist", to: "middle_mcp" },
+  { kind: "direction", name: "右手首", parent: "右手捩", source: "rightHand", from: "wrist", to: "middle_mcp" },
+
+  { kind: "direction", name: "左親指１", parent: "左手首", source: "leftHand", from: "thumb_mcp", to: "thumb_ip", bend: THUMB_BEND["左"] },
+  fingerBase("左", "leftHand", "人指", "index_mcp", "index_pip"),
+  fingerBase("左", "leftHand", "中指", "middle_mcp", "middle_pip"),
+  fingerBase("左", "leftHand", "薬指", "ring_mcp", "ring_pip"),
+  fingerBase("左", "leftHand", "小指", "pinky_mcp", "pinky_pip"),
+  { kind: "direction", name: "右親指１", parent: "右手首", source: "rightHand", from: "thumb_mcp", to: "thumb_ip", bend: THUMB_BEND["右"] },
+  fingerBase("右", "rightHand", "人指", "index_mcp", "index_pip"),
+  fingerBase("右", "rightHand", "中指", "middle_mcp", "middle_pip"),
+  fingerBase("右", "rightHand", "薬指", "ring_mcp", "ring_pip"),
+  fingerBase("右", "rightHand", "小指", "pinky_mcp", "pinky_pip"),
+
+  // Distal joints follow the base joint's bend at a fixed ratio (kept simple on
+  // purpose — works well in practice and is robust to noisy fingertip landmarks).
+  { kind: "fingerRatio", name: "左親指２", base: "左親指１", bendAxis: new Vec3(-1, -1, 0).normalize(), ratio: 0.85 },
+  ...fingerCurl("左", "人指", new Vec3(-0.031, 0, -0.993).normalize(), [0.9, 0.65]),
+  ...fingerCurl("左", "中指", new Vec3(0.03, 0, -0.996).normalize(), [0.9, 0.65]),
+  ...fingerCurl("左", "薬指", new Vec3(0.048, 0, 0.997).normalize(), [0.88, 0.6]),
+  ...fingerCurl("左", "小指", new Vec3(0.088, 0, -0.997).normalize(), [0.85, 0.55]),
+  { kind: "fingerRatio", name: "右親指２", base: "右親指１", bendAxis: new Vec3(-1, 1, 0).normalize(), ratio: 0.85 },
+  ...fingerCurl("右", "人指", new Vec3(-0.031, 0, 0.993).normalize(), [0.9, 0.65]),
+  ...fingerCurl("右", "中指", new Vec3(0.03, 0, 0.996).normalize(), [0.9, 0.65]),
+  ...fingerCurl("右", "薬指", new Vec3(0.048, 0, 0.997).normalize(), [0.88, 0.6]),
+  ...fingerCurl("右", "小指", new Vec3(0.088, 0, 0.997).normalize(), [0.85, 0.55]),
+]
+
+const DEF_BY_NAME: Record<string, BoneDef> = Object.fromEntries(BONE_DEFS.map((d) => [d.name, d]))
+
+/** Pose landmarks each basis bone reads, for visibility gating. */
+const BASIS_LANDMARKS: Record<string, string[]> = {
+  上半身: ["left_shoulder", "right_shoulder"],
+  下半身: ["left_hip", "right_hip", "left_shoulder", "right_shoulder"],
+  頭: ["left_ear", "right_ear", "left_eye", "right_eye"],
 }
 
-class OneEuroFilter {
-  private prev: number | null = null
-  private prevDeriv = 0
-  private prevTs: number | null = null
+// Below this average visibility the measurement is noise (limb off-frame or
+// occluded) — hold the last solved rotation instead of chasing garbage.
+const MIN_VISIBILITY = 0.35
 
-  constructor(
-    private minCutoff: number,
-    private beta: number,
-    private dCutoff: number,
-  ) {}
+// Witness blend: sine of the child-joint bend angle below which roll is
+// unobservable (straight limb) and we fall back to shortest-arc.
+const WITNESS_FADE_LO = 0.15
+const WITNESS_FADE_HI = 0.35
 
-  filter(value: number, ts: number): number {
-    if (this.prev === null || this.prevTs === null) {
-      this.prev = value
-      this.prevTs = ts
-      return value
-    }
-    const dt = (ts - this.prevTs) / 1000
-    if (dt <= 0) return this.prev
-
-    const rawDeriv = (value - this.prev) / dt
-    const aD = OneEuroFilter.smoothing(this.dCutoff, dt)
-    const filteredDeriv = aD * rawDeriv + (1 - aD) * this.prevDeriv
-
-    const cutoff = this.minCutoff + this.beta * Math.abs(filteredDeriv)
-    const a = OneEuroFilter.smoothing(cutoff, dt)
-    const filtered = a * value + (1 - a) * this.prev
-
-    this.prev = filtered
-    this.prevDeriv = filteredDeriv
-    this.prevTs = ts
-    return filtered
-  }
-
-  reset(): void {
-    this.prev = null
-    this.prevDeriv = 0
-    this.prevTs = null
-  }
-
-  private static smoothing(cutoff: number, dt: number): number {
-    const tau = 1 / (2 * Math.PI * cutoff)
-    return 1 / (1 + tau / dt)
-  }
+// Canonical rest bend planes in parent-local frame. MMD rest poses have straight
+// elbows/knees, so the rest child direction can't serve as the roll reference —
+// instead anchor to anatomy: elbows flex forward (−Z), knees flex backward (+Z).
+const WITNESS_REST: Record<string, Vec3> = {
+  左腕: new Vec3(0, 0, -1),
+  右腕: new Vec3(0, 0, -1),
+  左足: new Vec3(0, 0, 1),
+  右足: new Vec3(0, 0, 1),
 }
 
-class QuaternionOneEuroFilter {
-  private fx: OneEuroFilter
-  private fy: OneEuroFilter
-  private fz: OneEuroFilter
-  private fw: OneEuroFilter
-  private prev: Quaternion | null = null
-
-  constructor(minCutoff: number, beta: number, dCutoff: number) {
-    this.fx = new OneEuroFilter(minCutoff, beta, dCutoff)
-    this.fy = new OneEuroFilter(minCutoff, beta, dCutoff)
-    this.fz = new OneEuroFilter(minCutoff, beta, dCutoff)
-    this.fw = new OneEuroFilter(minCutoff, beta, dCutoff)
-  }
-
-  filter(q: Quaternion, ts: number): Quaternion {
-    let x = q.x,
-      y = q.y,
-      z = q.z,
-      w = q.w
-    // Hemisphere flip: keep dot(prev, raw) >= 0 so component-wise filtering
-    // doesn't take the long way around the 4D sphere.
-    if (this.prev) {
-      const dot = this.prev.x * x + this.prev.y * y + this.prev.z * z + this.prev.w * w
-      if (dot < 0) {
-        x = -x
-        y = -y
-        z = -z
-        w = -w
-      }
-    }
-    const out = new Quaternion(
-      this.fx.filter(x, ts),
-      this.fy.filter(y, ts),
-      this.fz.filter(z, ts),
-      this.fw.filter(w, ts),
-    )
-    out.normalize()
-    this.prev = out
-    return out
-  }
-
-  reset(): void {
-    this.fx.reset()
-    this.fy.reset()
-    this.fz.reset()
-    this.fw.reset()
-    this.prev = null
-  }
-}
+// ---------------------------------------------------------------------------
+// Rest-pose calibration
+// ---------------------------------------------------------------------------
 
 // Bones whose rest world positions calibrate() reads. Caller queries each
 // from the loaded MMD model and passes them as `restWorldPos`.
@@ -237,68 +227,106 @@ export const SOLVER_REST_BONES: readonly string[] = [
 // `Solver.calibrate()` overrides any of these from the loaded model's rest pose.
 // 左手捩/右手捩 use a canonical hand-local axis that calibrate() can't derive
 // from bones, so they always come from here.
-const DEFAULT_REFS: Record<string, Vector3> = {
-  左腕: new Vector3(0.80917156, -0.58753001, -0.00706277).normalize(),
-  右腕: new Vector3(-0.80917129, -0.58753035, -0.00706463).normalize(),
-  左ひじ: new Vector3(0.80886214, -0.58772615, -0.01788871).normalize(),
-  右ひじ: new Vector3(-0.80886264, -0.58772542, -0.01789011).normalize(),
-  左足: new Vector3(-0.01338665, -0.99819434, 0.05855645).normalize(),
-  右足: new Vector3(0.01338609, -0.99819433, 0.05855677).normalize(),
-  左ひざ: new Vector3(-0.01333798, -0.98954426, 0.14361147).normalize(),
-  右ひざ: new Vector3(0.01333724, -0.98954425, 0.14361163).normalize(),
-  左足首: new Vector3(0.00000064, -0.80765191, -0.58965955).normalize(),
-  右足首: new Vector3(0.00000054, -0.80765185, -0.58965964).normalize(),
-  首: new Vector3(0.00000258, 0.97346054, -0.22885491).normalize(),
-  左手首: new Vector3(0.81635913, -0.57754444, -0.00043314).normalize(),
-  右手首: new Vector3(-0.81635927, -0.57754425, -0.00043491).normalize(),
-  左親指１: new Vector3(0.62716533, -0.72577692, -0.28268623).normalize(),
-  右親指１: new Vector3(-0.62716428, -0.72578107, -0.28267792).normalize(),
-  左人指１: new Vector3(0.84121176, -0.54001806, 0.02726296).normalize(),
-  右人指１: new Vector3(-0.84121092, -0.54001943, 0.02726177).normalize(),
-  左中指１: new Vector3(0.82851523, -0.55942638, 0.02458950).normalize(),
-  右中指１: new Vector3(-0.82851643, -0.55942465, 0.02458833).normalize(),
-  左薬指１: new Vector3(0.80448878, -0.59258445, 0.04051516).normalize(),
-  右薬指１: new Vector3(-0.80448680, -0.59258726, 0.04051333).normalize(),
-  左小指１: new Vector3(0.86110206, -0.49661517, 0.10897986).normalize(),
-  右小指１: new Vector3(-0.86110169, -0.49661597, 0.10897917).normalize(),
+const DEFAULT_REFS: Record<string, Vec3> = {
+  左腕: new Vec3(0.80917156, -0.58753001, -0.00706277).normalize(),
+  右腕: new Vec3(-0.80917129, -0.58753035, -0.00706463).normalize(),
+  左ひじ: new Vec3(0.80886214, -0.58772615, -0.01788871).normalize(),
+  右ひじ: new Vec3(-0.80886264, -0.58772542, -0.01789011).normalize(),
+  左足: new Vec3(-0.01338665, -0.99819434, 0.05855645).normalize(),
+  右足: new Vec3(0.01338609, -0.99819433, 0.05855677).normalize(),
+  左ひざ: new Vec3(-0.01333798, -0.98954426, 0.14361147).normalize(),
+  右ひざ: new Vec3(0.01333724, -0.98954425, 0.14361163).normalize(),
+  左足首: new Vec3(0.00000064, -0.80765191, -0.58965955).normalize(),
+  右足首: new Vec3(0.00000054, -0.80765185, -0.58965964).normalize(),
+  首: new Vec3(0.00000258, 0.97346054, -0.22885491).normalize(),
+  左手首: new Vec3(0.81635913, -0.57754444, -0.00043314).normalize(),
+  右手首: new Vec3(-0.81635927, -0.57754425, -0.00043491).normalize(),
+  左親指１: new Vec3(0.62716533, -0.72577692, -0.28268623).normalize(),
+  右親指１: new Vec3(-0.62716428, -0.72578107, -0.28267792).normalize(),
+  左人指１: new Vec3(0.84121176, -0.54001806, 0.02726296).normalize(),
+  右人指１: new Vec3(-0.84121092, -0.54001943, 0.02726177).normalize(),
+  左中指１: new Vec3(0.82851523, -0.55942638, 0.0245895).normalize(),
+  右中指１: new Vec3(-0.82851643, -0.55942465, 0.02458833).normalize(),
+  左薬指１: new Vec3(0.80448878, -0.59258445, 0.04051516).normalize(),
+  右薬指１: new Vec3(-0.8044868, -0.59258726, 0.04051333).normalize(),
+  左小指１: new Vec3(0.86110206, -0.49661517, 0.10897986).normalize(),
+  右小指１: new Vec3(-0.86110169, -0.49661597, 0.10897917).normalize(),
   // 左手捩/右手捩: canonical hand-local axis used for wrist twist roll extraction.
-  左手捩: new Vector3(0, 0, -1).normalize(),
-  右手捩: new Vector3(0, 0, -1).normalize(),
+  左手捩: new Vec3(0, 0, -1),
+  右手捩: new Vec3(0, 0, -1),
 }
 
+interface XYZ {
+  x: number
+  y: number
+  z: number
+}
+
+// Scratch registers — the entire per-frame solve allocates nothing.
+const sFrom = Vec3.zeros()
+const sTo = Vec3.zeros()
+const sDir = Vec3.zeros()
+const sWit = Vec3.zeros()
+const sA = Vec3.zeros()
+const sB = Vec3.zeros()
+const sC = Vec3.zeros()
+const sQ = Quat.identity()
+const sQ2 = Quat.identity()
+
 export class Solver {
-  private poseWorldLandmarks: Landmark[] | null = null
-  private leftHandWorldLandmarks: Landmark[] | null = null
-  private rightHandWorldLandmarks: Landmark[] | null = null
-  private boneStates: Record<string, BoneState> = {}
+  private pose: Landmark[] | null = null
+  private leftHand: Landmark[] | null = null
+  private rightHand: Landmark[] | null = null
+
+  /** Unfiltered parent-local rotation per bone; doubles as the held value on dropout. */
+  private locals: Record<string, Quat> = {}
+  /** Accumulated world rotation per bone (parent chain product), rebuilt each frame. */
+  private worlds: Record<string, Quat> = {}
   private filters: Record<string, QuaternionOneEuroFilter> = {}
-  private smoothing = { minCutoff: 1.5, beta: 0.5, dCutoff: 1.0 }
+  // One-Euro tuning: minCutoff governs rest-pose jitter suppression (lower =
+  // calmer, laggier at rest); beta governs how fast the cutoff opens with
+  // speed (higher = fast/dramatic moves track tighter with less lag and less
+  // amplitude loss). Rest stability and motion tracking are tuned independently.
+  private smoothing = { minCutoff: 1.5, beta: 1.5, dCutoff: 1.0 }
   // Calibrated reference directions in each bone's parent-local frame at rest.
   // Populated by calibrate() from the loaded model. Falls through to DEFAULT_REFS.
-  private refs: Record<string, Vector3> = {}
+  private refs: Record<string, Vec3> = {}
+  /** Stable output array: one BoneState per def, quats mutated in place each frame. */
+  private outputs: BoneState[]
+  private outputByName: Record<string, BoneState> = {}
+  /** Roll-witness solving for arms/legs; disable to fall back to shortest-arc only. */
+  witnessEnabled = true
+  /** Anatomical finger clamps; disable to reproduce unclamped shortest-arc output. */
+  bendClampEnabled = true
 
-  constructor() {}
+  constructor() {
+    this.outputs = BONE_DEFS.map((def) => {
+      const state: BoneState = { name: def.name, rotation: Quat.identity() }
+      this.outputByName[def.name] = state
+      this.locals[def.name] = Quat.identity()
+      this.worlds[def.name] = Quat.identity()
+      return state
+    })
+  }
 
   reset(): void {
-    for (const key of Object.keys(this.filters)) {
-      this.filters[key].reset()
-    }
+    for (const key of Object.keys(this.filters)) this.filters[key].reset()
+    for (const key of Object.keys(this.locals)) this.locals[key].setIdentity()
   }
 
   // Calibrate reference directions from the model's rest-pose world bone positions.
   // Parent chains are identity at rest, so world-space (child − parent) IS the
   // parent-local reference direction.
-  calibrate(restWorldPos: Record<string, Vector3>): void {
-    const dir = (parent: string, child: string): Vector3 | null => {
+  calibrate(restWorldPos: Record<string, XYZ>): void {
+    const dir = (parent: string, child: string): Vec3 | null => {
       const p = restWorldPos[parent]
       const c = restWorldPos[child]
       if (!p || !c) return null
-      const v = c.subtract(p)
-      const len = v.length()
-      if (len < 1e-6) return null
-      return v.scale(1 / len)
+      const v = new Vec3(c.x - p.x, c.y - p.y, c.z - p.z)
+      if (v.length() < 1e-6) return null
+      return v.normalizeInPlace()
     }
-    const set = (key: string, v: Vector3 | null): void => {
+    const set = (key: string, v: Vec3 | null): void => {
       if (v) this.refs[key] = v
     }
 
@@ -312,34 +340,33 @@ export class Solver {
     set("左ひざ", dir("左ひざ", "左足首"))
     set("右ひざ", dir("右ひざ", "右足首"))
 
-    // Ankle: foot_index is forward of ankle; pose runtime uses ankle→foot_index
-    // landmark direction, so calibrate the same shape from MMD foot bones.
+    // Ankle: pose runtime uses ankle→foot_index, so calibrate the same shape.
     set("左足首", dir("左足首", "左つま先"))
     set("右足首", dir("右足首", "右つま先"))
 
     // Neck: bone-direct (首→頭) doesn't match the pose runtime measurement
     // (ear_center − shoulder_center), so even at rest the rotation isn't identity.
     // Use eye/shoulder bone proxies — eye height ≈ ear height, shoulder bone ≈
-    // shoulder landmark — so the calibrated direction lines up with the pose
-    // measurement. Falls through to 首→頭 if any of the four bones is missing.
+    // shoulder landmark. Falls through to 首→頭 if any of the four bones is missing.
     set("首", dir("首", "頭"))
     const ls = restWorldPos["左肩"]
     const rs = restWorldPos["右肩"]
     const le = restWorldPos["左目"]
     const re = restWorldPos["右目"]
     if (ls && rs && le && re) {
-      const shoulderMid = ls.add(rs).scale(0.5)
-      const eyeMid = le.add(re).scale(0.5)
-      const v = eyeMid.subtract(shoulderMid)
-      const len = v.length()
-      if (len > 1e-6) this.refs["首"] = v.scale(1 / len)
+      const v = new Vec3(
+        (le.x + re.x - ls.x - rs.x) / 2,
+        (le.y + re.y - ls.y - rs.y) / 2,
+        (le.z + re.z - ls.z - rs.z) / 2,
+      )
+      if (v.length() > 1e-6) this.refs["首"] = v.normalizeInPlace()
     }
 
     // Wrists — middle finger root is the natural "forward" axis of the hand
     set("左手首", dir("左手首", "左中指１"))
     set("右手首", dir("右手首", "右中指１"))
 
-    // Wrist-twist witness axis: index_mcp − ring_mcp at rest. solveWristTwist
+    // Wrist-twist witness axis: index_mcp − ring_mcp at rest. The twist solve
     // compares the live hand axis to this reference and projects onto the
     // forearm to extract twist. Without calibration, the (0, 0, -1) fallback
     // bakes in a 90°-ish baseline twist for every frame including rest.
@@ -359,1159 +386,290 @@ export class Solver {
     set("右小指１", dir("右小指１", "右小指２"))
   }
 
-  // Calibrated reference for `key` if available, else the static default.
-  private getRef(key: string): Vector3 {
+  /**
+   * Solve all bone rotations from one MediaPipe result.
+   * `timestampMs`: media time for video (so seeks reset smoothing correctly),
+   * wall time for live camera. Defaults to wall time.
+   */
+  solve(landmarks: SolverInput, timestampMs: number = performance.now()): BoneState[] {
+    this.pose =
+      landmarks.poseWorldLandmarks.length > 0 && landmarks.poseWorldLandmarks[0].length === 33
+        ? landmarks.poseWorldLandmarks[0]
+        : null
+    this.leftHand =
+      landmarks.leftHandWorldLandmarks.length > 0 && landmarks.leftHandWorldLandmarks[0].length === 21
+        ? landmarks.leftHandWorldLandmarks[0]
+        : null
+    this.rightHand =
+      landmarks.rightHandWorldLandmarks.length > 0 && landmarks.rightHandWorldLandmarks[0].length === 21
+        ? landmarks.rightHandWorldLandmarks[0]
+        : null
+
+    for (const def of BONE_DEFS) {
+      const local = this.locals[def.name]
+      // Each solve writes into `local`, or leaves it untouched (hold) when its
+      // landmarks are missing or below the visibility gate.
+      switch (def.kind) {
+        case "basis":
+          this.solveBasis(def, local)
+          break
+        case "direction":
+          this.solveDirection(def, local)
+          break
+        case "twist":
+          this.solveTwist(def, local)
+          break
+        case "fingerRatio":
+          this.solveFingerRatio(def, local)
+          break
+      }
+      if (def.kind !== "fingerRatio") {
+        const world = this.worlds[def.name]
+        const parent = def.parent ? this.worlds[def.parent] : null
+        if (parent) Quat.multiplyInto(parent, local, world)
+        else world.set(local)
+      }
+    }
+
+    // One-Euro post-pass on the outputs only — the hierarchy above always
+    // composes unfiltered locals, so parent-chain math stays exact.
+    for (const def of BONE_DEFS) {
+      let f = this.filters[def.name]
+      if (!f) {
+        f = new QuaternionOneEuroFilter(this.smoothing.minCutoff, this.smoothing.beta, this.smoothing.dCutoff)
+        this.filters[def.name] = f
+      }
+      f.filterInto(this.locals[def.name], timestampMs, this.outputByName[def.name].rotation)
+    }
+
+    return this.outputs
+  }
+
+  // -------------------------------------------------------------------------
+
+  private getRef(key: string): Vec3 {
     return this.refs[key] ?? DEFAULT_REFS[key]
   }
 
-  // Swing-twist decomposition: returns the twist component of `q` around unit
-  // axis `a`. `q = swing * twist`; the swing has zero rotation around `a`.
-  // Singular when q is ~180° around an axis perpendicular to a — return identity.
-  private static twistAroundAxis(q: Quaternion, a: Vector3): Quaternion {
-    const d = q.x * a.x + q.y * a.y + q.z * a.z
-    const px = a.x * d
-    const py = a.y * d
-    const pz = a.z * d
-    const len = Math.sqrt(px * px + py * py + pz * pz + q.w * q.w)
-    if (len < 1e-8) return Quaternion.Identity()
-    return new Quaternion(px / len, py / len, pz / len, q.w / len)
+  private sourceLandmarks(source: LandmarkSource): Landmark[] | null {
+    return source === "pose" ? this.pose : source === "leftHand" ? this.leftHand : this.rightHand
   }
 
-  solve(landmarks: HolisticLandmarkerResult): BoneState[] | null {
-    this.boneStates = {}
-    this.poseWorldLandmarks = null
-    this.leftHandWorldLandmarks = null
-    this.rightHandWorldLandmarks = null
+  private landmarkIndex(source: LandmarkSource, name: string): number {
+    return source === "pose" ? PoseLandmarksTable[name] : HandIndexTable[name]
+  }
 
-    if (landmarks.poseWorldLandmarks.length > 0 && landmarks.poseWorldLandmarks[0].length === 33) {
-      this.poseWorldLandmarks = landmarks.poseWorldLandmarks[0]
+  /** Writes the landmark (or midpoint) into `out` in MMD coords (y flipped). */
+  private point(source: LandmarkSource, p: Point, out: Vec3): Vec3 | null {
+    const lms = this.sourceLandmarks(source)
+    if (!lms) return null
+    if (typeof p === "string") {
+      const lm = lms[this.landmarkIndex(source, p)]
+      if (!lm) return null
+      return out.setXYZ(lm.x, -lm.y, lm.z)
     }
+    const a = lms[this.landmarkIndex(source, p[0])]
+    const b = lms[this.landmarkIndex(source, p[1])]
+    if (!a || !b) return null
+    return out.setXYZ((a.x + b.x) / 2, -(a.y + b.y) / 2, (a.z + b.z) / 2)
+  }
 
-    if (landmarks.leftHandWorldLandmarks.length > 0 && landmarks.leftHandWorldLandmarks[0].length === 21) {
-      this.leftHandWorldLandmarks = landmarks.leftHandWorldLandmarks[0]
-    }
-    if (landmarks.rightHandWorldLandmarks.length > 0 && landmarks.rightHandWorldLandmarks[0].length === 21) {
-      this.rightHandWorldLandmarks = landmarks.rightHandWorldLandmarks[0]
-    }
-
-    this.boneStates["upper_body"] = this.solveUpperBody()
-    this.boneStates["neck"] = this.solveNeck()
-    this.boneStates["head"] = this.solveHead()
-    this.boneStates["lower_body"] = this.solveLowerBody()
-    this.boneStates["left_leg"] = this.solveLeftLeg()
-    this.boneStates["right_leg"] = this.solveRightLeg()
-    this.boneStates["left_knee"] = this.solveLeftKnee()
-    this.boneStates["right_knee"] = this.solveRightKnee()
-    this.boneStates["left_ankle"] = this.solveLeftAnkle()
-    this.boneStates["right_ankle"] = this.solveRightAnkle()
-    this.boneStates["left_arm"] = this.solveLeftArm()
-    this.boneStates["right_arm"] = this.solveRightArm()
-    this.boneStates["left_elbow"] = this.solveLeftElbow()
-    this.boneStates["right_elbow"] = this.solveRightElbow()
-    this.boneStates["left_wrist_twist"] = this.solveLeftWristTwist()
-    this.boneStates["right_wrist_twist"] = this.solveRightWristTwist()
-    this.boneStates["left_wrist"] = this.solveLeftWrist()
-    this.boneStates["right_wrist"] = this.solveRightWrist()
-
-    // Left Hand Fingers
-    this.boneStates["left_thumb_1"] = this.solveLeftThumb1()
-    this.boneStates["left_thumb_2"] = this.solveLeftThumb2()
-    this.boneStates["left_index_1"] = this.solveLeftIndex1()
-    this.boneStates["left_index_2"] = this.solveLeftIndex2()
-    this.boneStates["left_index_3"] = this.solveLeftIndex3()
-    this.boneStates["left_middle_1"] = this.solveLeftMiddle1()
-    this.boneStates["left_middle_2"] = this.solveLeftMiddle2()
-    this.boneStates["left_middle_3"] = this.solveLeftMiddle3()
-    this.boneStates["left_ring_1"] = this.solveLeftRing1()
-    this.boneStates["left_ring_2"] = this.solveLeftRing2()
-    this.boneStates["left_ring_3"] = this.solveLeftRing3()
-    this.boneStates["left_pinky_1"] = this.solveLeftPinky1()
-    this.boneStates["left_pinky_2"] = this.solveLeftPinky2()
-    this.boneStates["left_pinky_3"] = this.solveLeftPinky3()
-
-    // Right Hand Fingers
-    this.boneStates["right_thumb_1"] = this.solveRightThumb1()
-    this.boneStates["right_thumb_2"] = this.solveRightThumb2()
-    this.boneStates["right_index_1"] = this.solveRightIndex1()
-    this.boneStates["right_index_2"] = this.solveRightIndex2()
-    this.boneStates["right_index_3"] = this.solveRightIndex3()
-    this.boneStates["right_middle_1"] = this.solveRightMiddle1()
-    this.boneStates["right_middle_2"] = this.solveRightMiddle2()
-    this.boneStates["right_middle_3"] = this.solveRightMiddle3()
-    this.boneStates["right_ring_1"] = this.solveRightRing1()
-    this.boneStates["right_ring_2"] = this.solveRightRing2()
-    this.boneStates["right_ring_3"] = this.solveRightRing3()
-    this.boneStates["right_pinky_1"] = this.solveRightPinky1()
-    this.boneStates["right_pinky_2"] = this.solveRightPinky2()
-    this.boneStates["right_pinky_3"] = this.solveRightPinky3()
-
-    // One-Euro filter pass. Applied as a post-pass on the final outputs so the
-    // hierarchical chain (child computed in unfiltered parent's local space)
-    // stays mathematically consistent — only the displayed rotations are smoothed.
-    const ts = performance.now()
-    for (const key of Object.keys(this.boneStates)) {
-      let f = this.filters[key]
-      if (!f) {
-        f = new QuaternionOneEuroFilter(this.smoothing.minCutoff, this.smoothing.beta, this.smoothing.dCutoff)
-        this.filters[key] = f
+  /** Average MediaPipe visibility across the pose landmarks a bone reads (1 for hands). */
+  private visibility(source: LandmarkSource, points: Point[]): number {
+    if (source !== "pose" || !this.pose) return 1
+    let sum = 0
+    let n = 0
+    for (const p of points) {
+      for (const name of typeof p === "string" ? [p] : p) {
+        sum += this.pose[PoseLandmarksTable[name]]?.visibility ?? 1
+        n++
       }
-      this.boneStates[key].rotation = f.filter(this.boneStates[key].rotation, ts)
+    }
+    return n > 0 ? sum / n : 1
+  }
+
+  private solveDirection(def: DirectionDef, out: Quat): void {
+    const from = this.point(def.source, def.from, sFrom)
+    const to = this.point(def.source, def.to, sTo)
+    if (!from || !to) return
+    if (this.visibility(def.source, [def.from, def.to]) < MIN_VISIBILITY) return
+
+    Vec3.subtractInto(to, from, sDir)
+    const parentWorld = def.parent ? this.worlds[def.parent] : null
+    if (parentWorld) rotateVecInv(parentWorld, sDir, sDir)
+    if (sDir.length() < 1e-6) return
+    sDir.normalizeInPlace()
+
+    quatFromUnitVectors(this.getRef(def.name), sDir, out)
+
+    if (def.witness && this.witnessEnabled) this.applyWitness(def, parentWorld, out)
+    if (def.bend && this.bendClampEnabled) Solver.clampBend(def.bend, out)
+  }
+
+  /**
+   * Clamp a joint rotation to anatomical range: decompose q = swing ∘ twist
+   * about the flexion axis, clamp the signed twist (flexion) angle and the
+   * swing (spread) magnitude, and recompose.
+   */
+  private static clampBend(bend: BendLimit, q: Quat): void {
+    quatTwistAroundAxis(q, bend.axis, sQ) // twist
+    // Signed flexion angle about the axis, wrapped to [-π, π]
+    const k = sQ.x * bend.axis.x + sQ.y * bend.axis.y + sQ.z * bend.axis.z
+    let angle = 2 * Math.atan2(k, sQ.w)
+    if (angle > Math.PI) angle -= 2 * Math.PI
+    else if (angle < -Math.PI) angle += 2 * Math.PI
+    const clamped = Math.min(bend.max, Math.max(bend.min, angle))
+
+    // swing = q ∘ twist⁻¹
+    sQ.conjugate()
+    Quat.multiplyInto(q, sQ, sQ2)
+    // Clamp swing magnitude by nlerp toward identity
+    const swingAngle = 2 * Math.acos(Math.min(1, Math.abs(sQ2.w)))
+    if (swingAngle > bend.spreadMax) {
+      const t = bend.spreadMax / swingAngle
+      const sign = sQ2.w < 0 ? -1 : 1
+      sQ2.setXYZW(sQ2.x * t * sign, sQ2.y * t * sign, sQ2.z * t * sign, sign * sQ2.w * t + (1 - t))
+      sQ2.normalize()
     }
 
-    return Object.values(this.boneStates)
+    Quat.fromAxisAngleInto(bend.axis.x, bend.axis.y, bend.axis.z, clamped, sQ)
+    Quat.multiplyInto(sQ2, sQ, q) // q = swing ∘ twist
   }
 
-  exportToVpdBlob(modelName: string = "MotionCapture"): Blob {
-    const poseData = Object.values(this.boneStates)
-    return VpdWriter.ConvertToVpdBlob(poseData, modelName)
+  /**
+   * Pin the roll (rotation about the bone axis) using the live direction of the
+   * child segment. Builds full rest/live orthonormal bases and replaces the
+   * shortest-arc rotation with basisLive ∘ basisRest⁻¹, faded by how observable
+   * the roll actually is (≈ sine of the child bend angle).
+   */
+  private applyWitness(def: DirectionDef, parentWorld: Quat | null, out: Quat): void {
+    const wdef = DEF_BY_NAME[def.witness!] as DirectionDef
+    const wFrom = this.point(wdef.source, wdef.from, sA)
+    const wTo = this.point(wdef.source, wdef.to, sB)
+    if (!wFrom || !wTo) return
+    if (this.visibility(wdef.source, [wdef.from, wdef.to]) < MIN_VISIBILITY) return
+
+    Vec3.subtractInto(wTo, wFrom, sWit)
+    if (parentWorld) rotateVecInv(parentWorld, sWit, sWit)
+    if (sWit.length() < 1e-6) return
+    sWit.normalizeInPlace()
+
+    // Live witness component perpendicular to the live bone direction (sDir
+    // still holds it). Its magnitude is the observability of the roll.
+    const dLive = sWit.dot(sDir)
+    sA.setXYZ(sWit.x - sDir.x * dLive, sWit.y - sDir.y * dLive, sWit.z - sDir.z * dLive)
+    const perpLen = sA.length()
+    if (perpLen < WITNESS_FADE_LO) return
+    sA.normalizeInPlace()
+
+    // Rest witness component perpendicular to the rest bone direction.
+    const ref = this.getRef(def.name)
+    const restWit = WITNESS_REST[def.name]
+    if (!restWit) return
+    const dRest = restWit.dot(ref)
+    sB.setXYZ(restWit.x - ref.x * dRest, restWit.y - ref.y * dRest, restWit.z - ref.z * dRest)
+    if (sB.length() < 1e-3) return
+    sB.normalizeInPlace()
+
+    // q = basisLive ∘ basisRest⁻¹ maps (ref → dir, restWitness⊥ → liveWitness⊥).
+    Vec3.crossInto(ref, sB, sC)
+    quatFromBasis(ref, sB, sC, sQ) // basisRest
+    sQ.conjugate()
+    Vec3.crossInto(sDir, sA, sC)
+    quatFromBasis(sDir, sA, sC, sQ2) // basisLive
+    Quat.multiplyInto(sQ2, sQ, sQ) // apply rest⁻¹ first, then live
+
+    // Fade between shortest-arc (straight limb, roll unobservable) and the
+    // witness solution, hemisphere-aligned so the blend is short-path.
+    const t = Math.min(1, Math.max(0, (perpLen - WITNESS_FADE_LO) / (WITNESS_FADE_HI - WITNESS_FADE_LO)))
+    if (quatDot(out, sQ) < 0) sQ.setXYZW(-sQ.x, -sQ.y, -sQ.z, -sQ.w)
+    quatNlerp(out, sQ, t * t * (3 - 2 * t), out)
   }
 
-  private getPoseLandmark(name: string): Vector3 | null {
-    if (!this.poseWorldLandmarks) return null
-    return this.landmarkToVector3(this.poseWorldLandmarks[PoseLandmarksTable[name]])
+  private solveTwist(def: TwistDef, out: Quat): void {
+    const from = this.point(def.source, def.from, sFrom)
+    const to = this.point(def.source, def.to, sTo)
+    if (!from || !to) return
+
+    Vec3.subtractInto(to, from, sDir)
+    rotateVecInv(this.worlds[def.parent], sDir, sDir)
+    if (sDir.length() < 1e-6) return
+    sDir.normalizeInPlace()
+
+    // Total rotation aligning the rest hand axis to the live one includes the
+    // wrist swing; project onto the forearm axis to keep only the twist.
+    quatFromUnitVectors(this.getRef(def.name), sDir, sQ)
+    quatTwistAroundAxis(sQ, this.getRef(def.axisRef), out)
   }
 
-  private getLeftHandLandmark(name: string): Vector3 | null {
-    if (!this.leftHandWorldLandmarks) return null
-    return this.landmarkToVector3(this.leftHandWorldLandmarks[HandIndexTable[name]])
+  private solveFingerRatio(def: FingerRatioDef, out: Quat): void {
+    const base = this.locals[def.base]
+    const bendDegrees = Solver.extractBendDegrees(base, def.bendAxis)
+    const radians = (bendDegrees * def.ratio * Math.PI) / 180
+    Quat.fromAxisAngleInto(def.bendAxis.x, def.bendAxis.y, def.bendAxis.z, radians, out)
   }
 
-  private getRightHandLandmark(name: string): Vector3 | null {
-    if (!this.rightHandWorldLandmarks) return null
-    return this.landmarkToVector3(this.rightHandWorldLandmarks[HandIndexTable[name]])
-  }
-
-  private landmarkToVector3(landmark: Landmark): Vector3 {
-    if (!landmark) return new Vector3(0, 0, 0)
-    return new Vector3(landmark.x, -landmark.y, landmark.z)
-  }
-
-  private solveLowerBody(): BoneState {
-    const leftHip = this.getPoseLandmark("left_hip")
-    const rightHip = this.getPoseLandmark("right_hip")
-    const leftShoulder = this.getPoseLandmark("left_shoulder")
-    const rightShoulder = this.getPoseLandmark("right_shoulder")
-
-    if (!leftHip || !rightHip || !leftShoulder || !rightShoulder)
-      return { name: "下半身", rotation: Quaternion.Identity() }
-
-    // Build a pelvis basis (X = hip line, Y = trunk vertical, Z = cross).
-    // The previous 1-axis hip-line rotation discarded forward bend, so 上半身
-    // would tilt while 下半身 stayed vertical — the spine kinked at the waist.
-    // No separate pelvis-tilt landmark exists, so we share the trunk Y with
-    // 上半身; lower/upper differ in X (hip vs shoulder line) which captures twist.
-    const shoulderCenter = leftShoulder.add(rightShoulder).scale(0.5)
-    const hipCenter = leftHip.add(rightHip).scale(0.5)
-
-    const spineY = shoulderCenter.subtract(hipCenter).normalize()
-
-    const rawHipX = leftHip.subtract(rightHip).normalize()
-    const hipX = rawHipX.subtract(spineY.scale(Vector3.Dot(rawHipX, spineY))).normalize()
-
-    const hipZ = Vector3.Cross(hipX, spineY).normalize()
-
-    const m = Matrix.FromValues(
-      hipX.x, hipX.y, hipX.z, 0,
-      spineY.x, spineY.y, spineY.z, 0,
-      hipZ.x, hipZ.y, hipZ.z, 0,
-      0, 0, 0, 1,
-    )
-
-    const scaling = new Vector3()
-    const rotation = new Quaternion()
-    const translation = new Vector3()
-    m.decompose(scaling, rotation, translation)
-
-    return { name: "下半身", rotation: rotation }
-  }
-
-  private solveUpperBody(): BoneState {
-    const leftShoulder = this.getPoseLandmark("left_shoulder")
-    const rightShoulder = this.getPoseLandmark("right_shoulder")
-
-    if (!leftShoulder || !rightShoulder) return { name: "上半身", rotation: Quaternion.Identity() }
-
-    const shoulderCenter = leftShoulder.add(rightShoulder).scale(0.5)
-
-    const spineY = shoulderCenter.normalize()
-
-    // Gram-Schmidt: shoulderX from landmarks isn't guaranteed perpendicular to
-    // spineY, which was leaving the matrix slightly sheared and tilting the torso.
-    // Project out the spineY component so all three axes are orthonormal.
-    const rawShoulderX = leftShoulder.subtract(rightShoulder).normalize()
-    const shoulderX = rawShoulderX.subtract(spineY.scale(Vector3.Dot(rawShoulderX, spineY))).normalize()
-
-    const upperBodyZ = Vector3.Cross(shoulderX, spineY).normalize()
-
-    const upperBodyMatrix = Matrix.FromValues(
-      shoulderX.x,
-      shoulderX.y,
-      shoulderX.z,
-      0,
-      spineY.x,
-      spineY.y,
-      spineY.z,
-      0,
-      upperBodyZ.x,
-      upperBodyZ.y,
-      upperBodyZ.z,
-      0,
-      0,
-      0,
-      0,
-      1,
-    )
-
-    const scaling = new Vector3()
-    const rotation = new Quaternion()
-    const translation = new Vector3()
-    upperBodyMatrix.decompose(scaling, rotation, translation)
-
-    return {
-      name: "上半身",
-      rotation: rotation,
-    }
-  }
-
-  private solveNeck(): BoneState {
-    const worldLeftEar = this.getPoseLandmark("left_ear")
-    const worldRightEar = this.getPoseLandmark("right_ear")
-    const worldLeftShoulder = this.getPoseLandmark("left_shoulder")
-    const worldRightShoulder = this.getPoseLandmark("right_shoulder")
-
-    if (!worldLeftEar || !worldRightEar || !worldLeftShoulder || !worldRightShoulder)
-      return { name: "首", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const upperBodyMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(upperBodyQuat, upperBodyMatrix)
-    const worldToUpperBody = upperBodyMatrix.invert()
-
-    const localLeftEar = Vector3.TransformCoordinates(worldLeftEar, worldToUpperBody)
-    const localRightEar = Vector3.TransformCoordinates(worldRightEar, worldToUpperBody)
-    const localLeftShoulder = Vector3.TransformCoordinates(worldLeftShoulder, worldToUpperBody)
-    const localRightShoulder = Vector3.TransformCoordinates(worldRightShoulder, worldToUpperBody)
-
-    // Calculate neck direction in upper body space
-    const localEarCenter = localLeftEar.add(localRightEar).scale(0.5)
-    const localShoulderCenter = localLeftShoulder.add(localRightShoulder).scale(0.5)
-    const neckDirection = localEarCenter.subtract(localShoulderCenter).normalize()
-    const reference = this.getRef("首")
-
-    return {
-      name: "首",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, neckDirection, new Quaternion()),
-    }
-  }
-
-  private solveHead(): BoneState {
-    const worldLeftEar = this.getPoseLandmark("left_ear")
-    const worldRightEar = this.getPoseLandmark("right_ear")
-    const worldLeftEye = this.getPoseLandmark("left_eye")
-    const worldRightEye = this.getPoseLandmark("right_eye")
-
-    if (!worldLeftEar || !worldRightEar || !worldLeftEye || !worldRightEye)
-      return { name: "頭", rotation: Quaternion.Identity() }
-
-    // Use full parent chain: upper_body * neck
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const neckQuat = this.boneStates["neck"].rotation
-
-    const fullParentQuat = upperBodyQuat.multiply(neckQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localLeftEar = Vector3.TransformCoordinates(worldLeftEar, worldToFullParent)
-    const localRightEar = Vector3.TransformCoordinates(worldRightEar, worldToFullParent)
-    const localLeftEye = Vector3.TransformCoordinates(worldLeftEye, worldToFullParent)
-    const localRightEye = Vector3.TransformCoordinates(worldRightEye, worldToFullParent)
-
-    const localEarCenter = localLeftEar.add(localRightEar).scale(0.5)
-    const localEyeCenter = localLeftEye.add(localRightEye).scale(0.5)
-
-    // Build head basis in upper_body * neck local frame and decompose to a single
-    // rotation. Two FromUnitVectors composed produced the same gimbal compounding
-    // we removed from wrist twist — the second rotation isn't expressed in the
-    // frame the first leaves you in. X = ear axis (left − right), Z = back
-    // (ear_center − eye_center, since eye is forward of ear at rest), Y = cross.
-    const earX = localLeftEar.subtract(localRightEar).normalize()
-    const back = localEarCenter.subtract(localEyeCenter).normalize()
-    // Gram-Schmidt: project earX to plane perpendicular to back so axes are orthonormal.
-    const headX = earX.subtract(back.scale(Vector3.Dot(earX, back))).normalize()
-    const headY = Vector3.Cross(back, headX).normalize()
-
-    const m = Matrix.FromValues(
-      headX.x, headX.y, headX.z, 0,
-      headY.x, headY.y, headY.z, 0,
-      back.x, back.y, back.z, 0,
-      0, 0, 0, 1,
-    )
-
-    const scaling = new Vector3()
-    const rotation = new Quaternion()
-    const translation = new Vector3()
-    m.decompose(scaling, rotation, translation)
-
-    return { name: "頭", rotation: rotation }
-  }
-
-  private solveLeftLeg(): BoneState {
-    const worldLeftHip = this.getPoseLandmark("left_hip")
-    const worldLeftKnee = this.getPoseLandmark("left_knee")
-
-    if (!worldLeftHip || !worldLeftKnee) return { name: "左足", rotation: Quaternion.Identity() }
-
-    const lowerBodyQuat = this.boneStates["lower_body"].rotation
-    const lowerBodyMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(lowerBodyQuat, lowerBodyMatrix)
-    const worldToLowerBody = lowerBodyMatrix.invert()
-    const localLeftHip = Vector3.TransformCoordinates(worldLeftHip, worldToLowerBody)
-    const localLeftKnee = Vector3.TransformCoordinates(worldLeftKnee, worldToLowerBody)
-
-    const leftLegDirection = localLeftKnee.subtract(localLeftHip).normalize()
-
-    const reference = this.getRef("左足")
-
-    return {
-      name: "左足",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, leftLegDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightLeg(): BoneState {
-    const worldRightHip = this.getPoseLandmark("right_hip")
-    const worldRightKnee = this.getPoseLandmark("right_knee")
-
-    if (!worldRightHip || !worldRightKnee) return { name: "右足", rotation: Quaternion.Identity() }
-
-    const lowerBodyQuat = this.boneStates["lower_body"].rotation
-    const lowerBodyMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(lowerBodyQuat, lowerBodyMatrix)
-    const worldToLowerBody = lowerBodyMatrix.invert()
-
-    const localRightHip = Vector3.TransformCoordinates(worldRightHip, worldToLowerBody)
-    const localRightKnee = Vector3.TransformCoordinates(worldRightKnee, worldToLowerBody)
-
-    const rightLegDirection = localRightKnee.subtract(localRightHip).normalize()
-
-    const reference = this.getRef("右足")
-
-    return {
-      name: "右足",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, rightLegDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftKnee(): BoneState {
-    const worldLeftKnee = this.getPoseLandmark("left_knee")
-    const worldLeftAnkle = this.getPoseLandmark("left_ankle")
-
-    if (!worldLeftKnee || !worldLeftAnkle) return { name: "左ひざ", rotation: Quaternion.Identity() }
-
-    const leftLegQuat = this.boneStates["left_leg"].rotation
-    const lowerBodyQuat = this.boneStates["lower_body"].rotation
-
-    const fullParentQuat = lowerBodyQuat.multiply(leftLegQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localLeftKnee = Vector3.TransformCoordinates(worldLeftKnee, worldToFullParent)
-    const localLeftAnkle = Vector3.TransformCoordinates(worldLeftAnkle, worldToFullParent)
-
-    const kneeDirection = localLeftAnkle.subtract(localLeftKnee).normalize()
-    const reference = this.getRef("左ひざ")
-
-    return {
-      name: "左ひざ",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, kneeDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightKnee(): BoneState {
-    const worldRightKnee = this.getPoseLandmark("right_knee")
-    const worldRightAnkle = this.getPoseLandmark("right_ankle")
-
-    if (!worldRightKnee || !worldRightAnkle) return { name: "右ひざ", rotation: Quaternion.Identity() }
-
-    const rightLegQuat = this.boneStates["right_leg"].rotation
-    const lowerBodyQuat = this.boneStates["lower_body"].rotation
-
-    const fullParentQuat = lowerBodyQuat.multiply(rightLegQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRightKnee = Vector3.TransformCoordinates(worldRightKnee, worldToFullParent)
-    const localRightAnkle = Vector3.TransformCoordinates(worldRightAnkle, worldToFullParent)
-
-    const kneeDirection = localRightAnkle.subtract(localRightKnee).normalize()
-    const reference = this.getRef("右ひざ")
-
-    return {
-      name: "右ひざ",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, kneeDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftAnkle(): BoneState {
-    // Use ankle (not heel) → foot_index so the runtime direction matches the
-    // calibrated 左足首→左つま先 bone reference (ankle is above heel; the heel
-    // baseline tilted the rest direction by ~30° from the bone-derived ref).
-    const worldLeftAnkle = this.getPoseLandmark("left_ankle")
-    const worldLeftFootIndex = this.getPoseLandmark("left_foot_index")
-
-    if (!worldLeftAnkle || !worldLeftFootIndex) return { name: "左足首", rotation: Quaternion.Identity() }
-
-    const lowerBodyQuat = this.boneStates["lower_body"].rotation
-    const leftLegQuat = this.boneStates["left_leg"].rotation
-    const leftKneeQuat = this.boneStates["left_knee"].rotation
-
-    const fullParentQuat = lowerBodyQuat.multiply(leftLegQuat).multiply(leftKneeQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localLeftAnkle = Vector3.TransformCoordinates(worldLeftAnkle, worldToFullParent)
-    const localLeftFootIndex = Vector3.TransformCoordinates(worldLeftFootIndex, worldToFullParent)
-
-    const ankleDirection = localLeftFootIndex.subtract(localLeftAnkle).normalize()
-    const reference = this.getRef("左足首")
-
-    return {
-      name: "左足首",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, ankleDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightAnkle(): BoneState {
-    // See solveLeftAnkle for the heel→ankle landmark switch rationale.
-    const worldRightAnkle = this.getPoseLandmark("right_ankle")
-    const worldRightFootIndex = this.getPoseLandmark("right_foot_index")
-
-    if (!worldRightAnkle || !worldRightFootIndex) return { name: "右足首", rotation: Quaternion.Identity() }
-
-    const lowerBodyQuat = this.boneStates["lower_body"].rotation
-    const rightLegQuat = this.boneStates["right_leg"].rotation
-    const rightKneeQuat = this.boneStates["right_knee"].rotation
-
-    const fullParentQuat = lowerBodyQuat.multiply(rightLegQuat).multiply(rightKneeQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRightAnkle = Vector3.TransformCoordinates(worldRightAnkle, worldToFullParent)
-    const localRightFootIndex = Vector3.TransformCoordinates(worldRightFootIndex, worldToFullParent)
-
-    const ankleDirection = localRightFootIndex.subtract(localRightAnkle).normalize()
-    const reference = this.getRef("右足首")
-
-    return {
-      name: "右足首",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, ankleDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftArm(): BoneState {
-    const worldLeftShoulder = this.getPoseLandmark("left_shoulder")
-    const worldLeftElbow = this.getPoseLandmark("left_elbow")
-
-    if (!worldLeftShoulder || !worldLeftElbow) return { name: "左腕", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const upperBodyMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(upperBodyQuat, upperBodyMatrix)
-    const worldToUpperBody = upperBodyMatrix.invert()
-
-    const localLeftShoulder = Vector3.TransformCoordinates(worldLeftShoulder, worldToUpperBody)
-    const localLeftElbow = Vector3.TransformCoordinates(worldLeftElbow, worldToUpperBody)
-
-    const leftArmDirection = localLeftElbow.subtract(localLeftShoulder).normalize()
-    const reference = this.getRef("左腕")
-
-    return {
-      name: "左腕",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, leftArmDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightArm(): BoneState {
-    const worldRightShoulder = this.getPoseLandmark("right_shoulder")
-    const worldRightElbow = this.getPoseLandmark("right_elbow")
-
-    if (!worldRightShoulder || !worldRightElbow) return { name: "右腕", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const upperBodyMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(upperBodyQuat, upperBodyMatrix)
-    const worldToUpperBody = upperBodyMatrix.invert()
-
-    const localRightShoulder = Vector3.TransformCoordinates(worldRightShoulder, worldToUpperBody)
-    const localRightElbow = Vector3.TransformCoordinates(worldRightElbow, worldToUpperBody)
-
-    const rightArmDirection = localRightElbow.subtract(localRightShoulder).normalize()
-    const reference = this.getRef("右腕")
-
-    return {
-      name: "右腕",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, rightArmDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftElbow(): BoneState {
-    const worldLeftElbow = this.getPoseLandmark("left_elbow")
-    const worldLeftWrist = this.getPoseLandmark("left_wrist")
-
-    if (!worldLeftElbow || !worldLeftWrist) return { name: "左ひじ", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-
-    const fullParentQuat = upperBodyQuat.multiply(leftArmQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localLeftElbow = Vector3.TransformCoordinates(worldLeftElbow, worldToFullParent)
-    const localLeftWrist = Vector3.TransformCoordinates(worldLeftWrist, worldToFullParent)
-
-    const leftElbowDirection = localLeftWrist.subtract(localLeftElbow).normalize()
-    const reference = this.getRef("左ひじ")
-
-    return {
-      name: "左ひじ",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, leftElbowDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightElbow(): BoneState {
-    const worldRightElbow = this.getPoseLandmark("right_elbow")
-    const worldRightWrist = this.getPoseLandmark("right_wrist")
-
-    if (!worldRightElbow || !worldRightWrist) return { name: "右ひじ", rotation: Quaternion.Identity() }
-
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-
-    const fullParentQuat = upperBodyQuat.multiply(rightArmQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRightElbow = Vector3.TransformCoordinates(worldRightElbow, worldToFullParent)
-    const localRightWrist = Vector3.TransformCoordinates(worldRightWrist, worldToFullParent)
-
-    const rightElbowDirection = localRightWrist.subtract(localRightElbow).normalize()
-    const reference = this.getRef("右ひじ")
-
-    return {
-      name: "右ひじ",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, rightElbowDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftWristTwist(): BoneState {
-    const worldLeftWrist = this.getLeftHandLandmark("wrist")
-    const worldLeftIndex = this.getLeftHandLandmark("index_mcp")
-    const worldLeftRing = this.getLeftHandLandmark("ring_mcp")
-
-    if (!worldLeftWrist || !worldLeftIndex || !worldLeftRing) return { name: "左手捩", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-
-    const fullParentQuat = upperBodyQuat.multiply(leftArmQuat).multiply(leftElbowQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localLeftIndex = Vector3.TransformCoordinates(worldLeftIndex, worldToFullParent)
-    const localLeftRing = Vector3.TransformCoordinates(worldLeftRing, worldToFullParent)
-
-    const handDirection = localLeftIndex.subtract(localLeftRing).normalize()
-    const reference = this.getRef("左手捩")
-
-    // Total rotation aligning rest hand axis to current. Includes wrist twist + swing.
-    const fullRotation = Quaternion.FromUnitVectorsToRef(reference, handDirection, new Quaternion())
-    // Forearm direction in this local frame at rest = elbow's reference (parent-local).
-    // Project the rotation onto this axis to keep only the twist; the residual swing
-    // is absorbed by 左手首 since its parent chain includes 左手捩.
-    const twist = Solver.twistAroundAxis(fullRotation, this.getRef("左ひじ"))
-
-    return {
-      name: "左手捩",
-      rotation: twist,
-    }
-  }
-
-  private solveRightWristTwist(): BoneState {
-    const worldRightWrist = this.getRightHandLandmark("wrist")
-    const worldRightIndex = this.getRightHandLandmark("index_mcp")
-    const worldRightRing = this.getRightHandLandmark("ring_mcp")
-    if (!worldRightWrist || !worldRightIndex || !worldRightRing)
-      return { name: "右手捩", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-
-    const fullParentQuat = upperBodyQuat.multiply(rightArmQuat).multiply(rightElbowQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRightIndex = Vector3.TransformCoordinates(worldRightIndex, worldToFullParent)
-    const localRightRing = Vector3.TransformCoordinates(worldRightRing, worldToFullParent)
-
-    const handDirection = localRightIndex.subtract(localRightRing).normalize()
-    const reference = this.getRef("右手捩")
-
-    // See solveLeftWristTwist. Twist axis = forearm = right elbow's reference direction.
-    const fullRotation = Quaternion.FromUnitVectorsToRef(reference, handDirection, new Quaternion())
-    const twist = Solver.twistAroundAxis(fullRotation, this.getRef("右ひじ"))
-
-    return {
-      name: "右手捩",
-      rotation: twist,
-    }
-  }
-
-  private solveLeftWrist(): BoneState {
-    // Full parent chain: upper_body * left_arm * left_elbows
-    const worldLeftWrist = this.getLeftHandLandmark("wrist")
-    const worldLeftMiddleMcp = this.getLeftHandLandmark("middle_mcp")
-
-    if (!worldLeftWrist || !worldLeftMiddleMcp) return { name: "左手首", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-
-    const fullParentQuat = upperBodyQuat.multiply(leftArmQuat).multiply(leftElbowQuat).multiply(leftWristTwistQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localLeftWrist = Vector3.TransformCoordinates(worldLeftWrist, worldToFullParent)
-    const localLeftMiddleMcp = Vector3.TransformCoordinates(worldLeftMiddleMcp, worldToFullParent)
-
-    const wristDirection = localLeftMiddleMcp.subtract(localLeftWrist).normalize()
-    const reference = this.getRef("左手首")
-
-    return {
-      name: "左手首",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, wristDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightWrist(): BoneState {
-    const worldRightWrist = this.getRightHandLandmark("wrist")
-    const worldRightMiddleMcp = this.getRightHandLandmark("middle_mcp")
-
-    if (!worldRightWrist || !worldRightMiddleMcp) return { name: "右手首", rotation: Quaternion.Identity() }
-
-    // Full parent chain: upper_body * right_arm * right_elbow
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-
-    const fullParentQuat = upperBodyQuat.multiply(rightArmQuat).multiply(rightElbowQuat).multiply(rightWristTwistQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRightWrist = Vector3.TransformCoordinates(worldRightWrist, worldToFullParent)
-    const localRightMiddleMcp = Vector3.TransformCoordinates(worldRightMiddleMcp, worldToFullParent)
-
-    const wristDirection = localRightMiddleMcp.subtract(localRightWrist).normalize()
-    const reference = this.getRef("右手首")
-
-    return {
-      name: "右手首",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, wristDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftThumb1(): BoneState {
-    const thumbMCP = this.getLeftHandLandmark("thumb_mcp")
-    const thumbIP = this.getLeftHandLandmark("thumb_ip")
-    if (!thumbMCP || !thumbIP) return { name: "左親指１", rotation: Quaternion.Identity() }
-
-    // Get full parent chain including thumb base
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localThumbMCP = Vector3.TransformCoordinates(thumbMCP, worldToFullParent)
-    const localThumbIP = Vector3.TransformCoordinates(thumbIP, worldToFullParent)
-
-    const thumbDirection = localThumbIP.subtract(localThumbMCP).normalize()
-    const reference = this.getRef("左親指１")
-    return {
-      name: "左親指１",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, thumbDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftThumb2(): BoneState {
-    return this.solveFingerJoint("left_thumb_1", "左親指２", new Vector3(-1.0, -1.0, 0.0).normalize(), 0.85)
-  }
-
-  private solveLeftIndex1(): BoneState {
-    const wrist = this.getLeftHandLandmark("wrist")
-    const indexMCP = this.getLeftHandLandmark("index_mcp")
-    const indexPIP = this.getLeftHandLandmark("index_pip")
-    if (!wrist || !indexMCP || !indexPIP) return { name: "左人指１", rotation: Quaternion.Identity() }
-
-    // Get full parent chain including index base
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localIndexMCP = Vector3.TransformCoordinates(indexMCP, worldToFullParent)
-    const localIndexPIP = Vector3.TransformCoordinates(indexPIP, worldToFullParent)
-
-    const indexDirection = localIndexPIP.subtract(localIndexMCP).normalize()
-    const reference = this.getRef("左人指１")
-
-    return {
-      name: "左人指１",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, indexDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftIndex2(): BoneState {
-    return this.solveFingerJoint("left_index_1", "左人指２", new Vector3(-0.031, 0.0, -0.993).normalize(), 0.9)
-  }
-
-  private solveLeftIndex3(): BoneState {
-    return this.solveFingerJoint("left_index_1", "左人指３", new Vector3(-0.031, 0.0, -0.993).normalize(), 0.65)
-  }
-
-  // Left Middle Finger
-  private solveLeftMiddle1(): BoneState {
-    const middleMCP = this.getLeftHandLandmark("middle_mcp")
-    const middlePIP = this.getLeftHandLandmark("middle_pip")
-    if (!middleMCP || !middlePIP) return { name: "左中指１", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localMiddleMCP = Vector3.TransformCoordinates(middleMCP, worldToFullParent)
-    const localMiddlePIP = Vector3.TransformCoordinates(middlePIP, worldToFullParent)
-
-    const middleDirection = localMiddlePIP.subtract(localMiddleMCP).normalize()
-    const reference = this.getRef("左中指１")
-
-    return {
-      name: "左中指１",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, middleDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftMiddle2(): BoneState {
-    return this.solveFingerJoint("left_middle_1", "左中指２", new Vector3(0.03, 0.0, -0.996).normalize(), 0.9)
-  }
-
-  private solveLeftMiddle3(): BoneState {
-    return this.solveFingerJoint("left_middle_1", "左中指３", new Vector3(0.03, 0.0, -0.996).normalize(), 0.65)
-  }
-
-  // Left Ring Finger
-  private solveLeftRing1(): BoneState {
-    const ringMCP = this.getLeftHandLandmark("ring_mcp")
-    const ringPIP = this.getLeftHandLandmark("ring_pip")
-    if (!ringMCP || !ringPIP) return { name: "左薬指１", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRingMCP = Vector3.TransformCoordinates(ringMCP, worldToFullParent)
-    const localRingPIP = Vector3.TransformCoordinates(ringPIP, worldToFullParent)
-
-    const ringDirection = localRingPIP.subtract(localRingMCP).normalize()
-    const reference = this.getRef("左薬指１")
-
-    return {
-      name: "左薬指１",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, ringDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftRing2(): BoneState {
-    return this.solveFingerJoint("left_ring_1", "左薬指２", new Vector3(0.048, 0.0, 0.997).normalize(), 0.88)
-  }
-
-  private solveLeftRing3(): BoneState {
-    return this.solveFingerJoint("left_ring_1", "左薬指３", new Vector3(0.048, 0.0, 0.997).normalize(), 0.6)
-  }
-
-  // Left Pinky Finger
-  private solveLeftPinky1(): BoneState {
-    const pinkyMCP = this.getLeftHandLandmark("pinky_mcp")
-    const pinkyPIP = this.getLeftHandLandmark("pinky_pip")
-    if (!pinkyMCP || !pinkyPIP) return { name: "左小指１", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const leftArmQuat = this.boneStates["left_arm"].rotation
-    const leftElbowQuat = this.boneStates["left_elbow"].rotation
-    const leftWristTwistQuat = this.boneStates["left_wrist_twist"].rotation
-    const leftWristQuat = this.boneStates["left_wrist"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(leftArmQuat)
-      .multiply(leftElbowQuat)
-      .multiply(leftWristTwistQuat)
-      .multiply(leftWristQuat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localPinkyMCP = Vector3.TransformCoordinates(pinkyMCP, worldToFullParent)
-    const localPinkyPIP = Vector3.TransformCoordinates(pinkyPIP, worldToFullParent)
-
-    const pinkyDirection = localPinkyPIP.subtract(localPinkyMCP).normalize()
-    const reference = this.getRef("左小指１")
-
-    return {
-      name: "左小指１",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, pinkyDirection, new Quaternion()),
-    }
-  }
-
-  private solveLeftPinky2(): BoneState {
-    return this.solveFingerJoint("left_pinky_1", "左小指２", new Vector3(0.088, 0.0, -0.997).normalize(), 0.85)
-  }
-
-  private solveLeftPinky3(): BoneState {
-    return this.solveFingerJoint("left_pinky_1", "左小指３", new Vector3(0.088, 0.0, -0.997).normalize(), 0.55)
-  }
-
-  private solveRightThumb1(): BoneState {
-    const thumbMCP = this.getRightHandLandmark("thumb_mcp")
-    const thumbIP = this.getRightHandLandmark("thumb_ip")
-
-    if (!thumbMCP || !thumbIP) return { name: "右親指１", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localThumbMCP = Vector3.TransformCoordinates(thumbMCP, worldToFullParent)
-    const localThumbIP = Vector3.TransformCoordinates(thumbIP, worldToFullParent)
-
-    const thumbDirection = localThumbIP.subtract(localThumbMCP).normalize()
-    const reference = this.getRef("右親指１")
-
-    return {
-      name: "右親指１",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, thumbDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightThumb2(): BoneState {
-    return this.solveFingerJoint("right_thumb_1", "右親指２", new Vector3(-1.0, 1.0, 0.0).normalize(), 0.85)
-  }
-
-  private solveRightIndex1(): BoneState {
-    const indexMCP = this.getRightHandLandmark("index_mcp")
-    const indexPIP = this.getRightHandLandmark("index_pip")
-    if (!indexMCP || !indexPIP) return { name: "右人指１", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-
-    // Transform to wrist local space (NOT including wrist twist)
-    const wristSpaceQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-
-    const wristSpaceMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(wristSpaceQuat, wristSpaceMatrix)
-    const worldToWristSpace = wristSpaceMatrix.invert()
-
-    const localIndexMCP = Vector3.TransformCoordinates(indexMCP, worldToWristSpace)
-    const localIndexPIP = Vector3.TransformCoordinates(indexPIP, worldToWristSpace)
-
-    const indexDirection = localIndexPIP.subtract(localIndexMCP).normalize()
-    const reference = this.getRef("右人指１")
-
-    return {
-      name: "右人指１",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, indexDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightIndex2(): BoneState {
-    return this.solveFingerJoint("right_index_1", "右人指２", new Vector3(-0.031, 0.0, 0.993).normalize(), 0.9)
-  }
-
-  private solveRightIndex3(): BoneState {
-    return this.solveFingerJoint("right_index_1", "右人指３", new Vector3(-0.031, 0.0, 0.993).normalize(), 0.65)
-  }
-
-  private solveRightMiddle1(): BoneState {
-    const middleMCP = this.getRightHandLandmark("middle_mcp")
-    const middlePIP = this.getRightHandLandmark("middle_pip")
-    if (!middleMCP || !middlePIP) return { name: "右中指１", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localMiddleMCP = Vector3.TransformCoordinates(middleMCP, worldToFullParent)
-    const localMiddlePIP = Vector3.TransformCoordinates(middlePIP, worldToFullParent)
-
-    const middleDirection = localMiddlePIP.subtract(localMiddleMCP).normalize()
-    const reference = this.getRef("右中指１")
-
-    return {
-      name: "右中指１",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, middleDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightMiddle2(): BoneState {
-    return this.solveFingerJoint("right_middle_1", "右中指２", new Vector3(0.03, 0.0, 0.996).normalize(), 0.9)
-  }
-
-  private solveRightMiddle3(): BoneState {
-    return this.solveFingerJoint("right_middle_1", "右中指３", new Vector3(0.03, 0.0, 0.996).normalize(), 0.65)
-  }
-
-  private solveRightRing1(): BoneState {
-    const ringMCP = this.getRightHandLandmark("ring_mcp")
-    const ringPIP = this.getRightHandLandmark("ring_pip")
-    if (!ringMCP || !ringPIP) return { name: "右薬指１", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localRingMCP = Vector3.TransformCoordinates(ringMCP, worldToFullParent)
-    const localRingPIP = Vector3.TransformCoordinates(ringPIP, worldToFullParent)
-
-    const ringDirection = localRingPIP.subtract(localRingMCP).normalize()
-    const reference = this.getRef("右薬指１")
-
-    return {
-      name: "右薬指１",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, ringDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightRing2(): BoneState {
-    return this.solveFingerJoint("right_ring_1", "右薬指２", new Vector3(0.048, 0.0, 0.997).normalize(), 0.88)
-  }
-
-  private solveRightRing3(): BoneState {
-    return this.solveFingerJoint("right_ring_1", "右薬指３", new Vector3(0.048, 0.0, 0.997).normalize(), 0.6)
-  }
-
-  private solveRightPinky1(): BoneState {
-    const pinkyMCP = this.getRightHandLandmark("pinky_mcp")
-    const pinkyPIP = this.getRightHandLandmark("pinky_pip")
-    if (!pinkyMCP || !pinkyPIP) return { name: "右小指１", rotation: Quaternion.Identity() }
-
-    const upperBodyQuat = this.boneStates["upper_body"].rotation
-    const rightArmQuat = this.boneStates["right_arm"].rotation
-    const rightElbowQuat = this.boneStates["right_elbow"].rotation
-    const rightWristQuat = this.boneStates["right_wrist"].rotation
-    const rightWristTwistQuat = this.boneStates["right_wrist_twist"].rotation
-
-    const fullParentQuat = upperBodyQuat
-      .multiply(rightArmQuat)
-      .multiply(rightElbowQuat)
-      .multiply(rightWristTwistQuat)
-      .multiply(rightWristQuat)
-
-    const fullParentMatrix = new Matrix()
-    Matrix.FromQuaternionToRef(fullParentQuat, fullParentMatrix)
-    const worldToFullParent = fullParentMatrix.invert()
-
-    const localPinkyMCP = Vector3.TransformCoordinates(pinkyMCP, worldToFullParent)
-    const localPinkyPIP = Vector3.TransformCoordinates(pinkyPIP, worldToFullParent)
-
-    const pinkyDirection = localPinkyPIP.subtract(localPinkyMCP).normalize()
-    const reference = this.getRef("右小指１")
-
-    return {
-      name: "右小指１",
-      rotation: Quaternion.FromUnitVectorsToRef(reference, pinkyDirection, new Quaternion()),
-    }
-  }
-
-  private solveRightPinky2(): BoneState {
-    return this.solveFingerJoint("right_pinky_1", "右小指２", new Vector3(0.088, 0.0, 0.997).normalize(), 0.85)
-  }
-
-  private solveRightPinky3(): BoneState {
-    return this.solveFingerJoint("right_pinky_1", "右小指３", new Vector3(0.088, 0.0, 0.997).normalize(), 0.55)
-  }
-
-  private solveFingerJoint(baseJointName: string, jointName: string, bendAxis: Vector3, ratio: number): BoneState {
-    // Extract bend degrees from base joint quaternion
-    const baseRotation = this.boneStates[baseJointName].rotation
-    const bendDegrees = this.extractBendDegrees(baseRotation, bendAxis)
-
-    // Apply ratio to get degrees for this joint
-    const adjustedDegrees = bendDegrees * ratio
-
-    // Create quaternion directly from degrees (following MPL approach)
-    const radians = (adjustedDegrees * Math.PI) / 180
-    const halfAngle = radians / 2
-    const sin = Math.sin(halfAngle)
-    const cos = Math.cos(halfAngle)
-
-    const rotation = new Quaternion(bendAxis.x * sin, bendAxis.y * sin, bendAxis.z * sin, cos)
-
-    return {
-      name: jointName,
-      rotation: rotation,
-    }
-  }
-
-  private extractBendDegrees(quat: Quaternion, bendAxis: Vector3): number {
-    // Extract the total rotation angle from quaternion in degrees
-    const totalAngle = 2 * Math.acos(Math.abs(quat.w)) * (180 / Math.PI)
-
-    // Determine the sign based on the bend axis component
+  private static extractBendDegrees(quat: Quat, bendAxis: Vec3): number {
+    const totalAngle = 2 * Math.acos(Math.min(1, Math.abs(quat.w))) * (180 / Math.PI)
     const axisComponent = quat.x * bendAxis.x + quat.y * bendAxis.y + quat.z * bendAxis.z
-    const sign = axisComponent < 0 ? -1 : 1
-
-    return totalAngle * sign
-  }
-}
-
-class VpdWriter {
-  private static readonly _Signature = "Vocaloid Pose Data file"
-
-  private static encodeShiftJIS(str: string): Uint8Array {
-    const unicodeArray = Encoding.stringToCode(str)
-    const sjisArray = Encoding.convert(unicodeArray, {
-      to: "SJIS",
-      from: "UNICODE",
-    })
-    return new Uint8Array(sjisArray)
+    return axisComponent < 0 ? -totalAngle : totalAngle
   }
 
-  public static ConvertToVpdBlob(poseData: BoneState[], modelName: string = "Model"): Blob {
-    const lines: string[] = []
+  private solveBasis(def: BasisDef, out: Quat): void {
+    if (!this.pose) return
+    if (this.visibility("pose", BASIS_LANDMARKS[def.name]) < MIN_VISIBILITY) return
 
-    lines.push(this._Signature)
-    lines.push("")
-    lines.push(`${modelName};\t\t// モデルファイル名`)
-    lines.push(`${poseData.length};\t\t\t// ボーンフレーム数`)
-    lines.push("")
+    switch (def.name) {
+      case "上半身": {
+        if (!this.point("pose", "left_shoulder", sA) || !this.point("pose", "right_shoulder", sB)) return
+        // spineY = shoulder center (pose world origin is the hip center)
+        sDir.setXYZ((sA.x + sB.x) / 2, (sA.y + sB.y) / 2, (sA.z + sB.z) / 2).normalizeInPlace()
+        Vec3.subtractInto(sA, sB, sC).normalizeInPlace()
+        Solver.basisFromYAndX(sDir, sC, out)
+        return
+      }
+      case "下半身": {
+        if (!this.point("pose", "left_shoulder", sA) || !this.point("pose", "right_shoulder", sB)) return
+        sFrom.setXYZ((sA.x + sB.x) / 2, (sA.y + sB.y) / 2, (sA.z + sB.z) / 2)
+        if (!this.point("pose", "left_hip", sA) || !this.point("pose", "right_hip", sB)) return
+        sTo.setXYZ((sA.x + sB.x) / 2, (sA.y + sB.y) / 2, (sA.z + sB.z) / 2)
+        // Pelvis basis shares the trunk Y with 上半身 (no separate pelvis-tilt
+        // landmark exists); lower/upper differ in X (hip vs shoulder line),
+        // which captures twist.
+        Vec3.subtractInto(sFrom, sTo, sDir).normalizeInPlace()
+        Vec3.subtractInto(sA, sB, sC).normalizeInPlace()
+        Solver.basisFromYAndX(sDir, sC, out)
+        return
+      }
+      case "頭": {
+        if (!this.point("pose", "left_ear", sA) || !this.point("pose", "right_ear", sB)) return
+        if (!this.point("pose", "left_eye", sFrom) || !this.point("pose", "right_eye", sTo)) return
+        const parentWorld = this.worlds[def.parent!]
+        // X = ear axis, Z = back (ear center − eye center; eyes sit forward of
+        // ears), Y = cross — one basis, one decomposition, no gimbal compounding.
+        Vec3.subtractInto(sA, sB, sC)
+        rotateVecInv(parentWorld, sC, sC).normalizeInPlace() // earX in parent frame
+        sDir.setXYZ(
+          (sA.x + sB.x - sFrom.x - sTo.x) / 2,
+          (sA.y + sB.y - sFrom.y - sTo.y) / 2,
+          (sA.z + sB.z - sFrom.z - sTo.z) / 2,
+        )
+        rotateVecInv(parentWorld, sDir, sDir).normalizeInPlace() // back in parent frame
+        // Gram-Schmidt earX ⊥ back, then Y = back × X
+        const d = sC.dot(sDir)
+        sC.setXYZ(sC.x - sDir.x * d, sC.y - sDir.y * d, sC.z - sDir.z * d).normalizeInPlace()
+        Vec3.crossInto(sDir, sC, sA)
+        quatFromBasis(sC, sA, sDir, out)
+        return
+      }
+    }
+  }
 
-    poseData.forEach((boneState, index) => {
-      lines.push(`Bone${index}{${boneState.name}`)
-      lines.push(`  0.000000,0.000000,0.000000;\t\t\t\t// trans x,y,z`)
-      lines.push(
-        `  ${boneState.rotation.x},${boneState.rotation.y},${boneState.rotation.z},${boneState.rotation.w};\t\t// Quaternion x,y,z,w`,
-      )
-      lines.push(`}`)
-      lines.push("")
-    })
-
-    const content = lines.join("\n")
-    const sjisBytes = this.encodeShiftJIS(content)
-
-    return new Blob([sjisBytes.buffer as ArrayBuffer], { type: "text/plain; charset=shift_jis" })
+  /** Basis from a trunk Y axis and a raw (non-orthogonal) X axis: X ⊥ Y, Z = X×Y. */
+  private static basisFromYAndX(y: Vec3, rawX: Vec3, out: Quat): void {
+    const d = rawX.dot(y)
+    sA.setXYZ(rawX.x - y.x * d, rawX.y - y.y * d, rawX.z - y.z * d).normalizeInPlace()
+    Vec3.crossInto(sA, y, sB)
+    quatFromBasis(sA, y, sB, out)
   }
 }

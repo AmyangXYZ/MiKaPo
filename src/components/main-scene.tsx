@@ -6,7 +6,6 @@ import { FolderOpen, Github, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 import { Engine, EngineStats, Model, Quat, Vec3, parsePmxFolderInput, pmxFileAtRelativePath } from "reze-engine"
-import { Vector3 } from "@babylonjs/core"
 
 import { MotionCapture } from "./motion-capture"
 import Loading from "./loading"
@@ -37,7 +36,8 @@ export default function MainScene() {
   /** Bumped on folder upload so a still-in-flight default `loadModel` can discard its result. */
   const loadGenerationRef = useRef(0)
   const [modelLoaded, setModelLoaded] = useState(false)
-  const [restPose, setRestPose] = useState<Record<string, Vector3> | null>(null)
+  const [restPose, setRestPose] = useState<Record<string, Vec3> | null>(null)
+  const [modelMorphs, setModelMorphs] = useState<string[] | null>(null)
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
   /** After `engine.init()` — folder picker is safe (loadModel still async for default PMX). */
   const [engineInited, setEngineInited] = useState(false)
@@ -50,16 +50,26 @@ export default function MainScene() {
   // Build a rest-pose dict from the model's bone world positions. Solver uses
   // these to derive per-bone reference directions instead of the static defaults.
   const buildRestPose = useCallback((model: Model) => {
-    const dict: Record<string, Vector3> = {}
+    const dict: Record<string, Vec3> = {}
     for (const name of SOLVER_REST_BONES) {
       try {
         const p = model.getBoneWorldPosition(name)
-        if (p) dict[name] = new Vector3(p.x, p.y, p.z)
+        if (p) dict[name] = new Vec3(p.x, p.y, p.z)
       } catch {
         // bone missing — solver falls back to DEFAULT_REFS
       }
     }
     setRestPose(dict)
+
+    // Morph list for blendshape mapping resolution. reze-engine keeps this
+    // private today — worth upstreaming a public getMorphNames() (resetAllMorphs
+    // already iterates the same data).
+    try {
+      const morphs = (model as unknown as { morphing?: { morphs?: { name: string }[] } }).morphing?.morphs
+      setModelMorphs(morphs ? morphs.map((m) => m.name) : null)
+    } catch {
+      setModelMorphs(null)
+    }
   }, [])
 
   const initEngine = useCallback(async () => {
@@ -278,14 +288,14 @@ export default function MainScene() {
   }, [dismissPmxPickDialog, pmxPickDialogOpen])
 
   const applyPose = useCallback(
-    (boneStates: BoneState[]) => {
+    (boneStates: BoneState[], tweenMs: number = 30) => {
       if (!engineRef.current) return
       const pose: Record<string, Quat> = {}
       for (const bone of boneStates) {
         pose[bone.name] = new Quat(bone.rotation.x, bone.rotation.y, bone.rotation.z, bone.rotation.w)
       }
       if (Object.keys(pose).length > 0) {
-        modelRef.current?.rotateBones(pose, 30)
+        modelRef.current?.rotateBones(pose, tweenMs)
       }
     },
     [engineRef],
@@ -297,7 +307,7 @@ export default function MainScene() {
   }, [])
 
   const applyFace = useCallback(
-    (faceResult: FaceSolverResult) => {
+    (faceResult: FaceSolverResult, tweenMs: number = 30) => {
       if (!engineRef.current) return
 
       // Apply eye bone rotations (左目, 右目)
@@ -306,20 +316,14 @@ export default function MainScene() {
         for (const bone of faceResult.boneStates) {
           pose[bone.name] = new Quat(bone.rotation.x, bone.rotation.y, bone.rotation.z, bone.rotation.w)
         }
-        modelRef.current?.rotateBones(pose, 30)
+        modelRef.current?.rotateBones(pose, tweenMs)
       }
 
-      // Apply morph weights to MMD model
-      const morphWeights = faceResult.morphWeights
-
-      // Eye morphs
-      modelRef.current?.setMorphWeight("まばたき", morphWeights.まばたき, 30)
-      modelRef.current?.setMorphWeight("ウィンク", morphWeights.ウィンク, 30)
-      modelRef.current?.setMorphWeight("ウィンク右", morphWeights.ウィンク右, 30)
-
-      // Mouth morphs
-      modelRef.current?.setMorphWeight("あ", morphWeights.あ, 30)
-      modelRef.current?.setMorphWeight("ワ", morphWeights.ワ, 30)
+      // Morph weights are already resolved to this model's actual morph names
+      // by FaceBlendshapeSolver.configure().
+      for (const [name, weight] of Object.entries(faceResult.morphWeights)) {
+        modelRef.current?.setMorphWeight(name, weight, tweenMs)
+      }
     },
     [engineRef],
   )
@@ -480,6 +484,7 @@ export default function MainScene() {
         onMediaPipeReadyChange={setMediaPipeReady}
         resetModel={resetModel}
         restPose={restPose}
+        modelMorphs={modelMorphs}
       />
 
       <Loading modelLoaded={modelLoaded} mediaPipeReady={mediaPipeReady} />

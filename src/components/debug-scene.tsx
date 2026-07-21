@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef } from "react"
 import { ArcRotateCamera, Color3, Color4, Engine, LinesMesh, MeshBuilder, Scene, Vector3 } from "@babylonjs/core"
 import { GridMaterial } from "@babylonjs/materials"
-import { HolisticLandmarker, HolisticLandmarkerResult, NormalizedLandmark } from "@mediapipe/tasks-vision"
+import { HolisticLandmarker, NormalizedLandmark } from "@mediapipe/tasks-vision"
 
-function DebugScene({ landmarks }: { landmarks: HolisticLandmarkerResult | null }) {
+interface SkeletonLandmarks {
+  poseWorldLandmarks: NormalizedLandmark[][]
+  leftHandWorldLandmarks: NormalizedLandmark[][]
+  rightHandWorldLandmarks: NormalizedLandmark[][]
+}
+
+function DebugScene({ landmarks }: { landmarks: SkeletonLandmarks | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sceneRef = useRef<Scene | null>(null)
   const engineRef = useRef<Engine | null>(null)
@@ -34,10 +40,18 @@ function DebugScene({ landmarks }: { landmarks: HolisticLandmarkerResult | null 
       const ground = MeshBuilder.CreateGround("ground", { width: 4, height: 4, updatable: false }, scene)
       ground.material = groundMaterial
 
+      let lastW = 0
+      let lastH = 0
       engine.runRenderLoop(() => {
         const c = canvasRef.current
         if (!c || c.clientWidth === 0 || c.clientHeight === 0) return
-        engine.resize()
+        // resize() every frame forces layout + backbuffer realloc — only do it
+        // when the canvas actually changed size.
+        if (c.clientWidth !== lastW || c.clientHeight !== lastH) {
+          lastW = c.clientWidth
+          lastH = c.clientHeight
+          engine.resize()
+        }
         scene!.render()
       })
     }

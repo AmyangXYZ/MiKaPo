@@ -1,32 +1,23 @@
 import { NormalizedLandmark } from "@mediapipe/tasks-vision"
-import { Quaternion } from "@babylonjs/core"
+import { Quat } from "reze-engine"
 import { BoneState } from "./solver"
+import { OneEuroFilter } from "./filters"
 
-/**
- * Face morph weights for MMD models
- */
-export interface FaceMorphWeights {
-  // Eye morphs (0 = open, 1 = closed)
-  まばたき: number // blink both
-  ウィンク: number // wink left
-  ウィンク右: number // wink right
+/** Morph weights keyed by the loaded model's actual morph names. */
+export type FaceMorphWeights = Record<string, number>
 
-  // Mouth morphs
-  あ: number // mouth open
-  ワ: number // big smile/laugh (wide mouth with teeth)
-}
-
-/**
- * Result from face solver - includes both bone rotations and morph weights
- */
 export interface FaceSolverResult {
   boneStates: BoneState[]
   morphWeights: FaceMorphWeights
 }
 
+// Geometric face solver: eye/mouth ratios measured directly on the MediaPipe
+// face mesh. (MediaPipe's ARKit blendshape output would be the cleaner source,
+// but the blendshape subgraph doesn't run on the holistic GPU delegate —
+// "No support of const" — so the landmark geometry stays the driver.)
+
 /**
  * Face landmark indices from MediaPipe 478-point face mesh
- * Matching the Rust FaceIndex enum
  */
 const FaceIndex = {
   // Left eye (from camera's perspective, so appears on right side of image)
@@ -43,166 +34,164 @@ const FaceIndex = {
   RightEyeRight: 263,
   RightEyeIris: 473,
 
-  // Mouth (matching original Rust FaceIndex)
+  // Mouth
   UpperLipTop: 13,
   LowerLipBottom: 14,
   MouthLeft: 61,
   MouthRight: 291,
-
-  // Reference
-  LeftEar: 234,
-  RightEar: 454,
 } as const
 
-/**
- * FaceBlendshapeSolver - computes eye rotations (bones) and face morphs from landmarks
- * Following the style of the Rust PoseSolver
- */
-export class FaceBlendshapeSolver {
-  // Smoothing
-  private smoothingFactor: number
-  private prevLeftEyeOpenness = 1.0
-  private prevRightEyeOpenness = 1.0
-  private prevMouthOpenness = 0.0
-  private prevLeftEyeGaze = { x: 0, y: 0 }
-  private prevRightEyeGaze = { x: 0, y: 0 }
+/** Canonical MMD morph names driven by this solver, with per-model aliases. */
+const MORPH_ALIASES: Record<string, string[]> = {
+  まばたき: ["瞬き"],
+  ウィンク: ["ウィンク２"],
+  ウィンク右: ["ウィンク右２", "ウインク右"],
+  あ: ["あ２"],
+  ワ: ["にっこり", "にやり"],
+}
 
-  constructor(options?: { smoothingFactor?: number }) {
-    this.smoothingFactor = options?.smoothingFactor ?? 0.3
+export class FaceBlendshapeSolver {
+  /** canonical → actual morph name on the loaded model. */
+  private morphNames: Record<string, string>
+
+  // One-Euro per channel: snappier than the old EMA for fast events (blinks)
+  // while still suppressing landmark flutter at rest.
+  private leftOpenFilter = new OneEuroFilter(2.0, 15, 1.0)
+  private rightOpenFilter = new OneEuroFilter(2.0, 15, 1.0)
+  private mouthFilter = new OneEuroFilter(2.0, 15, 1.0)
+  private smileFilter = new OneEuroFilter(2.0, 15, 1.0)
+  private gazeXFilter = new OneEuroFilter(2.0, 10, 1.0)
+  private gazeYFilter = new OneEuroFilter(2.0, 10, 1.0)
+
+  constructor() {
+    this.morphNames = Object.fromEntries(Object.keys(MORPH_ALIASES).map((n) => [n, n]))
   }
 
-  // Additional smoothing for smile
-  private prevSmile = 0.0
-
   /**
-   * Main solve function
+   * Resolve canonical morph names against the loaded model's actual morph list
+   * (names vary across models). Unresolved names stay canonical — the engine
+   * ignores unknown morphs, same graceful degradation as before.
    */
-  solve(faceLandmarks: NormalizedLandmark[]): FaceSolverResult {
+  configure(availableMorphs: string[]): void {
+    const available = new Set(availableMorphs)
+    for (const canonical of Object.keys(MORPH_ALIASES)) {
+      this.morphNames[canonical] =
+        [canonical, ...MORPH_ALIASES[canonical]].find((n) => available.has(n)) ?? canonical
+    }
+  }
+
+  reset(): void {
+    this.leftOpenFilter.reset()
+    this.rightOpenFilter.reset()
+    this.mouthFilter.reset()
+    this.smileFilter.reset()
+    this.gazeXFilter.reset()
+    this.gazeYFilter.reset()
+  }
+
+  solve(faceLandmarks: NormalizedLandmark[], timestampMs: number = performance.now()): FaceSolverResult {
+    const names = this.morphNames
     const defaultResult: FaceSolverResult = {
       boneStates: [],
       morphWeights: {
-        まばたき: 0,
-        ウィンク: 0,
-        ウィンク右: 0,
-        あ: 0,
-        ワ: 0,
+        [names["まばたき"]]: 0,
+        [names["ウィンク"]]: 0,
+        [names["ウィンク右"]]: 0,
+        [names["あ"]]: 0,
+        [names["ワ"]]: 0,
       },
     }
 
-    // HolisticLandmarker returns 478 face landmarks, but check for at least the ones we need
     // Highest index we use is 473 (RightEyeIris)
     if (!faceLandmarks || faceLandmarks.length < 474) {
       return defaultResult
     }
 
-    // Calculate eye gaze
+    // Eye gaze from iris position relative to eye corners
     const leftEyeGaze = this.calculateEyeGaze(
       faceLandmarks[FaceIndex.LeftEyeLeft],
       faceLandmarks[FaceIndex.LeftEyeRight],
-      faceLandmarks[FaceIndex.LeftEyeIris]
+      faceLandmarks[FaceIndex.LeftEyeIris],
     )
     const rightEyeGaze = this.calculateEyeGaze(
       faceLandmarks[FaceIndex.RightEyeLeft],
       faceLandmarks[FaceIndex.RightEyeRight],
-      faceLandmarks[FaceIndex.RightEyeIris]
+      faceLandmarks[FaceIndex.RightEyeIris],
     )
 
-    // Smooth gaze
-    const smoothedLeftGaze = {
-      x: this.lerp(this.prevLeftEyeGaze.x, leftEyeGaze.x, 1 - this.smoothingFactor),
-      y: this.lerp(this.prevLeftEyeGaze.y, leftEyeGaze.y, 1 - this.smoothingFactor),
-    }
-    const smoothedRightGaze = {
-      x: this.lerp(this.prevRightEyeGaze.x, rightEyeGaze.x, 1 - this.smoothingFactor),
-      y: this.lerp(this.prevRightEyeGaze.y, rightEyeGaze.y, 1 - this.smoothingFactor),
-    }
-    this.prevLeftEyeGaze = smoothedLeftGaze
-    this.prevRightEyeGaze = smoothedRightGaze
+    const gazeX = this.gazeXFilter.filter((leftEyeGaze.x + rightEyeGaze.x) / 2, timestampMs)
+    const gazeY = this.gazeYFilter.filter((leftEyeGaze.y + rightEyeGaze.y) / 2, timestampMs)
+    const eyeRotation = this.calculateEyeRotation(gazeX, gazeY)
 
-    // Average gaze for both eyes (like the Rust version)
-    const averageGaze = {
-      x: (smoothedLeftGaze.x + smoothedRightGaze.x) / 2,
-      y: (smoothedLeftGaze.y + smoothedRightGaze.y) / 2,
-    }
-
-    // Calculate eye rotations from gaze
-    const leftEyeRotation = this.calculateEyeRotation(averageGaze.x, averageGaze.y)
-    const rightEyeRotation = this.calculateEyeRotation(averageGaze.x, averageGaze.y)
-
-    // Calculate eye openness
-    // Note: In Rust version, left/right are swapped due to mirroring
-    let leftEyeOpenness = this.calculateEyeOpenness(
-      faceLandmarks[FaceIndex.RightEyeLeft],
-      faceLandmarks[FaceIndex.RightEyeRight],
-      faceLandmarks[FaceIndex.RightEyeUpper],
-      faceLandmarks[FaceIndex.RightEyeLower]
+    // Eye openness — left/right swapped for mirror UX (user's right eye drives
+    // the model eye on screen-left).
+    const leftEyeOpenness = this.leftOpenFilter.filter(
+      this.calculateEyeOpenness(
+        faceLandmarks[FaceIndex.RightEyeLeft],
+        faceLandmarks[FaceIndex.RightEyeRight],
+        faceLandmarks[FaceIndex.RightEyeUpper],
+        faceLandmarks[FaceIndex.RightEyeLower],
+      ),
+      timestampMs,
     )
-    let rightEyeOpenness = this.calculateEyeOpenness(
-      faceLandmarks[FaceIndex.LeftEyeLeft],
-      faceLandmarks[FaceIndex.LeftEyeRight],
-      faceLandmarks[FaceIndex.LeftEyeUpper],
-      faceLandmarks[FaceIndex.LeftEyeLower]
+    const rightEyeOpenness = this.rightOpenFilter.filter(
+      this.calculateEyeOpenness(
+        faceLandmarks[FaceIndex.LeftEyeLeft],
+        faceLandmarks[FaceIndex.LeftEyeRight],
+        faceLandmarks[FaceIndex.LeftEyeUpper],
+        faceLandmarks[FaceIndex.LeftEyeLower],
+      ),
+      timestampMs,
     )
 
-    // Smooth eye openness
-    leftEyeOpenness = this.lerp(this.prevLeftEyeOpenness, leftEyeOpenness, 1 - this.smoothingFactor)
-    rightEyeOpenness = this.lerp(this.prevRightEyeOpenness, rightEyeOpenness, 1 - this.smoothingFactor)
-    this.prevLeftEyeOpenness = leftEyeOpenness
-    this.prevRightEyeOpenness = rightEyeOpenness
-
-    // Calculate mouth openness (original simple formula from Rust)
-    let mouthOpenness = this.calculateMouthOpenness(
-      faceLandmarks[FaceIndex.UpperLipTop],
-      faceLandmarks[FaceIndex.LowerLipBottom],
-      faceLandmarks[FaceIndex.MouthLeft],
-      faceLandmarks[FaceIndex.MouthRight]
+    const mouthOpenness = this.mouthFilter.filter(
+      this.calculateMouthOpenness(
+        faceLandmarks[FaceIndex.UpperLipTop],
+        faceLandmarks[FaceIndex.LowerLipBottom],
+        faceLandmarks[FaceIndex.MouthLeft],
+        faceLandmarks[FaceIndex.MouthRight],
+      ),
+      timestampMs,
+    )
+    const smile = this.smileFilter.filter(
+      this.calculateSmile(
+        faceLandmarks[FaceIndex.UpperLipTop],
+        faceLandmarks[FaceIndex.LowerLipBottom],
+        faceLandmarks[FaceIndex.MouthLeft],
+        faceLandmarks[FaceIndex.MouthRight],
+      ),
+      timestampMs,
     )
 
-    // Calculate smile
-    let smile = this.calculateSmile(
-      faceLandmarks[FaceIndex.UpperLipTop],
-      faceLandmarks[FaceIndex.LowerLipBottom],
-      faceLandmarks[FaceIndex.MouthLeft],
-      faceLandmarks[FaceIndex.MouthRight]
-    )
-
-    // Smooth mouth openness and smile
-    mouthOpenness = this.lerp(this.prevMouthOpenness, mouthOpenness, 1 - this.smoothingFactor)
-    smile = this.lerp(this.prevSmile, smile, 1 - this.smoothingFactor)
-    this.prevMouthOpenness = mouthOpenness
-    this.prevSmile = smile
-
-    // Convert openness to blink (0 = open, 1 = closed -> blink morph)
+    // Convert openness to blink (0 = open, 1 = closed)
     const leftBlink = 1 - leftEyeOpenness
     const rightBlink = 1 - rightEyeOpenness
 
-    // Build result
     const boneStates: BoneState[] = [
-      { name: "左目", rotation: leftEyeRotation },
-      { name: "右目", rotation: rightEyeRotation },
+      { name: "左目", rotation: eyeRotation },
+      { name: "右目", rotation: eyeRotation.clone() },
     ]
 
     const morphWeights: FaceMorphWeights = {
-      まばたき: (leftBlink + rightBlink) / 2,
-      ウィンク: leftBlink > 0.5 && rightBlink < 0.3 ? leftBlink : 0,
-      ウィンク右: rightBlink > 0.5 && leftBlink < 0.3 ? rightBlink : 0,
-      あ: mouthOpenness,
-      ワ: smile,
+      [names["まばたき"]]: (leftBlink + rightBlink) / 2,
+      [names["ウィンク"]]: leftBlink > 0.5 && rightBlink < 0.3 ? leftBlink : 0,
+      [names["ウィンク右"]]: rightBlink > 0.5 && leftBlink < 0.3 ? rightBlink : 0,
+      [names["あ"]]: mouthOpenness,
+      [names["ワ"]]: smile,
     }
 
     return { boneStates, morphWeights }
   }
 
   /**
-   * Calculate eye gaze direction from iris position relative to eye corners
-   * Returns normalized x,y in range [-1, 1]
+   * Eye gaze direction from iris position relative to eye corners,
+   * normalized x,y in [-1, 1]
    */
   private calculateEyeGaze(
     eyeLeft: NormalizedLandmark,
     eyeRight: NormalizedLandmark,
-    iris: NormalizedLandmark
+    iris: NormalizedLandmark,
   ): { x: number; y: number } {
-    // Scale up for better precision (like Rust version's scale(10.0))
     const scale = 10.0
 
     const eyeCenterX = (eyeLeft.x * scale + eyeRight.x * scale) / 2
@@ -222,30 +211,24 @@ export class FaceBlendshapeSolver {
     }
   }
 
-  /**
-   * Calculate eye rotation quaternion from gaze direction
-   * Following the Rust calculate_eye_rotation
-   */
-  private calculateEyeRotation(gazeX: number, gazeY: number): Quaternion {
+  private calculateEyeRotation(gazeX: number, gazeY: number): Quat {
     const maxHorizontalRotation = Math.PI / 6 // 30 degrees
     const maxVerticalRotation = Math.PI / 12 // 15 degrees
 
     const xRotation = gazeY * maxVerticalRotation
     const yRotation = -gazeX * maxHorizontalRotation
 
-    // Create quaternion from euler angles (pitch, yaw, roll)
-    return Quaternion.FromEulerAngles(xRotation, yRotation, 0)
+    return Quat.fromEuler(xRotation, yRotation, 0)
   }
 
   /**
-   * Calculate eye openness using aspect ratio
-   * Returns 0 (closed) to 1 (fully open)
+   * Eye openness from aspect ratio: 0 (closed) to 1 (fully open)
    */
   private calculateEyeOpenness(
     eyeLeft: NormalizedLandmark,
     eyeRight: NormalizedLandmark,
     eyeUpper: NormalizedLandmark,
-    eyeLower: NormalizedLandmark
+    eyeLower: NormalizedLandmark,
   ): number {
     const eyeHeight = this.distance(eyeUpper, eyeLower)
     const eyeWidth = this.distance(eyeLeft, eyeRight)
@@ -254,9 +237,9 @@ export class FaceBlendshapeSolver {
 
     const aspectRatio = eyeHeight / eyeWidth
 
-    // Less sensitive blink: lower closedRatio so eyes need to be more closed
+    // Less sensitive blink: low closedRatio so eyes need clear closure to trigger
     const openRatio = 0.3
-    const closedRatio = 0.1  // Was 0.15, now requires more closure to trigger blink
+    const closedRatio = 0.1
 
     if (aspectRatio <= closedRatio) {
       return 0
@@ -269,62 +252,56 @@ export class FaceBlendshapeSolver {
   }
 
   /**
-   * Calculate mouth openness
-   * Returns 0 (closed) to 1 (max open)
+   * Mouth openness: 0 (closed) to 1 (max open)
    */
   private calculateMouthOpenness(
     upperLipTop: NormalizedLandmark,
     lowerLipBottom: NormalizedLandmark,
     mouthLeft: NormalizedLandmark,
-    mouthRight: NormalizedLandmark
+    mouthRight: NormalizedLandmark,
   ): number {
     const mouthHeight = this.distance(upperLipTop, lowerLipBottom)
     const mouthWidth = this.distance(mouthLeft, mouthRight)
 
     if (mouthWidth === 0) return 0
 
-    // High threshold (closed mouth won't trigger), but fast ramp-up once open
-    const threshold = 0.18  // Mouth needs to be clearly open
+    // High threshold (closed mouth won't trigger), fast ramp-up once open
+    const threshold = 0.18
     const ratio = mouthHeight / mouthWidth
-    
+
     if (ratio <= threshold) {
-      return 0  // No morph when mouth appears closed
+      return 0
     }
-    
-    // Once past threshold, ramp up quickly
+
     const openness = (ratio - threshold) / 0.2
     return this.clamp(openness, 0, 1)
   }
 
   /**
-   * Calculate smile from mouth corner positions
-   * Returns 0 (no smile) to 1 (full smile)
+   * Smile from mouth corner height: 0 (no smile) to 1 (full smile)
    */
   private calculateSmile(
     upperLipTop: NormalizedLandmark,
     lowerLipBottom: NormalizedLandmark,
     mouthLeft: NormalizedLandmark,
-    mouthRight: NormalizedLandmark
+    mouthRight: NormalizedLandmark,
   ): number {
-    // Smile detection: mouth corners are higher than center when smiling
+    // Mouth corners are higher than center when smiling
     const mouthCenterY = (upperLipTop.y + lowerLipBottom.y) / 2
     const cornerY = (mouthLeft.y + mouthRight.y) / 2
-    
-    // Raw smile amount (positive when corners are up)
-    const rawSmile = (mouthCenterY - cornerY)
-    
+
+    const rawSmile = mouthCenterY - cornerY
+
     // High threshold before triggering, then ramp up fast
-    const threshold = 0.008  // Needs clear smile to trigger
+    const threshold = 0.008
     if (rawSmile <= threshold) {
       return 0
     }
-    
-    // Once past threshold, ramp up quickly
+
     const smileAmount = (rawSmile - threshold) * 120
     return this.clamp(smileAmount, 0, 1)
   }
 
-  // Utility functions
   private distance(a: NormalizedLandmark, b: NormalizedLandmark): number {
     const dx = a.x - b.x
     const dy = a.y - b.y
@@ -334,16 +311,5 @@ export class FaceBlendshapeSolver {
 
   private clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value))
-  }
-
-  private lerp(a: number, b: number, t: number): number {
-    return a + (b - a) * t
-  }
-
-  /**
-   * Set smoothing factor (0 = no smoothing, 1 = max smoothing)
-   */
-  setSmoothingFactor(factor: number) {
-    this.smoothingFactor = this.clamp(factor, 0, 0.95)
   }
 }

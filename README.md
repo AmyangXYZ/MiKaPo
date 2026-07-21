@@ -11,14 +11,17 @@ A web-based tool that drives MikuMikuDance (MMD) models — **full body, both ha
 
 The hard part isn't detection — it's the transformation. MediaPipe and MMD use different coordinate systems, every MMD model has its own rest-pose reference directions, and the bone hierarchy means each rotation has to be computed in its parent chain's local space.
 
-**MiKaPo 2.0** is a complete rewrite of the solver:
+**MiKaPo 3.0** — solver and capture pipeline rewritten by [Claude (Fable 5)](https://www.anthropic.com/claude): **60 FPS rendering with real-time capture**.
 
-- Hierarchical bone solver with per-frame parent-chain transforms
-- Auto-calibration from each loaded model's rest pose — no hardcoded reference vectors
-- One-Euro filter for jitter reduction without lag
-- Swing-twist quaternion decomposition for clean forearm rotation
-- Migrated from Vite → Next.js
-- Renderer migrated from [babylon-mmd](https://github.com/noname0310/babylon-mmd) to my custom WebGPU MMD renderer [Reze Engine](https://github.com/AmyangXYZ/reze-engine)
+- **Web Worker detection** — MediaPipe holistic runs off the main thread; the WebGPU render loop never blocks on inference and holds 60 FPS during capture
+- **Data-driven solver** — one bone-definition table + generic direction/basis/twist solvers replaced ~40 hand-written per-bone functions; parent chains computed once per frame via cached world rotations, matrix inversion replaced by quaternion conjugation, zero allocations per frame (verified bit-equivalent to the 2.0 solver, 1.7× faster)
+- **Solver math on [Reze Engine](https://github.com/AmyangXYZ/reze-engine)'s Vec3/Quat** — Babylon.js remains only in the debug skeleton preview (so you can see when a bad pose comes from MediaPipe, not the solver), lazily loaded
+- **Roll witnesses** — the forearm/shin direction pins upper-arm and thigh roll, so elbow creases and knee planes orient correctly instead of being left to shortest-arc chance
+- **Anatomical finger clamps** — swing-twist decomposition per finger with human flexion/spread ranges; noisy landmark frames can no longer bend fingers backward
+- **Visibility gating + hold-last-pose** — off-frame or occluded limbs hold their pose instead of snapping to identity or chasing garbage landmarks
+- **Adaptive motion interpolation** — pose tweens are sized to the measured detection interval, upsampling ~30 Hz capture to smooth 60 FPS motion; One-Euro filters run on media time so video seeks don't warp smoothing
+
+**MiKaPo 2.0** rewrote the solver from scratch (hierarchical parent-chain solving, rest-pose auto-calibration, One-Euro filtering, swing-twist forearm), migrated Vite → Next.js, and moved rendering from [babylon-mmd](https://github.com/noname0310/babylon-mmd) to my custom WebGPU MMD renderer [Reze Engine](https://github.com/AmyangXYZ/reze-engine).
 
 ![](./screenshots/1.png)
 ![](./screenshots/2.png)
@@ -41,7 +44,7 @@ Demo model: 深空之眼 - 裁暗之锋·塞尔凯特
 
 ## Stack
 
-- **Detection** — [MediaPipe HolisticLandmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/holistic_landmarker)
+- **Detection** — [MediaPipe HolisticLandmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/holistic_landmarker), running in a Web Worker
 - **Renderer** — [Reze Engine](https://github.com/AmyangXYZ/reze-engine) (custom WebGPU MMD)
 - **Framework** — [Next.js 15](https://nextjs.org/)
 - **UI** — Tailwind v4 + shadcn/ui
@@ -60,23 +63,19 @@ Then open [http://localhost:4000](http://localhost:4000).
 MediaPipe gives world-space 3D landmark positions per frame. MMD bones rotate in their parent's local frame, with each model defining its own rest orientation. The solver bridges these:
 
 1. **Calibrate (once, on model load)** — read each rest-pose bone world position from the loaded MMD. Since the bone chain is identity at rest, world-space `parent → child` direction equals the parent-local reference direction.
-2. **Solve (per frame, per bone)** — compose the parent chain into a single quaternion, invert to get world-to-parent-local, transform the runtime landmarks into that frame, then rotate the calibrated reference onto the live direction.
-3. **Smooth** — pass each output quaternion through a [One-Euro filter](https://gery.casiez.net/1euro/) to remove jitter without lag.
+2. **Solve (per frame, per bone)** — each bone is one row in a definition table (parent, landmark pair, optional roll witness / anatomical clamp). World rotations accumulate down the hierarchy in solve order, so every parent chain is computed exactly once; rotating into parent-local space is a quaternion conjugation, no matrices involved.
+3. **Smooth** — pass each output quaternion through a [One-Euro filter](https://gery.casiez.net/1euro/) (on media time) to remove jitter without lag, then tween to display rate.
 
 ```typescript
-function solveBone(name: string, parentChain: string[], landmarks): Quaternion {
-  // Compose parent rotations and invert to get world → parent-local
-  const parentQ = parentChain.reduce((acc, p) => acc.multiply(boneStates[p].rotation), Quaternion.Identity())
-  const worldToLocal = Matrix.FromQuaternion(parentQ).invert()
+// One row of the bone table drives the generic solver:
+{ kind: "direction", name: "左ひじ", parent: "左腕", source: "pose",
+  from: "left_elbow", to: "left_wrist" }
 
-  // Transform landmarks into parent-local space
-  const head = Vector3.TransformCoordinates(landmarks.head, worldToLocal)
-  const tail = Vector3.TransformCoordinates(landmarks.tail, worldToLocal)
-  const direction = tail.subtract(head).normalize()
-
-  // Rotate the rest-pose reference onto the runtime direction
-  const reference = calibratedRefs[name] ?? DEFAULT_REFS[name]
-  return Quaternion.FromUnitVectorsToRef(reference, direction, new Quaternion())
+function solveDirection(def, out: Quat): void {
+  const dir = landmarkDelta(def.source, def.from, def.to)     // world-space segment
+  rotateVecInv(worlds[def.parent], dir, dir)                  // → parent-local (conjugate, no matrix)
+  quatFromUnitVectors(getRef(def.name), dir.normalize(), out) // rest ref → live direction
+  // then: optional roll witness (arms/legs), anatomical clamp (fingers)
 }
 ```
 
