@@ -5,7 +5,16 @@ import Link from "next/link"
 import { FolderOpen, Github, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-import { Engine, EngineStats, Model, Quat, Vec3, parsePmxFolderInput, pmxFileAtRelativePath } from "reze-engine"
+import {
+  Engine,
+  EngineStats,
+  MaterialPresetMap,
+  Model,
+  Quat,
+  Vec3,
+  parsePmxFolderInput,
+  pmxFileAtRelativePath,
+} from "reze-engine"
 
 import { MotionCapture } from "./motion-capture"
 import Loading from "./loading"
@@ -14,6 +23,40 @@ import { FaceSolverResult } from "@/lib/face-blendshape-solver"
 
 /** Stable engine key for the bundled default PMX — folder uploads swap via removeModel + new id. */
 const DEFAULT_MODEL_KEY = "mikapo"
+
+/** Style-group hints for the bundled 塞尔凯特 PMX (exact material names). Fed to
+ *  `engine.autoStyleGroups` as overrides: these win, then the engine's built-in
+ *  JP/CN/EN name hints fill in anything else — so an arbitrary standard MMD
+ *  upload still auto-styles even though we only enumerate the default model here. */
+const DEFAULT_STYLE_OVERRIDES: MaterialPresetMap = {
+  eye: ["眼睛", "眼白", "目白", "右瞳", "左瞳", "眉毛", "eyebrow", "eyelash"],
+  face: ["脸", "face01"],
+  body: ["皮肤", "skin"],
+  hair: ["头发", "hair_f"],
+  cloth_smooth: [
+    "衣服",
+    "裙子",
+    "裙带",
+    "裙布",
+    "外套",
+    "外套饰",
+    "裤子",
+    "裤子0",
+    "腿环",
+    "发饰",
+    "鞋子",
+    "鞋子饰",
+    "shirt",
+    "shoes",
+    "shorts",
+    "trigger",
+    "dress",
+    "hair_accessory",
+    "cloth01_shoes",
+  ],
+  stockings: ["袜子", "stockings"],
+  metal: ["metal01", "earring"],
+}
 
 function fileStem(filename: string) {
   const i = filename.lastIndexOf(".")
@@ -100,35 +143,7 @@ export default function MainScene() {
           loadedModelNameRef.current = DEFAULT_MODEL_KEY
           console.log(model.getMaterials())
 
-          engine.setMaterialPresets(loadedModelNameRef.current, {
-            eye: ["眼睛", "眼白", "目白", "右瞳", "左瞳", "眉毛", "eyebrow", "eyelash"],
-            face: ["脸", "face01"],
-            body: ["皮肤", "skin"],
-            hair: ["头发", "hair_f"],
-            cloth_smooth: [
-              "衣服",
-              "裙子",
-              "裙带",
-              "裙布",
-              "外套",
-              "外套饰",
-              "裤子",
-              "裤子0",
-              "腿环",
-              "发饰",
-              "鞋子",
-              "鞋子饰",
-              "shirt",
-              "shoes",
-              "shorts",
-              "trigger",
-              "dress",
-              "hair_accessory",
-              "cloth01_shoes",
-            ],
-            stockings: ["袜子", "stockings"],
-            metal: ["metal01", "earring"],
-          })
+          await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
           setModelLoaded(true)
           await new Promise((r) => requestAnimationFrame(r))
           buildRestPose(model)
@@ -180,35 +195,7 @@ export default function MainScene() {
         model.setName(stem)
         modelRef.current = model
         loadedModelNameRef.current = instanceKey
-        engine.setMaterialPresets(loadedModelNameRef.current, {
-          eye: ["眼睛", "眼白", "目白", "右瞳", "左瞳", "眉毛", "eyebrow", "eyelash"],
-          face: ["脸", "face01"],
-          body: ["皮肤", "skin"],
-          hair: ["头发", "hair_f"],
-          cloth_smooth: [
-            "衣服",
-            "裙子",
-            "裙带",
-            "裙布",
-            "外套",
-            "外套饰",
-            "裤子",
-            "裤子0",
-            "腿环",
-            "发饰",
-            "鞋子",
-            "鞋子饰",
-            "shirt",
-            "shoes",
-            "shorts",
-            "trigger",
-            "dress",
-            "hair_accessory",
-            "cloth01_shoes",
-          ],
-          stockings: ["袜子", "stockings"],
-          metal: ["metal01", "earring"],
-        })
+        await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
         setModelLoaded(true)
         buildRestPose(model)
         setEngineError(null)
