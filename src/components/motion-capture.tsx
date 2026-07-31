@@ -3,20 +3,12 @@ import Image from "next/image"
 import { BoneState, Solver } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
 import { buildClip, clipSummary, RecordedFrame } from "@/lib/vmd"
-import { ROOT_IK_BONES, RootIkSolver, type RootIkPose } from "@/lib/root-ik-solver"
 import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Camera, ChevronDown, Image as ImageIcon, Video, Webcam, Pause, Play, Download, Square } from "lucide-react"
 
 type DebugSceneProps = { landmarks: PoseWorkerResult | null }
-
-/** RootIkPose → the bone-keyed table both the preview and the clip want. */
-const rootIkToRecord = (p: RootIkPose): Record<string, { x: number; y: number; z: number }> => ({
-  [ROOT_IK_BONES.center]: { x: p.center.x, y: p.center.y, z: p.center.z },
-  [ROOT_IK_BONES.leftFoot]: { x: p.leftFootIk.x, y: p.leftFootIk.y, z: p.leftFootIk.z },
-  [ROOT_IK_BONES.rightFoot]: { x: p.rightFootIk.x, y: p.rightFootIk.y, z: p.rightFootIk.z },
-})
 
 /**
  * One tuning row: name, setting, slider — and for anything with a live signal, a
@@ -87,7 +79,6 @@ const DEBUG_PREVIEW_INTERVAL_MS = 66
 export const MotionCapture = ({
   applyPose,
   applyFace,
-  applyRoot,
   modelLoaded,
   onMediaPipeReadyChange,
   resetModel,
@@ -97,8 +88,6 @@ export const MotionCapture = ({
 }: {
   applyPose: (boneStates: BoneState[], tweenMs: number) => void
   applyFace: (faceResult: FaceSolverResult, tweenMs: number) => void
-  /** Root translation and foot IK targets — the parts rotation cannot express. */
-  applyRoot?: (pose: RootIkPose, tweenMs: number) => void
   modelLoaded: boolean
   onMediaPipeReadyChange?: (ready: boolean) => void
   resetModel?: () => void
@@ -123,7 +112,6 @@ export const MotionCapture = ({
   const [videoSrc, setVideoSrc] = useState<string>("/flash.mp4")
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
   const solverRef = useRef<Solver>(new Solver())
-  const rootIkRef = useRef<RootIkSolver>(new RootIkSolver())
   const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver>(new FaceBlendshapeSolver())
   const onMediaPipeReadyChangeRef = useRef(onMediaPipeReadyChange)
   useEffect(() => {
@@ -176,7 +164,6 @@ export const MotionCapture = ({
   // Current pose/face state
   const currentBoneStatesRef = useRef<BoneState[]>([])
   const currentMorphWeightsRef = useRef<FaceMorphWeights | null>(null)
-  const currentTranslationsRef = useRef<Record<string, { x: number; y: number; z: number }> | null>(null)
 
   // Custom video controls — replaces native browser chrome to match the panel style.
   const [videoPlaying, setVideoPlaying] = useState(false)
@@ -210,9 +197,7 @@ export const MotionCapture = ({
 
   // Re-calibrate solver reference directions when a (new) model's rest pose arrives.
   useEffect(() => {
-    if (!restPose) return
-    solverRef.current.calibrate(restPose)
-    rootIkRef.current.calibrate(restPose)
+    if (restPose) solverRef.current.calibrate(restPose)
   }, [restPose])
 
   // Resolve blendshape→morph mappings against the loaded model's morph list.
@@ -228,12 +213,10 @@ export const MotionCapture = ({
   }, [modelLoaded])
   const applyPoseRef = useRef(applyPose)
   const applyFaceRef = useRef(applyFace)
-  const applyRootRef = useRef(applyRoot)
   useEffect(() => {
     applyPoseRef.current = applyPose
     applyFaceRef.current = applyFace
-    applyRootRef.current = applyRoot
-  }, [applyPose, applyFace, applyRoot])
+  }, [applyPose, applyFace])
 
   const lastDebugUpdateRef = useRef(0)
   // Detection results arrive at ~25-35 Hz while the renderer runs at 60 —
@@ -264,10 +247,6 @@ export const MotionCapture = ({
     const pose = solverRef.current.solve(result, timestampMs)
     currentBoneStatesRef.current = pose
     applyPoseRef.current(pose, tweenMs)
-
-    const root = rootIkRef.current.solve(result, timestampMs)
-    currentTranslationsRef.current = root ? rootIkToRecord(root) : null
-    if (root) applyRootRef.current?.(root, tweenMs)
 
     if (result.faceLandmarks?.[0]) {
       const faceResult = faceBlendshapeSolverRef.current.solve(result.faceLandmarks[0], timestampMs)
@@ -542,10 +521,6 @@ export const MotionCapture = ({
         // which is the progress bar people actually watch.
         applyPoseRef.current(pose, 0)
 
-        const root = rootIkRef.current.solve(result, t * 1000)
-        const translations = root ? rootIkToRecord(root) : null
-        if (root) applyRootRef.current?.(root, 0)
-
         let morphWeights: FaceMorphWeights | null = null
         if (result.faceLandmarks?.[0]) {
           const face = faceBlendshapeSolverRef.current.solve(result.faceLandmarks[0], t * 1000)
@@ -558,7 +533,6 @@ export const MotionCapture = ({
           time: t,
           boneStates: pose.map((bs) => ({ name: bs.name, rotation: bs.rotation.clone() })),
           morphWeights,
-          translations,
         })
         // Throttled: a React render per frame is a render the conversion pays
         // for thousands of times, for a number that changes by a fraction.
