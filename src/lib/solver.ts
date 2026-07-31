@@ -288,6 +288,16 @@ export class Solver {
   // speed (higher = fast/dramatic moves track tighter with less lag and less
   // amplitude loss). Rest stability and motion tracking are tuned independently.
   private smoothing = { minCutoff: 1.5, beta: 1.5, dCutoff: 1.0 }
+
+  /**
+   * Retune smoothing. Existing filters are dropped so the new values take effect
+   * on the next frame rather than only on bones that appear later — a filter
+   * carries its cutoffs from construction.
+   */
+  setSmoothing(minCutoff: number, beta: number): void {
+    this.smoothing = { ...this.smoothing, minCutoff, beta }
+    this.filters = {}
+  }
   // Calibrated reference directions in each bone's parent-local frame at rest.
   // Populated by calibrate() from the loaded model. Falls through to DEFAULT_REFS.
   private refs: Record<string, Vec3> = {}

@@ -50,9 +50,33 @@ const MORPH_ALIASES: Record<string, string[]> = {
   ワ: ["にっこり", "にやり"],
 }
 
+/** What counts as an expression. Ratios measured on the MediaPipe face mesh. */
+export interface FaceThresholds {
+  /** Eye aspect ratio at or above which the eye reads fully open. */
+  eyeOpen: number
+  /** ...and at or below which it reads fully closed. Between them, a ramp. */
+  eyeClosed: number
+  /** Mouth-height ratio a closed mouth stays under. */
+  mouthOpen: number
+  /** Mouth-corner spread before a smile registers. */
+  smile: number
+}
+
+export const DEFAULT_FACE_THRESHOLDS: FaceThresholds = {
+  eyeOpen: 0.3,
+  eyeClosed: 0.1,
+  mouthOpen: 0.18,
+  smile: 0.008,
+}
+
 export class FaceBlendshapeSolver {
   /** canonical → actual morph name on the loaded model. */
   private morphNames: Record<string, string>
+  private thresholds: FaceThresholds = { ...DEFAULT_FACE_THRESHOLDS }
+
+  setThresholds(next: Partial<FaceThresholds>): void {
+    this.thresholds = { ...this.thresholds, ...next }
+  }
 
   // One-Euro per channel: snappier than the old EMA for fast events (blinks)
   // while still suppressing landmark flutter at rest.
@@ -238,8 +262,8 @@ export class FaceBlendshapeSolver {
     const aspectRatio = eyeHeight / eyeWidth
 
     // Less sensitive blink: low closedRatio so eyes need clear closure to trigger
-    const openRatio = 0.3
-    const closedRatio = 0.1
+    const openRatio = this.thresholds.eyeOpen
+    const closedRatio = this.thresholds.eyeClosed
 
     if (aspectRatio <= closedRatio) {
       return 0
@@ -266,7 +290,7 @@ export class FaceBlendshapeSolver {
     if (mouthWidth === 0) return 0
 
     // High threshold (closed mouth won't trigger), fast ramp-up once open
-    const threshold = 0.18
+    const threshold = this.thresholds.mouthOpen
     const ratio = mouthHeight / mouthWidth
 
     if (ratio <= threshold) {
@@ -293,7 +317,7 @@ export class FaceBlendshapeSolver {
     const rawSmile = mouthCenterY - cornerY
 
     // High threshold before triggering, then ramp up fast
-    const threshold = 0.008
+    const threshold = this.thresholds.smile
     if (rawSmile <= threshold) {
       return 0
     }
