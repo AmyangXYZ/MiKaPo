@@ -129,6 +129,21 @@ export const MotionCapture = ({
   // ever says "more sensitive to the right".
   const [tuning, setTuning] = useState({ smoothing: 1.5, beta: 1.5, blink: 0.35, mouth: 0.5, smile: 0.75 })
   const [tuningOpen, setTuningOpen] = useState(false)
+  // Face capture is the flakiest part of the pipeline — a bad blink read is worse
+  // than no blink at all — so it can be switched off and the body kept.
+  const [faceEnabled, setFaceEnabled] = useState(true)
+  const faceEnabledRef = useRef(true)
+  useEffect(() => {
+    faceEnabledRef.current = faceEnabled
+    // Written, not merely stopped: without this the model keeps the last
+    // expression it was given, mid-blink or mid-smile, forever.
+    if (!faceEnabled) {
+      const rest = faceBlendshapeSolverRef.current.restWeights()
+      currentMorphWeightsRef.current = rest
+      applyFaceRef.current({ boneStates: [], morphWeights: rest }, 120)
+      setLevels({ blink: 0, mouth: 0, smile: 0 })
+    }
+  }, [faceEnabled])
   const mix = (a: number, b: number, t: number) => a + (b - a) * t
   useEffect(() => {
     solverRef.current.setSmoothing(tuning.smoothing, tuning.beta)
@@ -248,7 +263,7 @@ export const MotionCapture = ({
     currentBoneStatesRef.current = pose
     applyPoseRef.current(pose, tweenMs)
 
-    if (result.faceLandmarks?.[0]) {
+    if (faceEnabledRef.current && result.faceLandmarks?.[0]) {
       const faceResult = faceBlendshapeSolverRef.current.solve(result.faceLandmarks[0], timestampMs)
       currentMorphWeightsRef.current = faceResult.morphWeights
       applyFaceRef.current(faceResult, tweenMs)
@@ -522,7 +537,7 @@ export const MotionCapture = ({
         applyPoseRef.current(pose, 0)
 
         let morphWeights: FaceMorphWeights | null = null
-        if (result.faceLandmarks?.[0]) {
+        if (faceEnabledRef.current && result.faceLandmarks?.[0]) {
           const face = faceBlendshapeSolverRef.current.solve(result.faceLandmarks[0], t * 1000)
           morphWeights = face.morphWeights
           currentMorphWeightsRef.current = morphWeights
@@ -752,6 +767,20 @@ export const MotionCapture = ({
           </button>
           {tuningOpen && (
             <div className="space-y-2 px-3 pb-2.5">
+              <button
+                type="button"
+                onClick={() => setFaceEnabled((v) => !v)}
+                className="flex w-full items-center justify-between rounded-md py-0.5 text-[11px] text-white/70 transition-colors hover:text-white"
+              >
+                Face capture
+                <span
+                  className={`relative h-3 w-6 rounded-full transition-colors ${faceEnabled ? "bg-emerald-400/70" : "bg-white/20"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 size-2 rounded-full bg-white transition-[left] ${faceEnabled ? "left-3.5" : "left-0.5"}`}
+                  />
+                </span>
+              </button>
               <Knob
                 label="Smoothing"
                 hint="Left: calmer at rest, and laggier. Right: tracks tighter, and jitters"
@@ -770,6 +799,7 @@ export const MotionCapture = ({
                 step={0.1}
                 onChange={(v) => setTuning((t) => ({ ...t, beta: v }))}
               />
+              <div className={faceEnabled ? "space-y-2" : "pointer-events-none space-y-2 opacity-40"}>
               <Knob
                 label="Blink"
                 hint="How readily a blink registers"
@@ -803,6 +833,7 @@ export const MotionCapture = ({
                 level={levels.smile}
                 onChange={(v) => setTuning((t) => ({ ...t, smile: v }))}
               />
+              </div>
             </div>
           )}
         </div>
