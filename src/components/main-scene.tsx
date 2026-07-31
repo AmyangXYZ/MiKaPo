@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 
 import {
   Engine,
+  type AnimationClip,
   EngineStats,
   MaterialPresetMap,
   Model,
@@ -18,6 +19,11 @@ import {
 
 import { MotionCapture } from "./motion-capture"
 import Loading from "./loading"
+import { withIkDisabled } from "@/lib/vmd"
+
+/** The captured clip is registered under its own name and never played, so
+ *  exporting cannot disturb the pose the user is driving live. */
+const EXPORT_CLIP_NAME = "mikapo-capture"
 import { BoneState, SOLVER_REST_BONES } from "@/lib/solver"
 import { FaceSolverResult } from "@/lib/face-blendshape-solver"
 
@@ -288,6 +294,30 @@ export default function MainScene() {
     [engineRef],
   )
 
+  /**
+   * Captured motion → a .vmd on disk.
+   *
+   * The clip goes through the model, so the ENGINE writes the file — the same
+   * writer Reze Studio exports through. That is what makes a capture from here
+   * open there, and in MMD, without a second VMD implementation to keep correct.
+   * The clip is registered under its own name and never played, so the live pose
+   * the user is still driving is untouched.
+   */
+  const exportVmd = useCallback((clip: AnimationClip) => {
+    const model = modelRef.current
+    if (!model || clip.frameCount === 0) return
+    model.loadClip(EXPORT_CLIP_NAME, clip)
+    // The engine writes the motion; MiKaPo adds the frame-0 IK switch-off that
+    // FK capture needs (see withIkDisabled).
+    const buffer = withIkDisabled(model.exportVmd(EXPORT_CLIP_NAME))
+    const url = URL.createObjectURL(new Blob([buffer], { type: "application/octet-stream" }))
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `mikapo-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.vmd`
+    link.click()
+    URL.revokeObjectURL(url)
+  }, [])
+
   const resetModel = useCallback(() => {
     modelRef.current?.resetAllBones()
     modelRef.current?.resetAllMorphs()
@@ -364,6 +394,16 @@ export default function MainScene() {
               >
                 <Link href="https://reze.studio" target="_blank">
                   Animation
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+                className="h-8 px-2.5 text-xs font-normal text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <Link href="https://reze.design" target="_blank">
+                  Design
                 </Link>
               </Button>
             </div>
@@ -472,14 +512,20 @@ export default function MainScene() {
         resetModel={resetModel}
         restPose={restPose}
         modelMorphs={modelMorphs}
+        exportVmd={exportVmd}
       />
 
-      <Loading modelLoaded={modelLoaded} mediaPipeReady={mediaPipeReady} />
-
-      {engineError && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-medium text-white z-10">
-          {engineError}
+      {/* One message at a time. A failed boot leaves `modelLoaded` false, so the
+          loader kept counting dots underneath the error that explained why it
+          never would finish — two centred overlays, both unreadable. */}
+      {engineError ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+          <div className="max-w-md rounded-xl border border-red-400/20 bg-zinc-950/90 px-5 py-4 text-center text-sm leading-relaxed text-red-300 shadow-2xl shadow-black/40 backdrop-blur-md">
+            {engineError}
+          </div>
         </div>
+      ) : (
+        <Loading modelLoaded={modelLoaded} mediaPipeReady={mediaPipeReady} />
       )}
       <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full z-1 outline-none" />
     </div>
