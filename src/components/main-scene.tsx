@@ -19,7 +19,7 @@ import {
 
 import { MotionCapture } from "./motion-capture"
 import Loading from "./loading"
-import { withIkDisabled } from "@/lib/vmd"
+import { ROOT_IK_BONES, type RootIkPose } from "@/lib/root-ik-solver"
 
 /** The captured clip is registered under its own name and never played, so
  *  exporting cannot disturb the pose the user is driving live. */
@@ -128,7 +128,9 @@ export default function MainScene() {
         engineRef.current = engine
         await engine.init()
         setEngineInited(true)
-        engine.setIKEnabled(false)
+        // On, because the solver now drives 左足ＩＫ/右足ＩＫ. With IK off the
+        // targets would be inert and the preview would disagree with the file.
+        engine.setIKEnabled(true)
         engine.runRenderLoop(() => {
           setStats(engine.getStats())
         })
@@ -280,6 +282,18 @@ export default function MainScene() {
     return () => window.removeEventListener("keydown", onKey)
   }, [dismissPmxPickDialog, pmxPickDialogOpen])
 
+  /** Root translation and foot IK targets — the two things rotations cannot say. */
+  const applyRoot = useCallback((pose: RootIkPose, tweenMs: number = 30) => {
+    modelRef.current?.moveBones(
+      {
+        [ROOT_IK_BONES.center]: pose.center,
+        [ROOT_IK_BONES.leftFoot]: pose.leftFootIk,
+        [ROOT_IK_BONES.rightFoot]: pose.rightFootIk,
+      },
+      tweenMs,
+    )
+  }, [])
+
   const applyPose = useCallback(
     (boneStates: BoneState[], tweenMs: number = 30) => {
       if (!engineRef.current) return
@@ -307,9 +321,7 @@ export default function MainScene() {
     const model = modelRef.current
     if (!model || clip.frameCount === 0) return
     model.loadClip(EXPORT_CLIP_NAME, clip)
-    // The engine writes the motion; MiKaPo adds the frame-0 IK switch-off that
-    // FK capture needs (see withIkDisabled).
-    const buffer = withIkDisabled(model.exportVmd(EXPORT_CLIP_NAME))
+    const buffer = model.exportVmd(EXPORT_CLIP_NAME)
     const url = URL.createObjectURL(new Blob([buffer], { type: "application/octet-stream" }))
     const link = document.createElement("a")
     link.href = url
@@ -512,6 +524,7 @@ export default function MainScene() {
         resetModel={resetModel}
         restPose={restPose}
         modelMorphs={modelMorphs}
+        applyRoot={applyRoot}
         exportVmd={exportVmd}
       />
 
