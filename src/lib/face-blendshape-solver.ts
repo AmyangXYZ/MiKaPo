@@ -78,6 +78,14 @@ export class FaceBlendshapeSolver {
     this.thresholds = { ...this.thresholds, ...next }
   }
 
+  /** Every morph this solver drives, at rest. Switching face capture off has to
+   *  WRITE these — leaving the morphs alone would freeze the model on whatever
+   *  expression it happened to be wearing. */
+  restWeights(): FaceMorphWeights {
+    const n = this.morphNames
+    return { [n["まばたき"]]: 0, [n["ウィンク"]]: 0, [n["ウィンク右"]]: 0, [n["あ"]]: 0, [n["ワ"]]: 0 }
+  }
+
   /** Last solved expression levels, 0–1, under canonical names. What the tuning
    *  UI meters — the morph weights themselves, so a threshold drag is visible as
    *  the bar it moves rather than as a number with no reference. */
