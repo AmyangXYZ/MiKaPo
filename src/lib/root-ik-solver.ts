@@ -40,15 +40,27 @@ interface Rest {
   rightAnkle: Vec3
 }
 
+/** How far the hips may sink, as a fraction of leg span. Past this the pose is a
+ *  detection failure rather than a crouch. */
+const MAX_CROUCH = 0.55
+
 const dist = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number =>
   Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z)
 
 export class RootIkSolver {
   private rest: Rest | null = null
 
-  // Scale drifts frame to frame with landmark noise, and it multiplies every
-  // position downstream — so it is smoothed hard and separately.
-  private scaleFilter = new OneEuroFilter(0.6, 0.5, 1.0)
+  // Scale is a property of the PERSON, not of the frame — how big they are
+  // relative to the model does not change while they dance. Measuring it per
+  // frame made it noise, and because it multiplies every position downstream,
+  // that noise came out as the hips wandering.
+  //
+  // Estimated from the longest leg seen so far. Foreshortening — a leg swinging
+  // toward or away from the camera — can only ever make the chain measure
+  // SHORTER than it is, never longer, so the running maximum converges on the
+  // true length and stops moving. The slow decay lets it re-settle if the
+  // performer changes, without chasing single-frame spikes.
+  private legLengthSeen = 0
   private centerY = new OneEuroFilter(1.2, 1.0, 1.0)
   private ik = {
     lx: new OneEuroFilter(1.5, 2.0, 1.0),
@@ -95,7 +107,7 @@ export class RootIkSolver {
 
   /** Drop filter history — call when the source changes (new video, new take). */
   reset(): void {
-    this.scaleFilter = new OneEuroFilter(0.6, 0.5, 1.0)
+    this.legLengthSeen = 0
     this.centerY = new OneEuroFilter(1.2, 1.0, 1.0)
   }
 
@@ -120,13 +132,19 @@ export class RootIkSolver {
     // Metres → model units, from the one thing both skeletons share: leg length.
     const detected = (dist(lHip, lKnee) + dist(lKnee, lAnkle) + dist(rHip, rKnee) + dist(rKnee, rAnkle)) / 2
     if (detected < 1e-4) return null
-    const scale = this.scaleFilter.filter(rest.legLength / detected, timestampMs)
+    this.legLengthSeen = Math.max(detected, this.legLengthSeen * 0.9995)
+    const scale = rest.legLength / this.legLengthSeen
 
     // The hips are the landmark origin, so a foot's Y IS its distance below the
     // hips. The lower foot is the one standing on something.
     const stance = Math.min(lAnkle.y, rAnkle.y) * scale
-    // Drop the hips by however much the legs have folded up under them.
-    const centerY = this.centerY.filter(rest.ankleY - rest.hipY - stance, timestampMs)
+    // Drop the hips by however far the legs have folded up under them. Clamped
+    // to a squat: a bad frame — legs foreshortened, a foot out of shot — reads
+    // as a very short leg span, and unclamped that buries the character in the
+    // floor for as long as the detection stays bad.
+    const legSpan = rest.hipY - rest.ankleY
+    const raw = Math.max(-legSpan * MAX_CROUCH, Math.min(0, stance + legSpan))
+    const centerY = this.centerY.filter(raw, timestampMs)
 
     // Hip position once the body has been placed at that height. X and Z stay at
     // rest until image-space landmarks give us somewhere real to put them.
