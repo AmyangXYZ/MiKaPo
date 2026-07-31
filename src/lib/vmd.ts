@@ -1,4 +1,3 @@
-import Encoding from "encoding-japanese"
 import { Quat, Vec3, type AnimationClip, type BoneInterpolation, type BoneKeyframe, type MorphKeyframe } from "reze-engine"
 import { BoneState } from "./solver"
 import { FaceMorphWeights } from "./face-blendshape-solver"
@@ -16,6 +15,9 @@ export interface RecordedFrame {
   time: number
   boneStates: BoneState[]
   morphWeights: FaceMorphWeights | null
+  /** Bone translations — センター and the foot IK targets. Offsets from rest, as
+   *  VMD stores them. */
+  translations?: Record<string, { x: number; y: number; z: number }> | null
 }
 
 /** VMD runs at 30 frames per second. Not a preference — it is the format. */
@@ -78,8 +80,21 @@ export function buildClip(frames: RecordedFrame[]): AnimationClip {
         boneName: bone.name,
         frame,
         rotation: new Quat(bone.rotation.x, bone.rotation.y, bone.rotation.z, bone.rotation.w),
-        // MiKaPo solves rotation only; every bone keeps its rest translation.
         translation: ZERO,
+        interpolation: LINEAR,
+      })
+    }
+
+    // Translation-only bones: センター carries the body, the foot IK bones carry
+    // the feet. They take no rotation, so an identity quaternion goes with them.
+    for (const [name, t] of Object.entries(captured.translations ?? {})) {
+      let track = bones.get(name)
+      if (!track) bones.set(name, (track = new Map()))
+      track.set(frame, {
+        boneName: name,
+        frame,
+        rotation: new Quat(0, 0, 0, 1),
+        translation: new Vec3(t.x, t.y, t.z),
         interpolation: LINEAR,
       })
     }
@@ -109,56 +124,4 @@ export function clipSummary(clip: AnimationClip): { frames: number; seconds: num
     bones: clip.boneTracks.size,
     morphs: clip.morphTracks.size,
   }
-}
-
-// ─── IK disable block ────────────────────────────────────────────────────────
-//
-// MiKaPo solves FK rotations for every bone, legs included. MMD enables leg IK
-// by default, and an enabled IK chain OVERRIDES whatever the leg bones were
-// rotated to — driving them toward the IK bone instead, which this file never
-// keyframes, so it sits at rest. The captured leg motion would be discarded and
-// the character would stand there with moving arms.
-//
-// The fix is the one hand-keyed FK motions have always used: a single frame-0
-// record switching the leg IK chains off. The engine's writer stops after the
-// morph block (a valid motion-only VMD), so the remaining sections are appended
-// here — camera, light and self-shadow counts of zero, then the IK block.
-const IK_BONES_OFF = ["左足ＩＫ", "右足ＩＫ", "左つま先ＩＫ", "右つま先ＩＫ"]
-const IK_NAME_SIZE = 20
-
-function encodeShiftJIS(str: string): Uint8Array {
-  const unicode = Encoding.stringToCode(str)
-  return new Uint8Array(Encoding.convert(unicode, { to: "SJIS", from: "UNICODE" }))
-}
-
-/** VMD tail: `uint32 camera, uint32 light, uint32 shadow, uint32 ikCount, [ik record]`. */
-export function withIkDisabled(motion: ArrayBuffer, boneNames: string[] = IK_BONES_OFF): ArrayBuffer {
-  // frame(4) + visible(1) + ikCount(4) + per bone (20 name + 1 enabled)
-  const record = 4 + 1 + 4 + boneNames.length * (IK_NAME_SIZE + 1)
-  const out = new ArrayBuffer(motion.byteLength + 4 * 4 + record)
-  new Uint8Array(out).set(new Uint8Array(motion))
-
-  const view = new DataView(out)
-  let offset = motion.byteLength
-  // Camera, light and self-shadow: none. Written explicitly so readers that walk
-  // the file sequentially reach the IK block instead of stopping at EOF.
-  for (let i = 0; i < 3; i++, offset += 4) view.setUint32(offset, 0, true)
-
-  view.setUint32(offset, 1, true) // one IK record
-  offset += 4
-  view.setUint32(offset, 0, true) // at frame 0
-  offset += 4
-  view.setUint8(offset, 1) // model visible
-  offset += 1
-  view.setUint32(offset, boneNames.length, true)
-  offset += 4
-  for (const name of boneNames) {
-    const bytes = new Uint8Array(out, offset, IK_NAME_SIZE)
-    bytes.fill(0)
-    bytes.set(encodeShiftJIS(name).subarray(0, IK_NAME_SIZE))
-    offset += IK_NAME_SIZE
-    view.setUint8(offset, 0) // off
-    offset += 1
-  }
-  return out
 }
