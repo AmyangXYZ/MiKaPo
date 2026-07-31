@@ -10,7 +10,14 @@ import { Camera, ChevronDown, Image as ImageIcon, Video, Webcam, Pause, Play, Do
 
 type DebugSceneProps = { landmarks: PoseWorkerResult | null }
 
-/** One tuning row: name, live value, and the slider that moves it. */
+/**
+ * One tuning row: name, setting, slider — and for anything with a live signal, a
+ * meter under it showing what the solver is currently reading.
+ *
+ * The meter is the point. A threshold is meaningless on its own; watched against
+ * the level it gates, "drag until blinking registers" becomes something you can
+ * see rather than guess.
+ */
 function Knob({
   label,
   hint,
@@ -18,6 +25,8 @@ function Knob({
   min,
   max,
   step,
+  percent,
+  level,
   onChange,
 }: {
   label: string
@@ -26,13 +35,19 @@ function Knob({
   min: number
   max: number
   step: number
+  /** Show the setting as 0–100 rather than a raw number. */
+  percent?: boolean
+  /** Live 0–1 signal this control gates, if it has one. */
+  level?: number
   onChange: (v: number) => void
 }) {
   return (
     <label className="block" title={hint}>
       <span className="flex items-baseline justify-between">
         <span className="text-[11px] text-white/70">{label}</span>
-        <span className="font-mono text-[10px] tabular-nums text-white/40">{value.toFixed(3)}</span>
+        <span className="font-mono text-[10px] tabular-nums text-white/40">
+          {percent ? `${Math.round(value * 100)}` : value.toFixed(2)}
+        </span>
       </span>
       <input
         type="range"
@@ -43,6 +58,14 @@ function Knob({
         onChange={(e) => onChange(Number(e.target.value))}
         className="mt-1 h-1 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-white outline-none [&::-moz-range-thumb]:size-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:size-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
       />
+      {level !== undefined && (
+        <span className="mt-1 block h-0.5 w-full overflow-hidden rounded-full bg-white/10">
+          <span
+            className="block h-full rounded-full bg-emerald-400/80 transition-[width] duration-75"
+            style={{ width: `${Math.round(Math.min(1, Math.max(0, level)) * 100)}%` }}
+          />
+        </span>
+      )}
     </label>
   )
 }
@@ -97,16 +120,34 @@ export const MotionCapture = ({
 
   // Tuning. Applied straight to the live solvers — no re-detection needed, so a
   // drag shows its effect on the next frame.
-  const [tuning, setTuning] = useState({ smoothing: 1.5, beta: 1.5, eyeClosed: 0.1, mouthOpen: 0.18, smile: 0.008 })
+  //
+  // Every face control is a SENSITIVITY: 0 needs a deliberate expression, 1
+  // triggers readily. The underlying thresholds do not agree on direction — a
+  // higher eye-closed ratio triggers a blink sooner, while a higher mouth or
+  // smile threshold triggers later — so exposing them raw meant three sliders
+  // where "more" meant different things. The mapping lives here; the UI only
+  // ever says "more sensitive to the right".
+  const [tuning, setTuning] = useState({ smoothing: 1.5, beta: 1.5, blink: 0.35, mouth: 0.5, smile: 0.75 })
   const [tuningOpen, setTuningOpen] = useState(false)
+  const mix = (a: number, b: number, t: number) => a + (b - a) * t
   useEffect(() => {
     solverRef.current.setSmoothing(tuning.smoothing, tuning.beta)
     faceBlendshapeSolverRef.current.setThresholds({
-      eyeClosed: tuning.eyeClosed,
-      mouthOpen: tuning.mouthOpen,
-      smile: tuning.smile,
+      eyeClosed: mix(0.02, 0.25, tuning.blink),
+      mouthOpen: mix(0.4, 0.05, tuning.mouth),
+      smile: mix(0.03, 0.001, tuning.smile),
     })
   }, [tuning])
+
+  // Live expression levels for the meters. Polled while the panel is open —
+  // reading them per frame would re-render the panel at detection rate for bars
+  // that only need to look continuous.
+  const [levels, setLevels] = useState({ blink: 0, mouth: 0, smile: 0 })
+  useEffect(() => {
+    if (!tuningOpen) return
+    const id = setInterval(() => setLevels({ ...faceBlendshapeSolverRef.current.getLevels() }), 80)
+    return () => clearInterval(id)
+  }, [tuningOpen])
 
   // Offline conversion state. Nothing is "recorded" as it plays — the video is
   // stepped frame by frame, so the result does not depend on how fast this
@@ -713,7 +754,7 @@ export const MotionCapture = ({
             <div className="space-y-2 px-3 pb-2.5">
               <Knob
                 label="Smoothing"
-                hint="Lower is calmer at rest, and laggier"
+                hint="Left: calmer at rest, and laggier. Right: tracks tighter, and jitters"
                 value={tuning.smoothing}
                 min={0.2}
                 max={5}
@@ -722,7 +763,7 @@ export const MotionCapture = ({
               />
               <Knob
                 label="Responsiveness"
-                hint="How fast smoothing opens up on quick motion"
+                hint="Right: fast motion keeps its shape instead of being smoothed flat"
                 value={tuning.beta}
                 min={0}
                 max={6}
@@ -731,29 +772,35 @@ export const MotionCapture = ({
               />
               <Knob
                 label="Blink"
-                hint="Eye must close this far to register"
-                value={tuning.eyeClosed}
-                min={0.02}
-                max={0.25}
-                step={0.005}
-                onChange={(v) => setTuning((t) => ({ ...t, eyeClosed: v }))}
+                hint="How readily a blink registers"
+                value={tuning.blink}
+                min={0}
+                max={1}
+                step={0.01}
+                percent
+                level={levels.blink}
+                onChange={(v) => setTuning((t) => ({ ...t, blink: v }))}
               />
               <Knob
                 label="Mouth"
-                hint="Opening needed before the mouth moves"
-                value={tuning.mouthOpen}
-                min={0.05}
-                max={0.4}
-                step={0.005}
-                onChange={(v) => setTuning((t) => ({ ...t, mouthOpen: v }))}
+                hint="How readily the mouth opens"
+                value={tuning.mouth}
+                min={0}
+                max={1}
+                step={0.01}
+                percent
+                level={levels.mouth}
+                onChange={(v) => setTuning((t) => ({ ...t, mouth: v }))}
               />
               <Knob
                 label="Smile"
-                hint="Corner spread before a smile registers"
+                hint="How readily a smile registers"
                 value={tuning.smile}
-                min={0.001}
-                max={0.03}
-                step={0.001}
+                min={0}
+                max={1}
+                step={0.01}
+                percent
+                level={levels.smile}
                 onChange={(v) => setTuning((t) => ({ ...t, smile: v }))}
               />
             </div>

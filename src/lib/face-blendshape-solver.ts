@@ -78,6 +78,14 @@ export class FaceBlendshapeSolver {
     this.thresholds = { ...this.thresholds, ...next }
   }
 
+  /** Last solved expression levels, 0–1, under canonical names. What the tuning
+   *  UI meters — the morph weights themselves, so a threshold drag is visible as
+   *  the bar it moves rather than as a number with no reference. */
+  private levels = { blink: 0, mouth: 0, smile: 0 }
+  getLevels(): { blink: number; mouth: number; smile: number } {
+    return this.levels
+  }
+
   // One-Euro per channel: snappier than the old EMA for fast events (blinks)
   // while still suppressing landmark flutter at rest.
   private leftOpenFilter = new OneEuroFilter(2.0, 15, 1.0)
@@ -204,6 +212,7 @@ export class FaceBlendshapeSolver {
       [names["ワ"]]: smile,
     }
 
+    this.levels = { blink: (leftBlink + rightBlink) / 2, mouth: mouthOpenness, smile }
     return { boneStates, morphWeights }
   }
 
