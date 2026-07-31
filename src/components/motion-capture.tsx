@@ -472,6 +472,27 @@ export const MotionCapture = ({
    * skipped because detection fell behind. Media time drives the solver's
    * filters, which is what they were designed for.
    */
+  /**
+   * A still → a one-frame VMD.
+   *
+   * There is no timeline to walk: the live loop has already solved the image and
+   * left the pose in the refs, so exporting is a matter of writing down what is
+   * already on screen. A single-frame motion is how MMD carries a pose.
+   */
+  const exportPoseVmd = useCallback(() => {
+    const pose = currentBoneStatesRef.current
+    if (pose.length === 0) return
+    const clip = buildClip([
+      {
+        time: 0,
+        boneStates: pose.map((bs) => ({ name: bs.name, rotation: bs.rotation.clone() })),
+        morphWeights: faceEnabledRef.current ? currentMorphWeightsRef.current : null,
+      },
+    ])
+    exportVmdRef.current?.(clip)
+    setExported("pose saved")
+  }, [])
+
   const convertVideoToVmd = useCallback(async () => {
     const video = videoRef.current
     const worker = workerRef.current
@@ -657,7 +678,13 @@ export const MotionCapture = ({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    onClick={() => (converting ? (cancelRef.current = true) : void convertVideoToVmd())}
+                    onClick={() =>
+                      converting
+                        ? (cancelRef.current = true)
+                        : inputMode === "image"
+                          ? exportPoseVmd()
+                          : void convertVideoToVmd()
+                    }
                     variant="ghost"
                     size="icon"
                     className={`size-7 ${
@@ -665,15 +692,20 @@ export const MotionCapture = ({
                         ? "bg-blue-500/10 text-blue-300 hover:bg-blue-500/15"
                         : "text-white/70 hover:bg-white/10 hover:text-white"
                     }`}
-                    // Only a video has a timeline to walk. A webcam has no end
-                    // and a still has no motion.
-                    disabled={inputMode !== "video" || !mediaPipeReady}
+                    // A webcam has no end, so there is nothing to convert. A
+                    // video is walked frame by frame; a still is written as it
+                    // stands.
+                    disabled={(inputMode !== "video" && inputMode !== "image") || !mediaPipeReady}
                   >
                     {converting ? <Square className="size-3.5 fill-current" /> : <Download className="size-3.5" />}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {converting ? "Stop converting" : "Convert this video to a VMD file"}
+                  {converting
+                    ? "Stop converting"
+                    : inputMode === "image"
+                      ? "Save this pose as a VMD file"
+                      : "Convert this video to a VMD file"}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -767,20 +799,6 @@ export const MotionCapture = ({
           </button>
           {tuningOpen && (
             <div className="space-y-2 px-3 pb-2.5">
-              <button
-                type="button"
-                onClick={() => setFaceEnabled((v) => !v)}
-                className="flex w-full items-center justify-between rounded-md py-0.5 text-[11px] text-white/70 transition-colors hover:text-white"
-              >
-                Face capture
-                <span
-                  className={`relative h-3 w-6 rounded-full transition-colors ${faceEnabled ? "bg-emerald-400/70" : "bg-white/20"}`}
-                >
-                  <span
-                    className={`absolute top-0.5 size-2 rounded-full bg-white transition-[left] ${faceEnabled ? "left-3.5" : "left-0.5"}`}
-                  />
-                </span>
-              </button>
               <Knob
                 label="Smoothing"
                 hint="Left: calmer at rest, and laggier. Right: tracks tighter, and jitters"
@@ -799,6 +817,20 @@ export const MotionCapture = ({
                 step={0.1}
                 onChange={(v) => setTuning((t) => ({ ...t, beta: v }))}
               />
+              <button
+                type="button"
+                onClick={() => setFaceEnabled((v) => !v)}
+                className="flex w-full items-center justify-between rounded-md py-0.5 text-[11px] text-white/70 transition-colors hover:text-white"
+              >
+                Face capture
+                <span
+                  className={`relative h-3 w-6 rounded-full transition-colors ${faceEnabled ? "bg-emerald-400/70" : "bg-white/20"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 size-2 rounded-full bg-white transition-[left] ${faceEnabled ? "left-3.5" : "left-0.5"}`}
+                  />
+                </span>
+              </button>
               <div className={faceEnabled ? "space-y-2" : "pointer-events-none space-y-2 opacity-40"}>
               <Knob
                 label="Blink"

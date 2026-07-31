@@ -11,6 +11,14 @@ A web-based tool that drives MikuMikuDance (MMD) models — **full body, both ha
 
 The hard part isn't detection — it's the transformation. MediaPipe and MMD use different coordinate systems, every MMD model has its own rest-pose reference directions, and the bone hierarchy means each rotation has to be computed in its parent chain's local space.
 
+**MiKaPo 3.1** — motion export rebuilt around an offline conversion pass.
+
+- **Video → VMD, stepped rather than recorded** — the video is seeked frame by frame at VMD's own 30 fps, detected and solved, so a slow machine produces the same file as a fast one and nothing is dropped because detection fell behind. Media time drives the One-Euro filters at exact deltas, which is what they were built for; seek and detect overlap so neither waits on the other
+- **The file comes from [Reze Engine](https://github.com/AmyangXYZ/reze-engine)'s VMD writer** — the same one Reze Studio exports through, rather than a second implementation. Two bugs retired with the old one: every export had been written at half speed, and all 64 interpolation bytes were the same value, giving each keyframe a degenerate curve
+- **Leg IK stands down in the file itself** — this capture solves FK rotations, and MMD's leg IK would otherwise override them toward IK bones the motion never keyframes. The engine now reads and writes VMD's per-chain IK block, so an export carries its own instruction and no player needs a switch thrown by hand
+- **A still exports too** — a single-frame VMD, which is how MMD carries a pose
+- **Tuning panel** — smoothing and responsiveness, plus blink, mouth and smile as sensitivities that all point the same way, each metered against the live signal it gates. Face capture can be switched off entirely, and writes the morphs back to rest when it is
+
 **MiKaPo 3.0** — solver and capture pipeline rewritten by [Claude (Fable 5)](https://www.anthropic.com/claude): **60 FPS rendering with real-time capture**.
 
 - **Web Worker detection** — MediaPipe holistic runs off the main thread; the WebGPU render loop never blocks on inference and holds 60 FPS during capture

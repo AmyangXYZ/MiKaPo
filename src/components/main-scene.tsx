@@ -19,7 +19,6 @@ import {
 
 import { MotionCapture } from "./motion-capture"
 import Loading from "./loading"
-import { withIkDisabled } from "@/lib/vmd"
 
 /** The captured clip is registered under its own name and never played, so
  *  exporting cannot disturb the pose the user is driving live. */
@@ -128,6 +127,10 @@ export default function MainScene() {
         engineRef.current = engine
         await engine.init()
         setEngineInited(true)
+        // MiKaPo poses the skeleton itself — FK rotations written every frame,
+        // no clip playing — so the engine must not also run IK and fight them.
+        // The exported motion still carries its own per-chain state for whoever
+        // plays it back.
         engine.setIKEnabled(false)
         engine.runRenderLoop(() => {
           setStats(engine.getStats())
@@ -307,9 +310,7 @@ export default function MainScene() {
     const model = modelRef.current
     if (!model || clip.frameCount === 0) return
     model.loadClip(EXPORT_CLIP_NAME, clip)
-    // The engine writes the motion; MiKaPo adds the frame-0 IK switch-off that
-    // FK capture needs (see withIkDisabled).
-    const buffer = withIkDisabled(model.exportVmd(EXPORT_CLIP_NAME))
+    const buffer = model.exportVmd(EXPORT_CLIP_NAME)
     const url = URL.createObjectURL(new Blob([buffer], { type: "application/octet-stream" }))
     const link = document.createElement("a")
     link.href = url
