@@ -1,5 +1,4 @@
 import { Quat } from "reze-engine"
-import { quatDot } from "./math-utils"
 
 // One-Euro filter (Casiez et al. 2012): adaptive low-pass whose cutoff rises with
 // speed — smooths jitter at rest without lagging fast motion.
@@ -79,7 +78,7 @@ export class QuaternionOneEuroFilter {
       w = q.w
     // Hemisphere flip: keep dot(prev, raw) >= 0 so component-wise filtering
     // doesn't take the long way around the 4D sphere.
-    if (this.hasPrev && quatDot(this.prev, q) < 0) {
+    if (this.hasPrev && Quat.dot(this.prev, q) < 0) {
       x = -x
       y = -y
       z = -z

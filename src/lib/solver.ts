@@ -2,7 +2,6 @@ import { Landmark } from "@mediapipe/tasks-vision"
 import { Quat, Vec3 } from "reze-engine"
 import { QuaternionOneEuroFilter } from "./filters"
 import { HandIndexTable, PoseLandmarksTable } from "./landmarks"
-import { quatFromBasis, quatFromUnitVectors, quatNlerp, quatDot, quatTwistAroundAxis, rotateVecInv } from "./math-utils"
 
 export interface BoneState {
   name: string
@@ -506,11 +505,11 @@ export class Solver {
 
     Vec3.subtractInto(to, from, sDir)
     const parentWorld = def.parent ? this.worlds[def.parent] : null
-    if (parentWorld) rotateVecInv(parentWorld, sDir, sDir)
+    if (parentWorld) Quat.rotateVecInvInto(parentWorld, sDir, sDir)
     if (sDir.length() < 1e-6) return
     sDir.normalizeInPlace()
 
-    quatFromUnitVectors(this.getRef(def.name), sDir, out)
+    Quat.fromUnitVectorsInto(this.getRef(def.name), sDir, out)
 
     if (def.witness && this.witnessEnabled) this.applyWitness(def, parentWorld, out)
     if (def.bend && this.bendClampEnabled) Solver.clampBend(def.bend, out)
@@ -522,7 +521,7 @@ export class Solver {
    * swing (spread) magnitude, and recompose.
    */
   private static clampBend(bend: BendLimit, q: Quat): void {
-    quatTwistAroundAxis(q, bend.axis, sQ) // twist
+    Quat.twistAroundAxisInto(q, bend.axis, sQ) // twist
     // Signed flexion angle about the axis, wrapped to [-π, π]
     const k = sQ.x * bend.axis.x + sQ.y * bend.axis.y + sQ.z * bend.axis.z
     let angle = 2 * Math.atan2(k, sQ.w)
@@ -560,7 +559,7 @@ export class Solver {
     if (this.visibility(wdef.source, [wdef.from, wdef.to]) < MIN_VISIBILITY) return
 
     Vec3.subtractInto(wTo, wFrom, sWit)
-    if (parentWorld) rotateVecInv(parentWorld, sWit, sWit)
+    if (parentWorld) Quat.rotateVecInvInto(parentWorld, sWit, sWit)
     if (sWit.length() < 1e-6) return
     sWit.normalizeInPlace()
 
@@ -583,17 +582,17 @@ export class Solver {
 
     // q = basisLive ∘ basisRest⁻¹ maps (ref → dir, restWitness⊥ → liveWitness⊥).
     Vec3.crossInto(ref, sB, sC)
-    quatFromBasis(ref, sB, sC, sQ) // basisRest
+    Quat.fromBasisInto(ref, sB, sC, sQ) // basisRest
     sQ.conjugate()
     Vec3.crossInto(sDir, sA, sC)
-    quatFromBasis(sDir, sA, sC, sQ2) // basisLive
+    Quat.fromBasisInto(sDir, sA, sC, sQ2) // basisLive
     Quat.multiplyInto(sQ2, sQ, sQ) // apply rest⁻¹ first, then live
 
     // Fade between shortest-arc (straight limb, roll unobservable) and the
     // witness solution, hemisphere-aligned so the blend is short-path.
     const t = Math.min(1, Math.max(0, (perpLen - WITNESS_FADE_LO) / (WITNESS_FADE_HI - WITNESS_FADE_LO)))
-    if (quatDot(out, sQ) < 0) sQ.setXYZW(-sQ.x, -sQ.y, -sQ.z, -sQ.w)
-    quatNlerp(out, sQ, t * t * (3 - 2 * t), out)
+    if (Quat.dot(out, sQ) < 0) sQ.setXYZW(-sQ.x, -sQ.y, -sQ.z, -sQ.w)
+    Quat.nlerpInto(out, sQ, t * t * (3 - 2 * t), out)
   }
 
   private solveTwist(def: TwistDef, out: Quat): void {
@@ -602,14 +601,14 @@ export class Solver {
     if (!from || !to) return
 
     Vec3.subtractInto(to, from, sDir)
-    rotateVecInv(this.worlds[def.parent], sDir, sDir)
+    Quat.rotateVecInvInto(this.worlds[def.parent], sDir, sDir)
     if (sDir.length() < 1e-6) return
     sDir.normalizeInPlace()
 
     // Total rotation aligning the rest hand axis to the live one includes the
     // wrist swing; project onto the forearm axis to keep only the twist.
-    quatFromUnitVectors(this.getRef(def.name), sDir, sQ)
-    quatTwistAroundAxis(sQ, this.getRef(def.axisRef), out)
+    Quat.fromUnitVectorsInto(this.getRef(def.name), sDir, sQ)
+    Quat.twistAroundAxisInto(sQ, this.getRef(def.axisRef), out)
   }
 
   private solveFingerRatio(def: FingerRatioDef, out: Quat): void {
@@ -658,18 +657,18 @@ export class Solver {
         // X = ear axis, Z = back (ear center − eye center; eyes sit forward of
         // ears), Y = cross — one basis, one decomposition, no gimbal compounding.
         Vec3.subtractInto(sA, sB, sC)
-        rotateVecInv(parentWorld, sC, sC).normalizeInPlace() // earX in parent frame
+        Quat.rotateVecInvInto(parentWorld, sC, sC).normalizeInPlace() // earX in parent frame
         sDir.setXYZ(
           (sA.x + sB.x - sFrom.x - sTo.x) / 2,
           (sA.y + sB.y - sFrom.y - sTo.y) / 2,
           (sA.z + sB.z - sFrom.z - sTo.z) / 2,
         )
-        rotateVecInv(parentWorld, sDir, sDir).normalizeInPlace() // back in parent frame
+        Quat.rotateVecInvInto(parentWorld, sDir, sDir).normalizeInPlace() // back in parent frame
         // Gram-Schmidt earX ⊥ back, then Y = back × X
         const d = sC.dot(sDir)
         sC.setXYZ(sC.x - sDir.x * d, sC.y - sDir.y * d, sC.z - sDir.z * d).normalizeInPlace()
         Vec3.crossInto(sDir, sC, sA)
-        quatFromBasis(sC, sA, sDir, out)
+        Quat.fromBasisInto(sC, sA, sDir, out)
         return
       }
     }
@@ -680,6 +679,6 @@ export class Solver {
     const d = rawX.dot(y)
     sA.setXYZ(rawX.x - y.x * d, rawX.y - y.y * d, rawX.z - y.z * d).normalizeInPlace()
     Vec3.crossInto(sA, y, sB)
-    quatFromBasis(sA, y, sB, out)
+    Quat.fromBasisInto(sA, y, sB, out)
   }
 }
