@@ -2,6 +2,16 @@
 
 A web-based tool that drives MikuMikuDance (MMD) models — **full body, both hands, and face** — from a webcam, video, or photo in real time. One shot, no offline preprocessing, no multi-pass.
 
+One piece of the **Reze MMD family**, covering the whole MMD workflow on the web:
+
+|                                                           |                                                                                |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [reze-engine](https://github.com/AmyangXYZ/reze-engine)   | The WebGPU foundation — anime-character rendering and physics, dependency-free |
+| [reze-design](https://github.com/AmyangXYZ/reze-design)   | Scene design, rendering and sharing platform                                   |
+| [reze-studio](https://github.com/AmyangXYZ/reze-studio)   | Animation editing on a professional timeline and curve editor                  |
+| **MiKaPo**                                                | This repo — real-time motion capture in the browser, exporting straight to VMD |
+| [reze-rig](https://github.com/AmyangXYZ/reze-rig)         | Retarget FBX animations to MMD VMD format, Mixamo and Unity tested             |
+
 ## Overview
 
 [MiKaPo](https://mikapo.vercel.app) covers all three motion modalities in one pipeline:
