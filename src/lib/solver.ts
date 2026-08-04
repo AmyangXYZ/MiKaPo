@@ -3,6 +3,16 @@ import { Quat, Vec3 } from "reze-engine"
 import { QuaternionOneEuroFilter } from "./filters"
 import { HandIndexTable, PoseLandmarksTable } from "./landmarks"
 
+/** One of the model's rigid bodies, flattened for the solver's clearance pass. */
+export interface BodyCollider {
+  bone: string
+  /** 0 sphere, 1 box, 2 capsule (PMX order). */
+  shape: number
+  size: XYZ
+  /** Rest-pose world position from the PMX. */
+  position: XYZ
+}
+
 export interface BoneState {
   name: string
   rotation: Quat
@@ -177,6 +187,14 @@ const BONE_DEFS: BoneDef[] = [
 
 const DEF_BY_NAME: Record<string, BoneDef> = Object.fromEntries(BONE_DEFS.map((d) => [d.name, d]))
 
+// Scratch for the clearance pass — it runs per arm, per frame.
+const _clearA = Quat.identity()
+const _clearB = Quat.identity()
+const _clearC = Quat.identity()
+const _clearV = new Vec3(0, 0, 0)
+const _clearFrom = new Vec3(0, 0, 0)
+const _clearTo = new Vec3(0, 0, 0)
+
 /** Pose landmarks each basis bone reads, for visibility gating. */
 const BASIS_LANDMARKS: Record<string, string[]> = {
   上半身: ["left_shoulder", "right_shoulder"],
@@ -213,6 +231,7 @@ export const SOLVER_REST_BONES: readonly string[] = [
   "左足", "右足", "左ひざ", "右ひざ", "左足首", "右足首",
   "左つま先", "右つま先",
   "首", "頭", "左肩", "右肩", "左目", "右目",
+  "上半身", "上半身2", "下半身",
   "左腕", "右腕", "左ひじ", "右ひじ", "左手首", "右手首",
   "左中指１", "右中指１",
   "左親指１", "左親指２", "右親指１", "右親指２",
@@ -297,6 +316,11 @@ export class Solver {
     this.smoothing = { ...this.smoothing, minCutoff, beta }
     this.filters = {}
   }
+
+  /** The live smoothing settings, so an offline pass can match them. */
+  getSmoothing(): { minCutoff: number; beta: number; dCutoff: number } {
+    return { ...this.smoothing }
+  }
   // Calibrated reference directions in each bone's parent-local frame at rest.
   // Populated by calibrate() from the loaded model. Falls through to DEFAULT_REFS.
   private refs: Record<string, Vec3> = {}
@@ -321,6 +345,174 @@ export class Solver {
   reset(): void {
     for (const key of Object.keys(this.filters)) this.filters[key].reset()
     for (const key of Object.keys(this.locals)) this.locals[key].setIdentity()
+  }
+
+  /** Body collision volumes taken from the MODEL'S OWN rigid bodies — the
+   *  author's approximation of their character, already shaped and sized to fit
+   *  it. MMD's physics never tests these against each other (they are all
+   *  bone-following statics, so the broadphase filters the pairs), which is
+   *  exactly why an arm can end up inside a chest. Positions are stored in the
+   *  chest's rest frame; capsules keep their half-height axis. */
+  private restPos: Record<string, XYZ> = {}
+  /** Overlap (model units) tolerated before the arm is pushed — a little contact
+   *  reads as touching; a lot reads as 穿模. */
+  clearanceSlack = 0.05
+  private bodyVolumes: { x: number; y: number; z: number; r: number; half: number }[] = []
+  /** Arm colliders in their own bone's rest frame, plus the chain geometry the
+   *  clearance FK needs. */
+  private armVolumes: Record<string, { ox: number; oy: number; oz: number; r: number; half: number; upper: number }> = {}
+  private chestRest: { x: number; y: number; z: number } | null = null
+
+  /**
+   * Feed the model's rigid bodies (see `Model.getRigidbodies()`). Torso and head
+   * shapes become the volume an arm may not enter; arm shapes give the limb its
+   * thickness. Without this the solver still runs — it simply has no idea the
+   * character occupies space, which is the 穿模 everyone reports.
+   */
+  calibrateColliders(
+    colliders: BodyCollider[],
+    rest: Record<string, XYZ>,
+  ): void {
+    const chest = rest["上半身2"] ?? rest["上半身"]
+    this.bodyVolumes = []
+    this.armVolumes = {}
+    this.chestRest = chest ? { x: chest.x, y: chest.y, z: chest.z } : null
+    if (!chest) return
+
+    const TORSO_BONES = new Set(["上半身", "上半身2", "下半身", "首", "頭"])
+    for (const c of colliders) {
+      // Sphere: size.x is the radius. Capsule: size.x radius, size.y height.
+      // Box: take the smallest half-extent as a conservative radius so a boxy
+      // torso does not over-claim space.
+      const r = c.shape === 1 ? Math.min(c.size.x, c.size.z) : c.size.x
+      const half = c.shape === 2 ? c.size.y * 0.5 : 0
+      if (TORSO_BONES.has(c.bone)) {
+        this.bodyVolumes.push({ x: c.position.x - chest.x, y: c.position.y - chest.y, z: c.position.z - chest.z, r, half })
+      } else if (c.bone.endsWith("腕") || c.bone.endsWith("ひじ")) {
+        const bone = rest[c.bone]
+        const child = rest[c.bone.endsWith("腕") ? c.bone.replace("腕", "ひじ") : c.bone.replace("ひじ", "手首")]
+        if (!bone) continue
+        this.armVolumes[c.bone] = {
+          ox: c.position.x - bone.x,
+          oy: c.position.y - bone.y,
+          oz: c.position.z - bone.z,
+          r,
+          half,
+          upper: child ? Math.hypot(child.x - bone.x, child.y - bone.y, child.z - bone.z) : 0,
+        }
+      }
+    }
+  }
+
+  /**
+   * Push a solved arm out of the body when the pose puts it inside.
+   *
+   * Rotation-only by design: the correction is a swing at the shoulder, so the
+   * elbow and hand ride along and the pose keeps its shape — no IK, no
+   * retargeting of the chain. Depth is MediaPipe's weakest axis and the error
+   * is largest exactly when a limb crosses the torso in frame, so this catches
+   * the failure the landmarks cannot avoid.
+   */
+  private enforceBodyClearance(): void {
+    if (this.bodyVolumes.length === 0 || !this.chestRest) return
+    const chest = this.worlds["上半身2"] ?? this.worlds["上半身"]
+    if (!chest) return
+
+    for (const side of ["左", "右"] as const) {
+      const armName = side + "腕"
+      const armWorld = this.worlds[armName]
+      const arm = this.armVolumes[armName]
+      const fore = this.armVolumes[side + "ひじ"]
+      if (!armWorld || !arm) continue
+      const shoulderRest = this.refsPos(side + "腕")
+      if (!shoulderRest) continue
+
+      // Chest-local shoulder joint, then the two limb capsule centres by FK.
+      const sx = shoulderRest.x - this.chestRest.x
+      const sy = shoulderRest.y - this.chestRest.y
+      const sz = shoulderRest.z - this.chestRest.z
+      const probes: { x: number; y: number; z: number; r: number }[] = []
+      const local = _clearV
+      const push = (ox: number, oy: number, oz: number, r: number, base: { x: number; y: number; z: number }) => {
+        local.setXYZ(ox, oy, oz)
+        Quat.rotateVecInto(armWorld, local, local)
+        Quat.rotateVecInvInto(chest, local, local)
+        probes.push({ x: base.x + local.x, y: base.y + local.y, z: base.z + local.z, r })
+      }
+      const shoulder = { x: sx, y: sy, z: sz }
+      push(arm.ox, arm.oy, arm.oz, arm.r, shoulder)
+      if (fore) {
+        local.setXYZ(0, -arm.upper, 0)
+        Quat.rotateVecInto(armWorld, local, local)
+        Quat.rotateVecInvInto(chest, local, local)
+        const elbow = { x: sx + local.x, y: sy + local.y, z: sz + local.z }
+        const foreWorld = this.worlds[side + "ひじ"] ?? armWorld
+        local.setXYZ(fore.ox, fore.oy, fore.oz)
+        Quat.rotateVecInto(foreWorld, local, local)
+        Quat.rotateVecInvInto(chest, local, local)
+        probes.push({ x: elbow.x + local.x, y: elbow.y + local.y, z: elbow.z + local.z, r: fore.r })
+      }
+
+      // Deepest overlap against any body volume wins the correction.
+      let worst: { x: number; y: number; z: number } | null = null
+      let worstDepth = this.clearanceSlack
+      for (const p of probes) {
+        for (const b of this.bodyVolumes) {
+          // Closest point on the body capsule's axis (a sphere has half = 0).
+          const ay = Math.min(b.y + b.half, Math.max(b.y - b.half, p.y))
+          const dx = p.x - b.x
+          const dy = p.y - ay
+          const dz = p.z - b.z
+          const d = Math.hypot(dx, dy, dz)
+          const depth = b.r + p.r - d
+          if (depth > worstDepth) {
+            worstDepth = depth
+            worst = { x: p.x, y: p.y, z: p.z }
+          }
+        }
+      }
+      if (!worst) continue
+
+      // Swing the shoulder outward along the radial direction, just past contact.
+      const fromX = worst.x - sx
+      const fromY = worst.y - sy
+      const fromZ = worst.z - sz
+      const fromLen = Math.hypot(fromX, fromY, fromZ)
+      if (fromLen < 1e-6) continue
+      const radial = Math.hypot(worst.x, worst.z)
+      if (radial < 1e-6) continue
+      const scale = (radial + worstDepth) / radial
+      const tX = worst.x * scale - sx
+      const tY = fromY
+      const tZ = worst.z * scale - sz
+      const tLen = Math.hypot(tX, tY, tZ)
+      if (tLen < 1e-6) continue
+      _clearFrom.setXYZ(fromX / fromLen, fromY / fromLen, fromZ / fromLen)
+      _clearTo.setXYZ(tX / tLen, tY / tLen, tZ / tLen)
+      Quat.fromUnitVectorsInto(_clearFrom, _clearTo, _clearA)
+
+      // Chest-local swing → world → back into the arm's parent-local frame.
+      Quat.conjugateInto(chest, _clearB)
+      Quat.multiplyInto(_clearA, _clearB, _clearC)
+      Quat.multiplyInto(chest, _clearC, _clearA)
+      Quat.multiplyInto(_clearA, armWorld, _clearB)
+      armWorld.set(_clearB)
+      const def = DEF_BY_NAME[armName]
+      const parentName = def && def.kind !== "fingerRatio" ? def.parent : undefined
+      const parentWorld = parentName ? this.worlds[parentName] : null
+      if (parentWorld) {
+        Quat.conjugateInto(parentWorld, _clearA)
+        Quat.multiplyInto(_clearA, armWorld, _clearB)
+        this.locals[armName].set(_clearB)
+      } else {
+        this.locals[armName].set(armWorld)
+      }
+    }
+  }
+
+  /** Rest world position of a bone, as captured by calibrate(). */
+  private refsPos(name: string): XYZ | null {
+    return this.restPos[name] ?? null
   }
 
   // Calibrate reference directions from the model's rest-pose world bone positions.
@@ -348,6 +540,8 @@ export class Solver {
     set("右足", dir("右足", "右ひざ"))
     set("左ひざ", dir("左ひざ", "左足首"))
     set("右ひざ", dir("右ひざ", "右足首"))
+
+    this.restPos = restWorldPos
 
     // Ankle: pose runtime uses ankle→foot_index, so calibrate the same shape.
     set("左足首", dir("左足首", "左つま先"))
@@ -440,6 +634,8 @@ export class Solver {
       }
     }
 
+    this.enforceBodyClearance()
+
     // One-Euro post-pass on the outputs only — the hierarchy above always
     // composes unfiltered locals, so parent-chain math stays exact.
     for (const def of BONE_DEFS) {
@@ -484,8 +680,33 @@ export class Solver {
   }
 
   /** Average MediaPipe visibility across the pose landmarks a bone reads (1 for hands). */
+  /**
+   * Confidence for a hand-sourced bone. MediaPipe's hand landmarks carry no
+   * visibility field of their own, and — worse — when tracking degrades they do
+   * not disappear: they collapse toward the origin, still 21 points, still
+   * structurally valid. Solving from that is what snaps a wrist into an
+   * impossible angle and folds fingers backwards.
+   *
+   * Two honest signals exist. The hand's own SPAN (a real hand is never a
+   * point), and the POSE's wrist landmark — the same joint, tracked by the
+   * other model, and it does report visibility.
+   */
+  private handConfidence(source: LandmarkSource): number {
+    const hand = source === "leftHand" ? this.leftHand : this.rightHand
+    if (!hand || hand.length < 21) return 0
+    const w = hand[HandIndexTable.wrist]
+    const mid = hand[HandIndexTable.middle_mcp]
+    if (!w || !mid) return 0
+    // World landmarks are metres; a palm is ~8 cm. Anything under a centimetre
+    // is a collapsed cloud, not a hand.
+    if (Math.hypot(mid.x - w.x, mid.y - w.y, mid.z - w.z) < 0.01) return 0
+    const wristName = source === "leftHand" ? "left_wrist" : "right_wrist"
+    return this.pose?.[PoseLandmarksTable[wristName]]?.visibility ?? 1
+  }
+
   private visibility(source: LandmarkSource, points: Point[]): number {
-    if (source !== "pose" || !this.pose) return 1
+    if (source !== "pose") return this.handConfidence(source)
+    if (!this.pose) return 1
     let sum = 0
     let n = 0
     for (const p of points) {
@@ -618,10 +839,14 @@ export class Solver {
     Quat.fromAxisAngleInto(def.bendAxis.x, def.bendAxis.y, def.bendAxis.z, radians, out)
   }
 
+  /** Signed rotation ABOUT the bend axis. The previous form took the total
+   *  rotation angle and merely borrowed the axis for its sign, so any spread or
+   *  twist in the base joint inflated the curl that the derived joints copy —
+   *  a sideways-splayed finger drove its own knuckles into a fist. This is the
+   *  twist component and nothing else. */
   private static extractBendDegrees(quat: Quat, bendAxis: Vec3): number {
-    const totalAngle = 2 * Math.acos(Math.min(1, Math.abs(quat.w))) * (180 / Math.PI)
     const axisComponent = quat.x * bendAxis.x + quat.y * bendAxis.y + quat.z * bendAxis.z
-    return axisComponent < 0 ? -totalAngle : totalAngle
+    return 2 * Math.atan2(axisComponent, quat.w) * (180 / Math.PI)
   }
 
   private solveBasis(def: BasisDef, out: Quat): void {
