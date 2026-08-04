@@ -315,11 +315,20 @@ export default function MainScene() {
     (boneStates: BoneState[], tweenMs: number = 30) => {
       if (!engineRef.current) return
       const pose: Record<string, Quat> = {}
+      const moves: Record<string, Vec3> = {}
       for (const bone of boneStates) {
         pose[bone.name] = new Quat(bone.rotation.x, bone.rotation.y, bone.rotation.z, bone.rotation.w)
+        // センター and the leg IK bones carry translation — the body's height
+        // over the ground and where each foot lands.
+        if (bone.translation) {
+          moves[bone.name] = new Vec3(bone.translation.x, bone.translation.y, bone.translation.z)
+        }
       }
       if (Object.keys(pose).length > 0) {
         modelRef.current?.rotateBones(pose, tweenMs)
+      }
+      if (Object.keys(moves).length > 0) {
+        modelRef.current?.moveBones(moves, tweenMs)
       }
     },
     [engineRef],

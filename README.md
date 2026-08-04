@@ -16,10 +16,22 @@ One piece of the **Reze MMD family**, covering the whole MMD workflow on the web
 
 [MiKaPo](https://mikapo.vercel.app) covers all three motion modalities in one pipeline:
 
-- **Body and hands** are driven by MMD **bone rotations** — 3D landmarks from MediaPipe are mapped to per-bone quaternions in each bone's parent-local frame.
+- **Body and hands** are driven by MMD **bone rotations** — 3D landmarks from MediaPipe are mapped to per-bone quaternions in each bone's parent-local frame. The root and the leg IK bones also carry **translation**, so the body has a height over the ground and each foot has a place to be.
 - **Face is driven by MMD morphs**, not bone retargeting — face blendshapes from MediaPipe are converted directly into MMD morph weights (`まばたき`, `あ`, `ワ`, `ウィンク`, `ウィンク右`), which is how MMD models are natively rigged for facial expression. Eye direction is the one face channel that does drive bones (`左目` / `右目`).
 
 The hard part isn't detection — it's the transformation. MediaPipe and MMD use different coordinate systems, every MMD model has its own rest-pose reference directions, and the bone hierarchy means each rotation has to be computed in its parent chain's local space.
+
+**MiKaPo 3.3** — the capture stands on the ground, and the solver knows what a body can do.
+
+- **The body is placed, not just posed** — `センター` carries a height and the leg IK bones carry positions, so crouches, level changes and weight drops survive into the file. Placement is exact rather than inferred: both legs are walked forward from the hips, and the body is dropped until the **lower** foot rests at the height it rests at in the model's own bind pose. Taking the lower foot is what makes a raised leg safe — a standing split measures against the standing foot, with no floor assumption and no contact detection to misfire. What it cannot do is leave the ground: both feet airborne is indistinguishable from standing in hip-centred landmarks
+- **Exports are native MMD leg rigs** — `足ＩＫ` tracks come from the solved chain and leg IK is switched on in the file, so a motion is editable the way MMD users expect instead of FK a player has to be told not to override
+- **The shoulder carries its share** — the bone table hung `腕` straight off `上半身`, so the clavicle never moved and the humerus performed every raise alone, which is anatomically impossible past about 30° and looked it. Anatomy splits elevation roughly 2:1, so the clavicle now takes a share of the arm's rotation and the arm gives back exactly that much — the arm still points where the landmarks put it, only the joint that bends changes
+- **穿模 answered with the model's own rigid bodies** — an MMD model already carries its author's approximation of the character as physics capsules. MMD never tests those against each other (bone-following statics, so the broadphase drops the pairs), which is exactly how a hand ends up inside a chest. The solver reads them as clearance volume and swings the shoulder just past contact, rotation only
+- **Hands are gated on confidence like everything else** — MediaPipe's hand landmarks carry no visibility field, and a lost hand does not vanish: it collapses toward the origin, still 21 structurally valid points, which is what snapped a wrist to an impossible angle. Two honest signals gate them now — the hand's own span, and the pose model's wrist visibility
+- **Smoothing that reads velocity, and refuses the impossible** — One-Euro's adaptive term used to be driven by per-component derivatives, which are not a rate of anything physical, so quick poses arrived softened. It measures true angular velocity now. And because a speed-adaptive filter is defenceless against a one-frame outlier — a glitch looks exactly like a fast move — rotations and positions are both held to what a limb could actually have done since the last frame, which is an acceleration limit, not a speed one: real motion ramps up, a glitch arrives from nothing
+- **Exports smooth in both directions** — live capture must filter causally and pays lag for it; a finished take has no such excuse. A Savitzky-Golay pass fits a local polynomial rather than averaging, so shake goes without flattening a kick: 59% less jitter, 99% of peak amplitude kept, zero phase shift
+- **Stills are stills** — the landmarker's graph is reset between images and the pose is applied unfiltered and untweened, so a second upload is its own pose rather than a transition out of the first
+- **No tuning panel** — the filter constants are the solver's business
 
 **MiKaPo 3.2** — capture quality: the export reads the whole take, hands stop inventing poses, and the model's own body keeps limbs out of it.
 
@@ -33,7 +45,7 @@ The hard part isn't detection — it's the transformation. MediaPipe and MMD use
 
 - **Video → VMD, stepped rather than recorded** — the video is seeked frame by frame at VMD's own 30 fps, detected and solved, so a slow machine produces the same file as a fast one and nothing is dropped because detection fell behind. Media time drives the One-Euro filters at exact deltas, which is what they were built for; seek and detect overlap so neither waits on the other
 - **The file comes from [Reze Engine](https://github.com/AmyangXYZ/reze-engine)'s VMD writer** — the same one Reze Studio exports through, rather than a second implementation. Two bugs retired with the old one: every export had been written at half speed, and all 64 interpolation bytes were the same value, giving each keyframe a degenerate curve
-- **Leg IK stands down in the file itself** — this capture solves FK rotations, and MMD's leg IK would otherwise override them toward IK bones the motion never keyframes. The engine now reads and writes VMD's per-chain IK block, so an export carries its own instruction and no player needs a switch thrown by hand
+- **The file carries its own IK instruction** — the engine reads and writes VMD's per-chain IK block, so an export says whether leg IK should run rather than leaving it to the player. (3.3 keyframes the IK bones and switches it on; before that the capture was FK-only and switched it off)
 - **A still exports too** — a single-frame VMD, which is how MMD carries a pose
 - **Tuning panel** — smoothing and responsiveness, plus blink, mouth and smile as sensitivities that all point the same way, each metered against the live signal it gates. Face capture can be switched off entirely, and writes the morphs back to rest when it is
 
@@ -90,8 +102,9 @@ MediaPipe gives world-space 3D landmark positions per frame. MMD bones rotate in
 
 1. **Calibrate (once, on model load)** — read each rest-pose bone world position from the loaded MMD. Since the bone chain is identity at rest, world-space `parent → child` direction equals the parent-local reference direction.
 2. **Solve (per frame, per bone)** — each bone is one row in a definition table (parent, landmark pair, optional roll witness / anatomical clamp). World rotations accumulate down the hierarchy in solve order, so every parent chain is computed exactly once; rotating into parent-local space is a quaternion conjugation, no matrices involved.
-3. **Smooth** — pass each output quaternion through a [One-Euro filter](https://gery.casiez.net/1euro/) (on media time) to remove jitter without lag, then tween to display rate. Exports get a second, non-causal pass: Savitzky-Golay over the finished take, which reads future frames the live path cannot and so removes shake at zero phase shift while a polynomial fit keeps fast transients at their real amplitude.
+3. **Smooth** — pass each output through a [One-Euro filter](https://gery.casiez.net/1euro/) (on media time) driven by true angular velocity, bounded by what a limb could physically have done since the last frame, then tween to display rate. Exports get a second, non-causal pass: Savitzky-Golay over the finished take, which reads future frames the live path cannot and so removes shake at zero phase shift while a polynomial fit keeps fast transients at their real amplitude.
 4. **Clear the body** — the model's own rigid bodies define where an arm may not go. Depth is MediaPipe's weakest axis and its error peaks exactly when a limb crosses the torso in frame, so the solved arm is checked against those capsules and swung out at the shoulder when it is inside.
+5. **Place it on the ground** — walk both legs forward from the hips, then drop the body until the lower foot rests where it rests in the model's bind pose. The ankle each leg reaches becomes its IK target, which is what the VMD keyframes.
 
 ```typescript
 // One row of the bone table drives the generic solver:

@@ -1,4 +1,4 @@
-import { Quat } from "reze-engine"
+import { Quat, Vec3 } from "reze-engine"
 
 // One-Euro filter (Casiez et al. 2012): adaptive low-pass whose cutoff rises with
 // speed — smooths jitter at rest without lagging fast motion.
@@ -56,37 +56,177 @@ export class OneEuroFilter {
 }
 
 export class QuaternionOneEuroFilter {
-  private fx: OneEuroFilter
-  private fy: OneEuroFilter
-  private fz: OneEuroFilter
-  private fw: OneEuroFilter
   private prev = Quat.identity()
   private hasPrev = false
+  private prevTs = 0
+  private speedFilter: OneEuroFilter
+  private readonly minCutoff: number
+  private readonly beta: number
+  /** Fastest rotation treated as real, radians/second. */
+  maxSpeed = 18
+  /** Fastest CHANGE in rotation speed, radians/second². This is what separates a
+   *  detection glitch from a fast move: a real limb accelerates over several
+   *  frames, while an outlier arrives at full speed from nothing. A velocity cap
+   *  alone cannot tell them apart, because the first frame of a genuine snap
+   *  looks identical to a spike. */
+  maxAccel = 220
+  private prevSpeed = 0
 
   constructor(minCutoff: number, beta: number, dCutoff: number) {
-    this.fx = new OneEuroFilter(minCutoff, beta, dCutoff)
-    this.fy = new OneEuroFilter(minCutoff, beta, dCutoff)
-    this.fz = new OneEuroFilter(minCutoff, beta, dCutoff)
-    this.fw = new OneEuroFilter(minCutoff, beta, dCutoff)
+    this.minCutoff = minCutoff
+    this.beta = beta
+    // The speed signal gets its own gentle low-pass, as One-Euro prescribes.
+    this.speedFilter = new OneEuroFilter(dCutoff, 0, dCutoff)
   }
 
-  /** Filters `q` into `out` (allocation-free; `out` may be a persistent per-bone quat). */
+  /**
+   * Filters `q` into `out` (allocation-free; `out` may be a persistent quat).
+   *
+   * One-Euro driven by ANGULAR VELOCITY rather than per-component derivatives.
+   * Four independent scalar filters each estimate their own "speed" from a
+   * quaternion component, which is not a rate of anything physical: the same
+   * rotation splits differently across components depending where it sits on
+   * the sphere, so the adaptive term — the whole point of One-Euro, the part
+   * that is supposed to open up and let a fast move through — fires
+   * inconsistently and a quick pose arrives softened. Measuring the actual
+   * rotation between frames gives one honest speed, shared by the blend.
+   */
   filterInto(q: Quat, ts: number, out: Quat): Quat {
     let x = q.x,
       y = q.y,
       z = q.z,
       w = q.w
-    // Hemisphere flip: keep dot(prev, raw) >= 0 so component-wise filtering
-    // doesn't take the long way around the 4D sphere.
+    // Hemisphere flip: keep dot(prev, raw) >= 0 so the blend takes the short way
+    // around the 4D sphere.
     if (this.hasPrev && Quat.dot(this.prev, q) < 0) {
       x = -x
       y = -y
       z = -z
       w = -w
     }
-    out.setXYZW(this.fx.filter(x, ts), this.fy.filter(y, ts), this.fz.filter(z, ts), this.fw.filter(w, ts))
+    if (!this.hasPrev) {
+      out.setXYZW(x, y, z, w)
+      this.prev.set(out)
+      this.prevTs = ts
+      this.hasPrev = true
+      return out
+    }
+    const dt = (ts - this.prevTs) / 1000
+    // Discontinuity (seek backward, long stall): reseed rather than smooth across it.
+    if (dt <= 0 || dt > 1.0) {
+      out.setXYZW(x, y, z, w)
+      this.prev.set(out)
+      this.prevTs = ts
+      this.speedFilter.reset()
+      return out
+    }
+
+    // Angle between the last output and this sample, in radians per second.
+    const dot = Math.min(1, Math.abs(this.prev.x * x + this.prev.y * y + this.prev.z * z + this.prev.w * w))
+    const step = 2 * Math.acos(dot)
+    let speed = step / dt
+
+    // Admit only what a limb could physically have done since the last frame:
+    // no faster than maxSpeed, and no more than maxAccel faster than it was
+    // already going. A glitch is throttled to near nothing because it comes
+    // from rest; a real snap builds over two or three frames and arrives
+    // essentially intact. The clamped speed is what feeds the cutoff, so an
+    // outlier can never widen the filter that is meant to suppress it.
+    const allowed = Math.min(this.maxSpeed, this.prevSpeed + this.maxAccel * dt)
+    if (speed > allowed && step > 1e-6) {
+      const t = (allowed * dt) / step
+      x = this.prev.x + (x - this.prev.x) * t
+      y = this.prev.y + (y - this.prev.y) * t
+      z = this.prev.z + (z - this.prev.z) * t
+      w = this.prev.w + (w - this.prev.w) * t
+      const len = Math.hypot(x, y, z, w)
+      if (len > 1e-9) {
+        x /= len
+        y /= len
+        z /= len
+        w /= len
+      }
+      speed = allowed
+    }
+    this.prevSpeed = speed
+
+    const cutoff = this.minCutoff + this.beta * this.speedFilter.filter(speed, ts)
+    const tau = 1 / (2 * Math.PI * cutoff)
+    const alpha = 1 / (1 + tau / dt)
+
+    // One blend for the whole rotation, at one honest cutoff.
+    out.setXYZW(
+      this.prev.x + (x - this.prev.x) * alpha,
+      this.prev.y + (y - this.prev.y) * alpha,
+      this.prev.z + (z - this.prev.z) * alpha,
+      this.prev.w + (w - this.prev.w) * alpha,
+    )
     out.normalize()
     this.prev.set(out)
+    this.prevTs = ts
+    return out
+  }
+
+  reset(): void {
+    this.hasPrev = false
+    this.prevTs = 0
+    this.prevSpeed = 0
+    this.speedFilter.reset()
+  }
+}
+
+/** Three One-Euro filters for a position, with the same physical plausibility
+ *  limits the rotation filter uses.
+ *
+ *  These carry the IK targets, which sit at the end of a long lever: a rotation
+ *  glitch the filter shaved down to a few degrees still throws a foot a long
+ *  way. Limiting the position directly is what stops that becoming a visible
+ *  kick. Units are the model's own (an MMD unit is roughly 8 cm), so the
+ *  defaults allow a fast step and refuse a teleport. */
+export class Vec3OneEuroFilter {
+  private fx: OneEuroFilter
+  private fy: OneEuroFilter
+  private fz: OneEuroFilter
+  private px = 0
+  private py = 0
+  private pz = 0
+  private hasPrev = false
+  private prevTs = 0
+  private prevSpeed = 0
+  maxSpeed = 90
+  maxAccel = 900
+
+  constructor(minCutoff: number, beta: number, dCutoff: number) {
+    this.fx = new OneEuroFilter(minCutoff, beta, dCutoff)
+    this.fy = new OneEuroFilter(minCutoff, beta, dCutoff)
+    this.fz = new OneEuroFilter(minCutoff, beta, dCutoff)
+  }
+
+  filterInto(x: number, y: number, z: number, ts: number, out: Vec3): Vec3 {
+    if (this.hasPrev) {
+      const dt = (ts - this.prevTs) / 1000
+      if (dt > 0 && dt <= 1.0) {
+        const step = Math.hypot(x - this.px, y - this.py, z - this.pz)
+        const speed = step / dt
+        const allowed = Math.min(this.maxSpeed, this.prevSpeed + this.maxAccel * dt)
+        if (speed > allowed && step > 1e-6) {
+          const t = (allowed * dt) / step
+          x = this.px + (x - this.px) * t
+          y = this.py + (y - this.py) * t
+          z = this.pz + (z - this.pz) * t
+          this.prevSpeed = allowed
+        } else {
+          this.prevSpeed = speed
+        }
+      } else {
+        this.prevSpeed = 0
+      }
+    }
+    out.setXYZ(this.fx.filter(x, ts), this.fy.filter(y, ts), this.fz.filter(z, ts))
+    this.px = out.x
+    this.py = out.y
+    this.pz = out.z
+    this.prevTs = ts
     this.hasPrev = true
     return out
   }
@@ -95,8 +235,9 @@ export class QuaternionOneEuroFilter {
     this.fx.reset()
     this.fy.reset()
     this.fz.reset()
-    this.fw.reset()
     this.hasPrev = false
+    this.prevSpeed = 0
+    this.prevTs = 0
   }
 }
 

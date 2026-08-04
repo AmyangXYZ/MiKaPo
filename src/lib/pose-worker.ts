@@ -10,6 +10,7 @@ export type PoseWorkerRequest =
   | { type: "mode"; running: "VIDEO" | "IMAGE" }
   | { type: "video"; bitmap: ImageBitmap; ts: number; mediaTs: number }
   | { type: "image"; bitmap: ImageBitmap; mediaTs: number }
+  | { type: "reset" }
 
 /** Subset of HolisticLandmarkerResult the app consumes (structured-clone friendly).
  * Face ships as mesh landmarks: the blendshape subgraph doesn't run on the
@@ -103,6 +104,14 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
           await landmarker.setOptions({ runningMode: msg.running })
           runningMode = msg.running
         }
+        break
+      case "reset":
+        // Between stills, the landmarker must forget the previous one. Its
+        // graph carries tracker state even in IMAGE mode, so two uploads in a
+        // row show the second easing out of the first — visible in the raw
+        // landmarks, before any solving. setOptions rebuilds the graph, which
+        // is the documented way to clear it without rebuilding the model.
+        if (landmarker) await landmarker.setOptions({ runningMode })
         break
       case "video":
         if (landmarker && runningMode === "VIDEO") {

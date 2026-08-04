@@ -1,6 +1,6 @@
 import { Landmark } from "@mediapipe/tasks-vision"
 import { Quat, Vec3 } from "reze-engine"
-import { QuaternionOneEuroFilter } from "./filters"
+import { QuaternionOneEuroFilter, Vec3OneEuroFilter } from "./filters"
 import { HandIndexTable, PoseLandmarksTable } from "./landmarks"
 
 /** One of the model's rigid bodies, flattened for the solver's clearance pass. */
@@ -16,6 +16,10 @@ export interface BodyCollider {
 export interface BoneState {
   name: string
   rotation: Quat
+  /** Only bones that MOVE carry this: センター (the body's height over the
+   *  ground) and the leg IK bones (where each foot actually is). Everything
+   *  else keeps its rest translation, as MMD expects. */
+  translation?: Vec3
 }
 
 /** The landmark arrays the solver reads — HolisticLandmarkerResult and the
@@ -187,12 +191,20 @@ const BONE_DEFS: BoneDef[] = [
 
 const DEF_BY_NAME: Record<string, BoneDef> = Object.fromEntries(BONE_DEFS.map((d) => [d.name, d]))
 
+/** Solved geometrically rather than from landmark directions. */
+const GROUNDING_BONES = ["センター", "左足ＩＫ", "右足ＩＫ"] as const
+/** Derived from the arm rather than from landmarks: MediaPipe's shoulder point
+ *  is the joint itself, which says nothing about clavicle elevation. */
+const SHOULDER_BONES = ["左肩", "右肩"] as const
+
 // Scratch for the clearance pass — it runs per arm, per frame.
 const _clearA = Quat.identity()
 const _clearB = Quat.identity()
 const _clearC = Quat.identity()
 const _clearV = new Vec3(0, 0, 0)
 const _clearFrom = new Vec3(0, 0, 0)
+const _gA = new Vec3(0, 0, 0)
+const _gB = new Vec3(0, 0, 0)
 const _clearTo = new Vec3(0, 0, 0)
 
 /** Pose landmarks each basis bone reads, for visibility gating. */
@@ -232,6 +244,7 @@ export const SOLVER_REST_BONES: readonly string[] = [
   "左つま先", "右つま先",
   "首", "頭", "左肩", "右肩", "左目", "右目",
   "上半身", "上半身2", "下半身",
+  "センター", "左足ＩＫ", "右足ＩＫ",
   "左腕", "右腕", "左ひじ", "右ひじ", "左手首", "右手首",
   "左中指１", "右中指１",
   "左親指１", "左親指２", "右親指１", "右親指２",
@@ -300,6 +313,9 @@ export class Solver {
   private locals: Record<string, Quat> = {}
   /** Accumulated world rotation per bone (parent chain product), rebuilt each frame. */
   private worlds: Record<string, Quat> = {}
+  /** World rotations recomposed from the FILTERED locals — what grounding reads. */
+  private filteredWorlds: Record<string, Quat> = {}
+  private moveFilters: Record<string, Vec3OneEuroFilter> = {}
   private filters: Record<string, QuaternionOneEuroFilter> = {}
   // One-Euro tuning: minCutoff governs rest-pose jitter suppression (lower =
   // calmer, laggier at rest); beta governs how fast the cutoff opens with
@@ -338,13 +354,36 @@ export class Solver {
       this.outputByName[def.name] = state
       this.locals[def.name] = Quat.identity()
       this.worlds[def.name] = Quat.identity()
+      this.filteredWorlds[def.name] = Quat.identity()
       return state
     })
+    // The clavicles: no landmark pair drives them, they take a share of the
+    // arm's own rotation (see applyShoulderRhythm).
+    for (const name of SHOULDER_BONES) {
+      const state: BoneState = { name, rotation: Quat.identity() }
+      this.outputByName[name] = state
+      this.outputs.push(state)
+      this.locals[name] = Quat.identity()
+      this.worlds[name] = Quat.identity()
+      this.filteredWorlds[name] = Quat.identity()
+    }
+    // Bones the definition table does not solve, because they are not driven by
+    // a landmark pair: the root's height and the two leg IK targets. They are
+    // computed geometrically after the chain resolves.
+    for (const name of GROUNDING_BONES) {
+      const state: BoneState = { name, rotation: Quat.identity(), translation: new Vec3(0, 0, 0) }
+      this.outputByName[name] = state
+      this.outputs.push(state)
+    }
   }
 
   reset(): void {
     for (const key of Object.keys(this.filters)) this.filters[key].reset()
+    // Position filters too, or a second still eases out of the first one's
+    // body placement instead of simply being that pose.
+    for (const key of Object.keys(this.moveFilters)) this.moveFilters[key].reset()
     for (const key of Object.keys(this.locals)) this.locals[key].setIdentity()
+    for (const name of GROUNDING_BONES) this.outputByName[name]?.translation?.setXYZ(0, 0, 0)
   }
 
   /** Body collision volumes taken from the MODEL'S OWN rigid bodies — the
@@ -357,6 +396,18 @@ export class Solver {
   /** Overlap (model units) tolerated before the arm is pushed — a little contact
    *  reads as touching; a lot reads as 穿模. */
   clearanceSlack = 0.05
+  /** 0 disables grounding entirely (rotation-only output, as before 3.3);
+   *  1 follows the measured hip height exactly. */
+  groundingGain = 1
+  /** Share of arm elevation the clavicle carries (anatomy is roughly 1:2
+   *  scapula:humerus). 0 restores the old frozen-shoulder behaviour. */
+  shoulderRatio = 0.33
+  /** Elevation below which the clavicle does not move at all (radians). */
+  shoulderStart = 30 * DEG
+  /** Ramp width above the threshold, so the shoulder eases in (radians). */
+  shoulderRamp = 30 * DEG
+  /** Hard cap on clavicle rotation (radians). */
+  shoulderMax = 35 * DEG
   private bodyVolumes: { x: number; y: number; z: number; r: number; half: number }[] = []
   /** Arm colliders in their own bone's rest frame, plus the chain geometry the
    *  clearance FK needs. */
@@ -510,6 +561,162 @@ export class Solver {
     }
   }
 
+  /**
+   * Let the shoulder carry its share of the raise (scapulohumeral rhythm).
+   *
+   * The bone table hangs 腕 straight off 上半身, so the clavicle never moves and
+   * the humerus performs the whole lift alone — which is anatomically
+   * impossible past about 30° and looks it: arms overhead fold at a joint that
+   * cannot fold that way. Anatomy splits elevation roughly 2:1 between humerus
+   * and scapula once past that threshold, so hand the shoulder a fraction of
+   * the arm's own rotation and take the same amount back out of the arm, which
+   * leaves the arm pointing exactly where the landmarks put it.
+   *
+   * Both rotations live in 上半身-local space, so this is a straight factoring —
+   * no frame conversions, nothing to drift.
+   */
+  private applyShoulderRhythm(): void {
+    if (this.shoulderRatio <= 0) return
+    for (const side of ["左", "右"] as const) {
+      const armLocal = this.locals[side + "腕"]
+      const shoulderLocal = this.locals[side + "肩"]
+      if (!armLocal || !shoulderLocal) continue
+
+      const w = Math.min(1, Math.abs(armLocal.w))
+      const angle = 2 * Math.acos(w)
+      if (angle <= this.shoulderStart) {
+        shoulderLocal.setIdentity()
+        continue
+      }
+      const sin = Math.sqrt(Math.max(0, 1 - w * w))
+      if (sin < 1e-6) {
+        shoulderLocal.setIdentity()
+        continue
+      }
+      // armLocal's sign convention follows w; keep the axis on the same side.
+      const flip = armLocal.w < 0 ? -1 : 1
+      const ax = (armLocal.x * flip) / sin
+      const ay = (armLocal.y * flip) / sin
+      const az = (armLocal.z * flip) / sin
+
+      // Ramp in over the first 30° past the threshold rather than stepping.
+      const ramp = Math.min(1, (angle - this.shoulderStart) / this.shoulderRamp)
+      let take = (angle - this.shoulderStart) * this.shoulderRatio * ramp
+      if (take > this.shoulderMax) take = this.shoulderMax
+      Quat.fromAxisAngleInto(ax, ay, az, take, shoulderLocal)
+      // Remove exactly what the shoulder took, so the arm still points where the
+      // landmarks say it does.
+      Quat.conjugateInto(shoulderLocal, _clearA)
+      Quat.multiplyInto(_clearA, armLocal, _clearB)
+      armLocal.set(_clearB)
+    }
+  }
+
+  /**
+   * Place the body in space: how high the hips ride, and where each foot lands.
+   *
+   * MediaPipe's world landmarks are hip-centred, so the hip's own height is not
+   * in them — but the distance from hip down to the LOWER foot is, and that is
+   * the same number as long as one foot is on the ground. Taking the lower foot
+   * is what makes this survive a raised leg: a standing split measures against
+   * the standing foot and the free leg goes wherever the pose sends it. No
+   * contact detection, no floor assumption, nothing to misfire.
+   *
+   * Scale comes from leg length — the model's hip→knee→ankle against the
+   * landmarks' — so no calibration pose is needed.
+   *
+   * Then the leg chain is walked forward from the placed hip to find each ankle,
+   * which becomes that leg's IK target. Feet land on the floor by construction:
+   * if the hips sit exactly one bent-leg's height above it, the bent leg reaches
+   * it. What this cannot do is leave the ground — both feet airborne is
+   * indistinguishable from standing, in hip-centred coordinates.
+   */
+  private solveGrounding(timestampMs: number, unfiltered = false): void {
+    const center = this.outputByName["センター"]
+    if (!center?.translation) return
+    const rest = this.restPos
+    if (!this.pose || !rest["左足"] || !rest["右足"]) return
+
+    // Walk both legs from the leg root FIRST, with no body offset, to find
+    // where each ankle lands. Placing the body is then exact: drop it until the
+    // LOWER foot rests at the height it rests at in the model's own bind pose.
+    //
+    // Deriving the offset from measured hip height instead needs the landmark
+    // scale and the model's rest stance to agree, and they do not — MMD models
+    // commonly stand with a slight bend, which leaves a constant float. This
+    // formulation cannot drift: the supporting foot is on the floor because the
+    // body was placed to put it there.
+    const ankleY: Record<string, number> = {}
+    const ankleWorld: Record<string, { x: number; y: number; z: number }> = {}
+    // 足 hangs off 下半身, which the solver rotates every frame — a leaning or
+    // twisting lower body carries the hip joints with it. Starting the chain at
+    // 足's REST position ignores that and leaves the body floating (or sunk) by
+    // whatever the lean displaced.
+    const lowerRest = rest["下半身"]
+    const lowerWorld = this.filteredWorlds["下半身"]
+    for (const side of ["左", "右"] as const) {
+      const hipRest = rest[side + "足"]
+      const knee = rest[side + "ひざ"]
+      const ankle = rest[side + "足首"]
+      const thighWorld = this.filteredWorlds[side + "足"]
+      const shinWorld = this.filteredWorlds[side + "ひざ"]
+      if (!hipRest || !knee || !ankle || !thighWorld || !shinWorld) continue
+      let hip = hipRest
+      if (lowerRest && lowerWorld) {
+        _gA.setXYZ(hipRest.x - lowerRest.x, hipRest.y - lowerRest.y, hipRest.z - lowerRest.z)
+        Quat.rotateVecInto(lowerWorld, _gA, _gA)
+        hip = { x: lowerRest.x + _gA.x, y: lowerRest.y + _gA.y, z: lowerRest.z + _gA.z }
+      }
+      _gA.setXYZ(knee.x - hipRest.x, knee.y - hipRest.y, knee.z - hipRest.z)
+      Quat.rotateVecInto(thighWorld, _gA, _gA)
+      _gB.setXYZ(ankle.x - knee.x, ankle.y - knee.y, ankle.z - knee.z)
+      Quat.rotateVecInto(shinWorld, _gB, _gB)
+      const p = { x: hip.x + _gA.x + _gB.x, y: hip.y + _gA.y + _gB.y, z: hip.z + _gA.z + _gB.z }
+      ankleWorld[side] = p
+      ankleY[side] = p.y
+    }
+    const lowest = Math.min(...Object.values(ankleY))
+    if (!Number.isFinite(lowest)) return
+    const restAnkleY = Math.min(rest["左足首"]?.y ?? 0, rest["右足首"]?.y ?? 0)
+    const rawDy = (restAnkleY - lowest) * this.groundingGain
+
+    let mf = this.moveFilters["センター"]
+    if (!mf) {
+      mf = new Vec3OneEuroFilter(this.smoothing.minCutoff, this.smoothing.beta, this.smoothing.dCutoff)
+      this.moveFilters["センター"] = mf
+    }
+    if (unfiltered) {
+      mf.reset()
+      center.translation.setXYZ(0, rawDy, 0)
+    } else {
+      mf.filterInto(0, rawDy, 0, timestampMs, center.translation)
+    }
+    const dy = center.translation.y
+
+    // Each ankle, lifted by the same offset, is that leg's IK target.
+    for (const side of ["左", "右"] as const) {
+      const ikOut = this.outputByName[side + "足ＩＫ"]
+      const ikRest = rest[side + "足ＩＫ"] ?? rest[side + "足首"]
+      const p = ankleWorld[side]
+      if (!ikOut?.translation || !ikRest || !p) continue
+      let f = this.moveFilters[side + "足ＩＫ"]
+      if (!f) {
+        f = new Vec3OneEuroFilter(this.smoothing.minCutoff, this.smoothing.beta, this.smoothing.dCutoff)
+        this.moveFilters[side + "足ＩＫ"] = f
+      }
+      if (unfiltered) {
+        f.reset()
+        ikOut.translation.setXYZ(p.x - ikRest.x, p.y + dy - ikRest.y, p.z - ikRest.z)
+      } else {
+        f.filterInto(p.x - ikRest.x, p.y + dy - ikRest.y, p.z - ikRest.z, timestampMs, ikOut.translation)
+      }
+      // With IK driving the chain the foot takes its orientation from the IK
+      // bone, so hand it the ankle's (filtered) world rotation.
+      const footWorld = this.filteredWorlds[side + "足首"]
+      if (footWorld) ikOut.rotation.set(footWorld)
+    }
+  }
+
   /** Rest world position of a bone, as captured by calibrate(). */
   private refsPos(name: string): XYZ | null {
     return this.restPos[name] ?? null
@@ -594,7 +801,13 @@ export class Solver {
    * `timestampMs`: media time for video (so seeks reset smoothing correctly),
    * wall time for live camera. Defaults to wall time.
    */
-  solve(landmarks: SolverInput, timestampMs: number = performance.now()): BoneState[] {
+  /**
+   * @param unfiltered  A still has no time axis: there is nothing to smooth
+   * between, and passing one pose through a temporal filter can only soften it.
+   * Set for image input — the solved pose is handed back exactly, and the
+   * filters are reseeded so switching back to video starts clean.
+   */
+  solve(landmarks: SolverInput, timestampMs: number = performance.now(), unfiltered = false): BoneState[] {
     this.pose =
       landmarks.poseWorldLandmarks.length > 0 && landmarks.poseWorldLandmarks[0].length === 33
         ? landmarks.poseWorldLandmarks[0]
@@ -634,11 +847,27 @@ export class Solver {
       }
     }
 
+    // Shoulder rhythm rewrites 肩 and 腕 locals, so the world chain is rebuilt
+    // before anything downstream reads it.
+    this.applyShoulderRhythm()
+    for (const def of BONE_DEFS) {
+      if (def.kind === "fingerRatio") continue
+      const world = this.worlds[def.name]
+      const parent = def.parent ? this.worlds[def.parent] : null
+      if (parent) Quat.multiplyInto(parent, this.locals[def.name], world)
+      else world.set(this.locals[def.name])
+    }
+
     this.enforceBodyClearance()
 
     // One-Euro post-pass on the outputs only — the hierarchy above always
     // composes unfiltered locals, so parent-chain math stays exact.
     for (const def of BONE_DEFS) {
+      if (unfiltered) {
+        this.outputByName[def.name].rotation.set(this.locals[def.name])
+        this.filters[def.name]?.reset()
+        continue
+      }
       let f = this.filters[def.name]
       if (!f) {
         f = new QuaternionOneEuroFilter(this.smoothing.minCutoff, this.smoothing.beta, this.smoothing.dCutoff)
@@ -646,6 +875,34 @@ export class Solver {
       }
       f.filterInto(this.locals[def.name], timestampMs, this.outputByName[def.name].rotation)
     }
+
+    for (const name of SHOULDER_BONES) {
+      if (unfiltered) {
+        this.outputByName[name].rotation.set(this.locals[name])
+        this.filters[name]?.reset()
+        continue
+      }
+      let f = this.filters[name]
+      if (!f) {
+        f = new QuaternionOneEuroFilter(this.smoothing.minCutoff, this.smoothing.beta, this.smoothing.dCutoff)
+        this.filters[name] = f
+      }
+      f.filterInto(this.locals[name], timestampMs, this.outputByName[name].rotation)
+    }
+
+    // Grounding walks the leg chain, so it must read the rotations that will
+    // actually be shown — otherwise the body is placed against an unfiltered
+    // skeleton and the feet inherit every landmark twitch. Recompose world
+    // rotations from the filtered locals (same order, so parents are ready).
+    for (const def of BONE_DEFS) {
+      if (def.kind === "fingerRatio") continue
+      const world = this.filteredWorlds[def.name]
+      const parent = def.parent ? this.filteredWorlds[def.parent] : null
+      const local = this.outputByName[def.name].rotation
+      if (parent) Quat.multiplyInto(parent, local, world)
+      else world.set(local)
+    }
+    this.solveGrounding(timestampMs, unfiltered)
 
     return this.outputs
   }
