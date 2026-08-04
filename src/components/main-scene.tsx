@@ -23,7 +23,7 @@ import Loading from "./loading"
 /** The captured clip is registered under its own name and never played, so
  *  exporting cannot disturb the pose the user is driving live. */
 const EXPORT_CLIP_NAME = "mikapo-capture"
-import { BoneState, SOLVER_REST_BONES } from "@/lib/solver"
+import { BoneState, SOLVER_REST_BONES, type BodyCollider } from "@/lib/solver"
 import { FaceSolverResult } from "@/lib/face-blendshape-solver"
 
 /** Stable engine key for the bundled default PMX — folder uploads swap via removeModel + new id. */
@@ -91,6 +91,7 @@ export default function MainScene() {
   const loadGenerationRef = useRef(0)
   const [modelLoaded, setModelLoaded] = useState(false)
   const [restPose, setRestPose] = useState<Record<string, Vec3> | null>(null)
+  const [colliders, setColliders] = useState<BodyCollider[] | null>(null)
   const [modelMorphs, setModelMorphs] = useState<string[] | null>(null)
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
   /** After `engine.init()` — folder picker is safe (loadModel still async for default PMX). */
@@ -114,6 +115,20 @@ export default function MainScene() {
       }
     }
     setRestPose(dict)
+
+    // The model's own rigid bodies double as its body volume: the author already
+    // shaped capsules to fit this character. The solver uses them to keep arms
+    // out of the chest (MMD physics never tests these pairs — they are all
+    // bone-following statics, so the broadphase drops them).
+    const bones = model.getSkeleton().bones
+    setColliders(
+      model.getRigidbodies().map((rb) => ({
+        bone: bones[rb.boneIndex]?.name ?? "",
+        shape: rb.shape as number,
+        size: { x: rb.size.x, y: rb.size.y, z: rb.size.z },
+        position: { x: rb.shapePosition.x, y: rb.shapePosition.y, z: rb.shapePosition.z },
+      })),
+    )
 
     // Morph list for blendshape mapping resolution. reze-engine keeps this
     // private today — worth upstreaming a public getMorphNames() (resetAllMorphs
@@ -525,6 +540,7 @@ export default function MainScene() {
         onMediaPipeReadyChange={setMediaPipeReady}
         resetModel={resetModel}
         restPose={restPose}
+        colliders={colliders}
         modelMorphs={modelMorphs}
         exportVmd={exportVmd}
       />
