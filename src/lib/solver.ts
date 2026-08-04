@@ -378,6 +378,7 @@ export class Solver {
   }
 
   reset(): void {
+    this.heldDy = 0
     for (const key of Object.keys(this.filters)) this.filters[key].reset()
     // Position filters too, or a second still eases out of the first one's
     // body placement instead of simply being that pose.
@@ -408,6 +409,11 @@ export class Solver {
   shoulderRamp = 30 * DEG
   /** Hard cap on clavicle rotation (radians). */
   shoulderMax = 35 * DEG
+  /** How high the hips rest when the body is lying on them, as a fraction of
+   *  leg length — roughly half a torso's thickness. */
+  hipClearance = 0.22
+  /** Last committed body height, held through non-upright poses. */
+  private heldDy = 0
   private bodyVolumes: { x: number; y: number; z: number; r: number; half: number }[] = []
   /** Arm colliders in their own bone's rest frame, plus the chain geometry the
    *  clearance FK needs. */
@@ -675,10 +681,46 @@ export class Solver {
       ankleWorld[side] = p
       ankleY[side] = p.y
     }
-    const lowest = Math.min(...Object.values(ankleY))
-    if (!Number.isFinite(lowest)) return
+    const ys = Object.values(ankleY)
+    if (ys.length === 0 || !ys.every(Number.isFinite)) return
     const restAnkleY = Math.min(rest["左足首"]?.y ?? 0, rest["右足首"]?.y ?? 0)
-    const rawDy = (restAnkleY - lowest) * this.groundingGain
+    const legRootY = ((rest["左足"]?.y ?? 0) + (rest["右足"]?.y ?? 0)) / 2
+    const legSpan = Math.max(1e-3, legRootY - restAnkleY)
+
+    // The body rests on its LOWEST PART, not on its feet. Grounding purely off
+    // ankles assumes someone is standing on them — so a person rolling on the
+    // floor, whose weight is on their back with legs in the air, had the body
+    // hauled up and down by whatever the legs were doing. That is the bouncing.
+    //
+    // Each candidate says how far the body must move for IT to sit on the floor
+    // (its own resting height minus where the pose put it), and the binding one
+    // is simply the largest: satisfy that and nothing else is underground. The
+    // ankles rest at their bind height; the hips rest a body's thickness up.
+    // Continuous by construction — at a handover the two agree, so support
+    // passes from feet to hip without a step.
+    let rawDy = -Infinity
+    for (const y of ys) rawDy = Math.max(rawDy, restAnkleY - y)
+    const hipRestY = rest["下半身"]?.y ?? legRootY
+    rawDy = Math.max(rawDy, legSpan * this.hipClearance - hipRestY)
+    rawDy *= this.groundingGain
+    // A body cannot climb above its own bind height, whatever the landmarks say.
+    if (rawDy > legSpan * 0.15) rawDy = legSpan * 0.15
+
+    // Grounding is a standing-pose idea. Once the torso leaves vertical — rolling,
+    // lying, a floor move — the hips are on the ground and the legs are in the
+    // air, and nothing in hip-centred landmarks says how far the body dropped.
+    // Tracking anyway means the legs drive the height and the body bounces.
+    // So: hold the last height instead of guessing, fading over rather than
+    // switching. A pose we place imperfectly is forgivable; one that jitters
+    // is not.
+    const spineWorld = this.filteredWorlds["上半身"]
+    if (spineWorld) {
+      _gA.setXYZ(0, 1, 0)
+      Quat.rotateVecInto(spineWorld, _gA, _gA)
+      const upright = Math.min(1, Math.max(0, (_gA.y - 0.35) / 0.3))
+      rawDy = this.heldDy + (rawDy - this.heldDy) * upright
+    }
+    this.heldDy = rawDy
 
     let mf = this.moveFilters["センター"]
     if (!mf) {

@@ -63,13 +63,13 @@ export class QuaternionOneEuroFilter {
   private readonly minCutoff: number
   private readonly beta: number
   /** Fastest rotation treated as real, radians/second. */
-  maxSpeed = 18
+  maxSpeed = 14
   /** Fastest CHANGE in rotation speed, radians/second². This is what separates a
    *  detection glitch from a fast move: a real limb accelerates over several
    *  frames, while an outlier arrives at full speed from nothing. A velocity cap
    *  alone cannot tell them apart, because the first frame of a genuine snap
    *  looks identical to a spike. */
-  maxAccel = 220
+  maxAccel = 150
   private prevSpeed = 0
 
   constructor(minCutoff: number, beta: number, dCutoff: number) {
@@ -193,8 +193,8 @@ export class Vec3OneEuroFilter {
   private hasPrev = false
   private prevTs = 0
   private prevSpeed = 0
-  maxSpeed = 90
-  maxAccel = 900
+  maxSpeed = 55
+  maxAccel = 350
 
   constructor(minCutoff: number, beta: number, dCutoff: number) {
     this.fx = new OneEuroFilter(minCutoff, beta, dCutoff)

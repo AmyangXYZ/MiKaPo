@@ -21,7 +21,9 @@ One piece of the **Reze MMD family**, covering the whole MMD workflow on the web
 
 The hard part isn't detection — it's the transformation. MediaPipe and MMD use different coordinate systems, every MMD model has its own rest-pose reference directions, and the bone hierarchy means each rotation has to be computed in its parent chain's local space.
 
-**MiKaPo 3.3** — the capture stands on the ground, and the solver knows what a body can do.
+**MiKaPo 4.0** — the point where a capture becomes motion worth keeping.
+
+Up to 3.x this was proof that MMD mocap could run in a browser at all: a pose followed a person, live, and the file it wrote was rotations. 4.0 is about the capture being *right* — the body stands on the ground, joints bend the way joints bend, the model's own geometry keeps limbs out of itself, and a bad frame of detection is refused rather than displayed.
 
 - **The body is placed, not just posed** — `センター` carries a height and the leg IK bones carry positions, so crouches, level changes and weight drops survive into the file. Placement is exact rather than inferred: both legs are walked forward from the hips, and the body is dropped until the **lower** foot rests at the height it rests at in the model's own bind pose. Taking the lower foot is what makes a raised leg safe — a standing split measures against the standing foot, with no floor assumption and no contact detection to misfire. What it cannot do is leave the ground: both feet airborne is indistinguishable from standing in hip-centred landmarks
 - **Exports are native MMD leg rigs** — `足ＩＫ` tracks come from the solved chain and leg IK is switched on in the file, so a motion is editable the way MMD users expect instead of FK a player has to be told not to override
@@ -31,6 +33,7 @@ The hard part isn't detection — it's the transformation. MediaPipe and MMD use
 - **Smoothing that reads velocity, and refuses the impossible** — One-Euro's adaptive term used to be driven by per-component derivatives, which are not a rate of anything physical, so quick poses arrived softened. It measures true angular velocity now. And because a speed-adaptive filter is defenceless against a one-frame outlier — a glitch looks exactly like a fast move — rotations and positions are both held to what a limb could actually have done since the last frame, which is an acceleration limit, not a speed one: real motion ramps up, a glitch arrives from nothing
 - **Exports smooth in both directions** — live capture must filter causally and pays lag for it; a finished take has no such excuse. A Savitzky-Golay pass fits a local polynomial rather than averaging, so shake goes without flattening a kick: 59% less jitter, 99% of peak amplitude kept, zero phase shift
 - **Stills are stills** — the landmarker's graph is reset between images and the pose is applied unfiltered and untweened, so a second upload is its own pose rather than a transition out of the first
+- **Grounding holds rather than guesses** — placement is a standing-pose idea, so once the torso leaves vertical (rolling, lying, floor work) the body keeps its last height instead of being hauled around by legs waving in the air. Monocular landmarks do not say how far a lying body dropped; a pose placed imperfectly is forgivable, one that bounces is not
 - **No tuning panel** — the filter constants are the solver's business
 
 **MiKaPo 3.2** — capture quality: the export reads the whole take, hands stop inventing poses, and the model's own body keeps limbs out of it.
