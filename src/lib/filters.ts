@@ -99,3 +99,93 @@ export class QuaternionOneEuroFilter {
     this.hasPrev = false
   }
 }
+
+/**
+ * Zero-phase smoothing for an already-captured take (offline export only).
+ *
+ * The live solver filters causally — it must, it cannot see the future — and
+ * every causal filter trades jitter against lag. A finished sequence has no
+ * such constraint, so this pass reads both directions at once.
+ *
+ * Savitzky-Golay, not another low-pass: it fits a local quadratic and takes its
+ * centre value, which removes shake while KEEPING the amplitude of a fast
+ * transient. Running One-Euro backwards over the already-forward-filtered take
+ * cancels phase lag but filters twice, and the second pass flattens exactly the
+ * poses that matter — a kick, a snap, a hit. A polynomial fit does not.
+ *
+ * Above `keepFastAbove` the original samples are kept outright (blending back in
+ * over a ramp): during genuinely fast motion the residual shake is invisible,
+ * and the peak is worth more than the polish.
+ *
+ * Per bone, hemisphere-aligned, in place.
+ */
+export function smoothTakeZeroPhase(
+  frames: { time: number; boneStates: { name: string; rotation: Quat }[] }[],
+  opts?: { keepFastAbove?: number; fullyKeepAbove?: number },
+): void {
+  if (frames.length < 5) return
+  // Quadratic SG, 7-wide (±3 frames ≈ ±0.1 s at 30 fps).
+  const K = [-2, 3, 6, 7, 6, 3, -2]
+  const HALF = 3
+  const lo = opts?.keepFastAbove ?? 2.5 // rad/s — brisk gesture
+  const hi = opts?.fullyKeepAbove ?? 6.0 // rad/s — a kick or a snap
+
+  const byBone = new Map<string, { q: Quat; frame: number }[]>()
+  for (let i = 0; i < frames.length; i++) {
+    for (const bs of frames[i].boneStates) {
+      let seq = byBone.get(bs.name)
+      if (!seq) byBone.set(bs.name, (seq = []))
+      seq.push({ q: bs.rotation, frame: i })
+    }
+  }
+
+  const aligned = new Quat(0, 0, 0, 1)
+  const smoothed = new Quat(0, 0, 0, 1)
+  for (const seq of byBone.values()) {
+    if (seq.length < 7) continue
+    // Hemisphere-align the whole sequence first: component-wise weighting is
+    // meaningless across a sign flip.
+    for (let i = 1; i < seq.length; i++) {
+      if (Quat.dot(seq[i - 1].q, seq[i].q) < 0) {
+        seq[i].q.setXYZW(-seq[i].q.x, -seq[i].q.y, -seq[i].q.z, -seq[i].q.w)
+      }
+    }
+    const src = seq.map((e) => e.q.clone())
+    for (let i = 0; i < seq.length; i++) {
+      let x = 0,
+        y = 0,
+        z = 0,
+        w = 0,
+        wsum = 0
+      for (let k = -HALF; k <= HALF; k++) {
+        const j = i + k
+        if (j < 0 || j >= src.length) continue // shrink at the edges
+        const c = K[k + HALF]
+        x += src[j].x * c
+        y += src[j].y * c
+        z += src[j].z * c
+        w += src[j].w * c
+        wsum += c
+      }
+      if (wsum === 0) continue
+      smoothed.setXYZW(x / wsum, y / wsum, z / wsum, w / wsum)
+      smoothed.normalize()
+
+      // Local angular speed from the ORIGINAL samples, so the gate reads the
+      // performance rather than its own output.
+      const a = src[Math.max(0, i - 1)]
+      const b = src[Math.min(src.length - 1, i + 1)]
+      const dt = Math.max(1e-3, frames[seq[Math.min(seq.length - 1, i + 1)].frame].time - frames[seq[Math.max(0, i - 1)].frame].time)
+      const speed = Quat.angleTo(a, b) / dt
+      const keep = Math.min(1, Math.max(0, (speed - lo) / (hi - lo)))
+
+      if (keep <= 0) aligned.set(smoothed)
+      else if (keep >= 1) continue // fast: original stands
+      else {
+        Quat.nlerpInto(smoothed, src[i], keep, aligned)
+        aligned.normalize()
+      }
+      seq[i].q.set(aligned)
+    }
+  }
+}
