@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback, type ComponentType } from "react"
 import Image from "next/image"
-import { BoneState, Solver } from "@/lib/solver"
+import { BoneState, Solver, type BodyCollider } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
 import { buildClip, clipSummary, RecordedFrame } from "@/lib/vmd"
+import { smoothTakeZeroPhase } from "@/lib/filters"
 import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -83,6 +84,7 @@ export const MotionCapture = ({
   onMediaPipeReadyChange,
   resetModel,
   restPose,
+  colliders,
   modelMorphs,
   exportVmd,
 }: {
@@ -96,6 +98,7 @@ export const MotionCapture = ({
   exportVmd?: (clip: ReturnType<typeof buildClip>) => void
   // MMD rest-pose world bone positions, keyed by Japanese bone name.
   restPose?: Record<string, { x: number; y: number; z: number }> | null
+  colliders?: BodyCollider[] | null
   // Morph names present on the loaded model — resolves blendshape mappings.
   modelMorphs?: string[] | null
 }) => {
@@ -184,6 +187,28 @@ export const MotionCapture = ({
   const [videoPlaying, setVideoPlaying] = useState(false)
   const [videoTime, setVideoTime] = useState(0)
   const [videoDuration, setVideoDuration] = useState(0)
+  /** Accept a duration only once it is a real number. When the browser says
+   *  Infinity (common for WebM and anything streamed), nudge it into resolving:
+   *  seeking far past the end forces the demuxer to find the true end, and the
+   *  durationchange that follows carries the answer. Guarded by a flag so the
+   *  nudge happens once per file. */
+  const durationNudged = useRef(false)
+  const resolveDuration = useCallback((video: HTMLVideoElement) => {
+    const d = video.duration
+    if (Number.isFinite(d) && d > 0) {
+      setVideoDuration(d)
+      durationNudged.current = false
+      return
+    }
+    if (durationNudged.current) return
+    durationNudged.current = true
+    const onSeeked = () => {
+      video.removeEventListener("seeked", onSeeked)
+      video.currentTime = 0
+    }
+    video.addEventListener("seeked", onSeeked)
+    video.currentTime = 1e9
+  }, [])
   const formatTime = (s: number): string => {
     if (!Number.isFinite(s) || s < 0) return "0:00"
     const m = Math.floor(s / 60)
@@ -213,7 +238,8 @@ export const MotionCapture = ({
   // Re-calibrate solver reference directions when a (new) model's rest pose arrives.
   useEffect(() => {
     if (restPose) solverRef.current.calibrate(restPose)
-  }, [restPose])
+    if (restPose && colliders) solverRef.current.calibrateColliders(colliders, restPose)
+  }, [restPose, colliders])
 
   // Resolve blendshape→morph mappings against the loaded model's morph list.
   useEffect(() => {
@@ -496,7 +522,9 @@ export const MotionCapture = ({
   const convertVideoToVmd = useCallback(async () => {
     const video = videoRef.current
     const worker = workerRef.current
-    if (!video || !worker || !video.duration || convertingRef.current) return
+    // A non-finite duration (unresolved WebM/stream) would make the frame loop
+    // below run forever — refuse until it is a real number.
+    if (!video || !worker || !Number.isFinite(video.duration) || video.duration <= 0 || convertingRef.current) return
 
     video.pause()
     cancelRef.current = false
@@ -586,6 +614,12 @@ export const MotionCapture = ({
     }
 
     if (frames.length === 0) return
+    // The live solve was causal — it filtered each frame knowing only the past.
+    // The finished take can be read in both directions: a zero-phase polynomial
+    // fit removes the residual shake without shifting timing, and hands fast
+    // transients (a kick, a snap) back their original amplitude. Export only;
+    // the on-screen preview is inherently real-time.
+    smoothTakeZeroPhase(frames)
     const clip = buildClip(frames)
     exportVmdRef.current?.(clip)
     const { frames: n, seconds } = clipSummary(clip)
@@ -745,7 +779,11 @@ export const MotionCapture = ({
                 onPlay={() => setVideoPlaying(true)}
                 onPause={() => setVideoPlaying(false)}
                 onTimeUpdate={(e) => setVideoTime(e.currentTarget.currentTime)}
-                onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration || 0)}
+                onLoadedMetadata={(e) => resolveDuration(e.currentTarget)}
+                // Browsers report Infinity at loadedmetadata for WebM/streamed
+                // and variable-frame-rate files, then refine it later — so take
+                // the update too, not just the first announcement.
+                onDurationChange={(e) => resolveDuration(e.currentTarget)}
               />
 
               {inputMode === "video" && videoSrc && (

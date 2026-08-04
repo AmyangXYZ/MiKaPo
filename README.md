@@ -21,6 +21,14 @@ One piece of the **Reze MMD family**, covering the whole MMD workflow on the web
 
 The hard part isn't detection — it's the transformation. MediaPipe and MMD use different coordinate systems, every MMD model has its own rest-pose reference directions, and the bone hierarchy means each rotation has to be computed in its parent chain's local space.
 
+**MiKaPo 3.2** — capture quality: the export reads the whole take, hands stop inventing poses, and the model's own body keeps limbs out of it.
+
+- **The exported take is smoothed in both directions** — live capture must filter causally and pays lag for it; a finished take has no such excuse. Export now runs a Savitzky-Golay pass over the recorded sequence, which fits a local polynomial instead of averaging, so shake goes without flattening a kick or a snap. Measured on a synthetic take with an 80° spike: 59% less jitter, 99% of the peak amplitude kept, zero phase shift. The live One-Euro filter is unchanged — this is an extra pass the export can afford
+- **Hands are gated on confidence like everything else** — MediaPipe's hand landmarks carry no visibility field, and when tracking degrades they do not vanish: they collapse toward the origin, still 21 structurally valid points. That is what snapped a wrist to an impossible angle with the hand parked at the body's centre. Two honest signals now gate them — the hand's own span (a palm is never a point) and the pose model's wrist visibility, the same joint tracked independently
+- **Finger bend is measured about the bend axis** — it had been the total rotation angle wearing the axis's sign, so a splayed knuckle inflated the curl its derived joints copy, folding fingers backwards. It is the twist component now, and nothing else
+- **穿模 answered with the model's own rigid bodies** — an MMD model already carries its author's approximation of the character as physics capsules, sized and placed to fit. MMD never tests those against each other (they are bone-following statics, so the broadphase drops the pairs), which is exactly how a hand ends up inside a chest. The solver reads them as clearance volume and swings the shoulder just past contact — rotation only, so the pose keeps its shape and no IK is involved
+- **Video duration is resolved, not assumed** — browsers report `Infinity` at `loadedmetadata` for WebM and anything streamed. It broke the readout, broke the scrubber, and would have made the frame loop run forever
+
 **MiKaPo 3.1** — motion export rebuilt around an offline conversion pass.
 
 - **Video → VMD, stepped rather than recorded** — the video is seeked frame by frame at VMD's own 30 fps, detected and solved, so a slow machine produces the same file as a fast one and nothing is dropped because detection fell behind. Media time drives the One-Euro filters at exact deltas, which is what they were built for; seek and detect overlap so neither waits on the other
@@ -82,7 +90,8 @@ MediaPipe gives world-space 3D landmark positions per frame. MMD bones rotate in
 
 1. **Calibrate (once, on model load)** — read each rest-pose bone world position from the loaded MMD. Since the bone chain is identity at rest, world-space `parent → child` direction equals the parent-local reference direction.
 2. **Solve (per frame, per bone)** — each bone is one row in a definition table (parent, landmark pair, optional roll witness / anatomical clamp). World rotations accumulate down the hierarchy in solve order, so every parent chain is computed exactly once; rotating into parent-local space is a quaternion conjugation, no matrices involved.
-3. **Smooth** — pass each output quaternion through a [One-Euro filter](https://gery.casiez.net/1euro/) (on media time) to remove jitter without lag, then tween to display rate.
+3. **Smooth** — pass each output quaternion through a [One-Euro filter](https://gery.casiez.net/1euro/) (on media time) to remove jitter without lag, then tween to display rate. Exports get a second, non-causal pass: Savitzky-Golay over the finished take, which reads future frames the live path cannot and so removes shake at zero phase shift while a polynomial fit keeps fast transients at their real amplitude.
+4. **Clear the body** — the model's own rigid bodies define where an arm may not go. Depth is MediaPipe's weakest axis and its error peaks exactly when a limb crosses the torso in frame, so the solved arm is checked against those capsules and swung out at the shoulder when it is inside.
 
 ```typescript
 // One row of the bone table drives the generic solver:
