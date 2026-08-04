@@ -342,16 +342,28 @@ export class Solver {
   // calmer, laggier at rest); beta governs how fast the cutoff opens with
   // speed (higher = fast/dramatic moves track tighter with less lag and less
   // amplitude loss). Rest stability and motion tracking are tuned independently.
-  private smoothing = { minCutoff: 1.5, beta: 1.5, dCutoff: 1.0 }
+  //
+  // dCutoff is the low-pass on the SPEED estimate, and it decides how quickly
+  // the adaptive term reacts — the term that is supposed to open the filter up
+  // and let a fast move through. One-Euro's published default of 1.0 Hz is
+  // tuned for a mouse pointer. On a limb it is far too slow: at 30 fps it
+  // reaches only 63% of a step in about six frames, so a strike that is over in
+  // three is filtered at its RESTING cutoff throughout and lands short. 4 Hz
+  // gets there in roughly two frames, inside the action rather than after it.
+  // This is the single parameter behind 动作没做到位.
+  private smoothing = { minCutoff: 1.5, beta: 1.5, dCutoff: 4.0 }
 
   /**
    * Retune smoothing. Existing filters are dropped so the new values take effect
    * on the next frame rather than only on bones that appear later — a filter
    * carries its cutoffs from construction.
    */
-  setSmoothing(minCutoff: number, beta: number): void {
-    this.smoothing = { ...this.smoothing, minCutoff, beta }
+  setSmoothing(minCutoff: number, beta: number, dCutoff?: number): void {
+    this.smoothing = { ...this.smoothing, minCutoff, beta, dCutoff: dCutoff ?? this.smoothing.dCutoff }
     this.filters = {}
+    // Position filters carry the same cutoffs and must be rebuilt too, or the
+    // IK targets keep smoothing at the old settings while the rotations change.
+    this.moveFilters = {}
   }
 
   /** The live smoothing settings, so an offline pass can match them. */

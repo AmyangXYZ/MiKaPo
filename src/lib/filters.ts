@@ -62,14 +62,27 @@ export class QuaternionOneEuroFilter {
   private speedFilter: OneEuroFilter
   private readonly minCutoff: number
   private readonly beta: number
-  /** Fastest rotation treated as real, radians/second. */
-  maxSpeed = 14
+  /** Fastest rotation treated as real, radians/second.
+   *
+   *  Set against what a joint actually does, not what is comfortable: 30 rad/s
+   *  is about 1700°/s, which a dance snap or a thrown punch reaches easily —
+   *  an elbow in a throw passes 2000°/s. The old 14 (800°/s) sat below the peak
+   *  of nearly every deliberate fast action, so those actions were clipped at
+   *  the exact frames they were supposed to be fastest, and arrived short. The
+   *  acceleration limiter below is what rejects glitches; this only has to
+   *  refuse the physically impossible. */
+  maxSpeed = 30
   /** Fastest CHANGE in rotation speed, radians/second². This is what separates a
    *  detection glitch from a fast move: a real limb accelerates over several
    *  frames, while an outlier arrives at full speed from nothing. A velocity cap
    *  alone cannot tell them apart, because the first frame of a genuine snap
-   *  looks identical to a spike. */
-  maxAccel = 150
+   *  looks identical to a spike.
+   *
+   *  At 30 fps this admits ~15 rad/s of new speed per frame, so a real strike
+   *  is at full speed by its second frame instead of its fourth. A one-frame
+   *  spike still gets throttled, and what survives meets a cutoff that is still
+   *  narrow — the speed estimate it would need to widen has not risen yet. */
+  maxAccel = 450
   private prevSpeed = 0
 
   constructor(minCutoff: number, beta: number, dCutoff: number) {
@@ -193,8 +206,11 @@ export class Vec3OneEuroFilter {
   private hasPrev = false
   private prevTs = 0
   private prevSpeed = 0
-  maxSpeed = 55
-  maxAccel = 350
+  /** An MMD unit is roughly 8 cm, so 160 is about 13 m/s — the speed a foot
+   *  actually reaches in a kick. The old 55 (4.4 m/s) was a brisk walking
+   *  step, and capped every kick and stamp at a fraction of its travel. */
+  maxSpeed = 160
+  maxAccel = 1200
 
   constructor(minCutoff: number, beta: number, dCutoff: number) {
     this.fx = new OneEuroFilter(minCutoff, beta, dCutoff)
