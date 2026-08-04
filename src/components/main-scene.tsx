@@ -104,6 +104,17 @@ export default function MainScene() {
 
   // Build a rest-pose dict from the model's bone world positions. Solver uses
   // these to derive per-bone reference directions instead of the static defaults.
+  /** Frame the character the way reze-design does: the orbit centre rides
+   *  センター with a small lift, eased rather than bolted on. It matters more
+   *  here than there — grounding moves センター now, so a crouch would otherwise
+   *  drop out of frame. */
+  const followModel = useCallback(
+    (model: Model) => {
+      engineRef.current?.setCameraFollow(model, "センター", new Vec3(0, 3, 0), 0.15)
+    },
+    [engineRef],
+  )
+
   const buildRestPose = useCallback((model: Model) => {
     const dict: Record<string, Vec3> = {}
     for (const name of SOLVER_REST_BONES) {
@@ -144,7 +155,12 @@ export default function MainScene() {
   const initEngine = useCallback(async () => {
     if (canvasRef.current) {
       try {
-        const engine = new Engine(canvasRef.current, { bloom: { color: new Vec3(0.5, 0.1, 0.9), intensity: 0.03 } })
+        const engine = new Engine(canvasRef.current, {
+          bloom: { color: new Vec3(0.5, 0.1, 0.9), intensity: 0.03 },
+          // Further out than the engine default: a capture is watched whole —
+          // raised arms and a deep crouch both have to stay in frame.
+          camera: { distance: 30 },
+        })
         engineRef.current = engine
         await engine.init()
         setEngineInited(true)
@@ -184,6 +200,7 @@ export default function MainScene() {
           setModelLoaded(true)
           await new Promise((r) => requestAnimationFrame(r))
           buildRestPose(model)
+          followModel(model)
           engine.addGround({ diffuseColor: new Vec3(0.9, 0.1, 0.9) })
           setEngineError(null)
         } catch (loadErr) {
@@ -196,7 +213,7 @@ export default function MainScene() {
         setEngineError(error instanceof Error ? error.message : "Unknown error")
       }
     }
-  }, [buildRestPose])
+  }, [buildRestPose, followModel])
 
   useEffect(() => {
     void (async () => {
@@ -235,13 +252,14 @@ export default function MainScene() {
         await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
         setModelLoaded(true)
         buildRestPose(model)
+        followModel(model)
         setEngineError(null)
       } catch (e) {
         console.error("[pmx-upload] loadModel failed:", e)
         window.alert(e instanceof Error ? e.message : String(e))
       }
     },
-    [buildRestPose],
+    [buildRestPose, followModel],
   )
 
   const onPickPmxFolder = useCallback(
