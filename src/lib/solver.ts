@@ -74,6 +74,23 @@ interface DirectionDef {
    */
   witness?: string
   /**
+   * Second witness, used to the extent the first one has faded out.
+   *
+   * The knee witness dies exactly when the leg straightens, and a straight leg
+   * is most of standing, walking and most of any dance — so for the thigh the
+   * primary witness is absent precisely when it is needed, and hip rotation
+   * falls back to shortest-arc, which carries no twist at all. That is what
+   * makes mocap legs read as stiff: knees and feet locked forward relative to
+   * the pelvis, the leg swinging like a pendulum.
+   *
+   * A straight knee cannot report roll, but the FOOT can. With the knee
+   * extended the shin cannot twist independently, so where the toes point is
+   * where the femur is rotated. Ankle flexion changes only how far the toe
+   * direction leans off the leg axis — its bearing around the axis, which is
+   * all the witness basis uses, still reads femoral rotation.
+   */
+  rollFallback?: string
+  /**
    * Anatomical clamp (fingers): shortest-arc solving happily bends a joint the
    * wrong way when a noisy landmark frame lands on the extension side — clamp
    * flexion and spread to human ranges so glitches can't produce backward curls.
@@ -143,8 +160,8 @@ const BONE_DEFS: BoneDef[] = [
   { kind: "basis", name: "頭", parent: "首" },
   { kind: "basis", name: "下半身", parent: null },
 
-  { kind: "direction", name: "左足", parent: "下半身", source: "pose", from: "left_hip", to: "left_knee", witness: "左ひざ" },
-  { kind: "direction", name: "右足", parent: "下半身", source: "pose", from: "right_hip", to: "right_knee", witness: "右ひざ" },
+  { kind: "direction", name: "左足", parent: "下半身", source: "pose", from: "left_hip", to: "left_knee", witness: "左ひざ", rollFallback: "左足首" },
+  { kind: "direction", name: "右足", parent: "下半身", source: "pose", from: "right_hip", to: "right_knee", witness: "右ひざ", rollFallback: "右足首" },
   { kind: "direction", name: "左ひざ", parent: "左足", source: "pose", from: "left_knee", to: "left_ankle" },
   { kind: "direction", name: "右ひざ", parent: "右足", source: "pose", from: "right_knee", to: "right_ankle" },
   // ankle→foot_index matches the calibrated 足首→つま先 bone reference (ankle is
@@ -303,6 +320,10 @@ const sB = Vec3.zeros()
 const sC = Vec3.zeros()
 const sQ = Quat.identity()
 const sQ2 = Quat.identity()
+// The two witness solutions, held apart so the second can be built while the
+// first is still waiting to be blended.
+const sQ3 = Quat.identity()
+const sQ4 = Quat.identity()
 
 export class Solver {
   private pose: Landmark[] | null = null
@@ -1072,32 +1093,78 @@ export class Solver {
    * the roll actually is (≈ sine of the child bend angle).
    */
   private applyWitness(def: DirectionDef, parentWorld: Quat | null, out: Quat): void {
-    const wdef = DEF_BY_NAME[def.witness!] as DirectionDef
+    const primary = this.witnessSolution(def, def.witness!, WITNESS_REST[def.name] ?? null, parentWorld, sQ3)
+    // How much of the roll the primary witness could actually see. Whatever it
+    // leaves is the room the fallback may claim.
+    const t = Solver.witnessFade(primary)
+    if (t > 0) {
+      if (Quat.dot(out, sQ3) < 0) sQ3.setXYZW(-sQ3.x, -sQ3.y, -sQ3.z, -sQ3.w)
+      Quat.nlerpInto(out, sQ3, t, out)
+    }
+
+    // Straight limb. The knee has nothing left to say about roll, so ask the
+    // foot — see `rollFallback`. Both are absolute orientations, so handing
+    // over is a weighted average and stays continuous across the crossover.
+    const room = 1 - t
+    if (room <= 1e-3 || !def.rollFallback) return
+    const fallback = this.witnessSolution(def, def.rollFallback, this.getRef(def.rollFallback), parentWorld, sQ4)
+    const t2 = Solver.witnessFade(fallback) * room
+    if (t2 <= 0) return
+    if (Quat.dot(out, sQ4) < 0) sQ4.setXYZW(-sQ4.x, -sQ4.y, -sQ4.z, -sQ4.w)
+    Quat.nlerpInto(out, sQ4, t2, out)
+  }
+
+  /** Smoothstep from "roll unobservable" to "witness fully trusted". */
+  private static witnessFade(perpLen: number): number {
+    if (!(perpLen > WITNESS_FADE_LO)) return 0
+    const t = Math.min(1, (perpLen - WITNESS_FADE_LO) / (WITNESS_FADE_HI - WITNESS_FADE_LO))
+    return t * t * (3 - 2 * t)
+  }
+
+  /**
+   * The rest→live basis rotation that pins this bone's roll using a witness
+   * segment, written into `outQ`. Returns how observable that roll is — the
+   * witness's component perpendicular to the bone axis, which is the sine of
+   * the joint's bend — or -1 when the witness cannot be read at all.
+   *
+   * `restWit` is the witness direction in THIS bone's parent-local frame at
+   * rest. Parent chains are identity at rest, so a child def's own reference
+   * direction serves directly.
+   */
+  private witnessSolution(
+    def: DirectionDef,
+    witnessName: string,
+    restWit: Vec3 | null,
+    parentWorld: Quat | null,
+    outQ: Quat,
+  ): number {
+    if (!restWit) return -1
+    const wdef = DEF_BY_NAME[witnessName] as DirectionDef | undefined
+    if (!wdef) return -1
     const wFrom = this.point(wdef.source, wdef.from, sA)
     const wTo = this.point(wdef.source, wdef.to, sB)
-    if (!wFrom || !wTo) return
-    if (this.visibility(wdef.source, [wdef.from, wdef.to]) < MIN_VISIBILITY) return
+    if (!wFrom || !wTo) return -1
+    if (this.visibility(wdef.source, [wdef.from, wdef.to]) < MIN_VISIBILITY) return -1
 
     Vec3.subtractInto(wTo, wFrom, sWit)
     if (parentWorld) Quat.rotateVecInvInto(parentWorld, sWit, sWit)
-    if (sWit.length() < 1e-6) return
+    if (sWit.length() < 1e-6) return -1
     sWit.normalizeInPlace()
 
     // Live witness component perpendicular to the live bone direction (sDir
-    // still holds it). Its magnitude is the observability of the roll.
+    // still holds it). Its magnitude is the observability of the roll; its
+    // bearing around the axis is the roll itself.
     const dLive = sWit.dot(sDir)
     sA.setXYZ(sWit.x - sDir.x * dLive, sWit.y - sDir.y * dLive, sWit.z - sDir.z * dLive)
     const perpLen = sA.length()
-    if (perpLen < WITNESS_FADE_LO) return
+    if (perpLen < WITNESS_FADE_LO) return perpLen
     sA.normalizeInPlace()
 
     // Rest witness component perpendicular to the rest bone direction.
     const ref = this.getRef(def.name)
-    const restWit = WITNESS_REST[def.name]
-    if (!restWit) return
     const dRest = restWit.dot(ref)
     sB.setXYZ(restWit.x - ref.x * dRest, restWit.y - ref.y * dRest, restWit.z - ref.z * dRest)
-    if (sB.length() < 1e-3) return
+    if (sB.length() < 1e-3) return -1
     sB.normalizeInPlace()
 
     // q = basisLive ∘ basisRest⁻¹ maps (ref → dir, restWitness⊥ → liveWitness⊥).
@@ -1106,13 +1173,8 @@ export class Solver {
     sQ.conjugate()
     Vec3.crossInto(sDir, sA, sC)
     Quat.fromBasisInto(sDir, sA, sC, sQ2) // basisLive
-    Quat.multiplyInto(sQ2, sQ, sQ) // apply rest⁻¹ first, then live
-
-    // Fade between shortest-arc (straight limb, roll unobservable) and the
-    // witness solution, hemisphere-aligned so the blend is short-path.
-    const t = Math.min(1, Math.max(0, (perpLen - WITNESS_FADE_LO) / (WITNESS_FADE_HI - WITNESS_FADE_LO)))
-    if (Quat.dot(out, sQ) < 0) sQ.setXYZW(-sQ.x, -sQ.y, -sQ.z, -sQ.w)
-    Quat.nlerpInto(out, sQ, t * t * (3 - 2 * t), out)
+    Quat.multiplyInto(sQ2, sQ, outQ) // apply rest⁻¹ first, then live
+    return perpLen
   }
 
   private solveTwist(def: TwistDef, out: Quat): void {
