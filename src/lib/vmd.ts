@@ -77,8 +77,11 @@ export function buildClip(frames: RecordedFrame[]): AnimationClip {
         boneName: bone.name,
         frame,
         rotation: new Quat(bone.rotation.x, bone.rotation.y, bone.rotation.z, bone.rotation.w),
-        // MiKaPo solves rotation only; every bone keeps its rest translation.
-        translation: ZERO,
+        // Only センター and the leg IK bones move; everything else keeps its
+        // rest translation, which is what MMD expects of a rotation rig.
+        translation: bone.translation
+          ? new Vec3(bone.translation.x, bone.translation.y, bone.translation.z)
+          : ZERO,
         interpolation: LINEAR,
       })
     }
@@ -101,9 +104,18 @@ export function buildClip(frames: RecordedFrame[]): AnimationClip {
   // stand down or they would drive the feet toward IK bones this motion never
   // keyframes. Declared in the clip; the engine writes it into the file and
   // honours it on playback.
-  const ikTracks = new Map<string, { frame: number; enabled: boolean }[]>(
-    ["左足ＩＫ", "右足ＩＫ", "左つま先ＩＫ", "右つま先ＩＫ"].map((bone) => [bone, [{ frame: 0, enabled: false }]]),
-  )
+  // Leg IK is switched ON exactly when the capture actually keyframes the IK
+  // bones. Without those tracks MMD's solver would drag the legs toward IK
+  // bones the motion never touches, overriding the FK it does carry — with
+  // them, the file is a native MMD leg rig and editable as one. つま先ＩＫ stays
+  // down either way: nothing here solves toe direction.
+  const drivesFootIk = bones.has("左足ＩＫ") || bones.has("右足ＩＫ")
+  const ikTracks = new Map<string, { frame: number; enabled: boolean }[]>([
+    ["左足ＩＫ", [{ frame: 0, enabled: drivesFootIk }]],
+    ["右足ＩＫ", [{ frame: 0, enabled: drivesFootIk }]],
+    ["左つま先ＩＫ", [{ frame: 0, enabled: false }]],
+    ["右つま先ＩＫ", [{ frame: 0, enabled: false }]],
+  ])
   return { boneTracks, morphTracks, ikTracks, frameCount: last + 1 }
 }
 

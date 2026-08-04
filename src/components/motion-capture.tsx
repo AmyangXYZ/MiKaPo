@@ -7,7 +7,7 @@ import { smoothTakeZeroPhase } from "@/lib/filters"
 import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Camera, ChevronDown, Image as ImageIcon, Video, Webcam, Pause, Play, Download, Square } from "lucide-react"
+import { Camera, Image as ImageIcon, Video, Webcam, Pause, Play, Download, Square } from "lucide-react"
 
 type DebugSceneProps = { landmarks: PoseWorkerResult | null }
 
@@ -19,57 +19,6 @@ type DebugSceneProps = { landmarks: PoseWorkerResult | null }
  * the level it gates, "drag until blinking registers" becomes something you can
  * see rather than guess.
  */
-function Knob({
-  label,
-  hint,
-  value,
-  min,
-  max,
-  step,
-  percent,
-  level,
-  onChange,
-}: {
-  label: string
-  hint: string
-  value: number
-  min: number
-  max: number
-  step: number
-  /** Show the setting as 0–100 rather than a raw number. */
-  percent?: boolean
-  /** Live 0–1 signal this control gates, if it has one. */
-  level?: number
-  onChange: (v: number) => void
-}) {
-  return (
-    <label className="block" title={hint}>
-      <span className="flex items-baseline justify-between">
-        <span className="text-[11px] text-white/70">{label}</span>
-        <span className="font-mono text-[10px] tabular-nums text-white/40">
-          {percent ? `${Math.round(value * 100)}` : value.toFixed(2)}
-        </span>
-      </span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="mt-1 h-1 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-white outline-none [&::-moz-range-thumb]:size-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:size-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
-      />
-      {level !== undefined && (
-        <span className="mt-1 block h-0.5 w-full overflow-hidden rounded-full bg-white/10">
-          <span
-            className="block h-full rounded-full bg-emerald-400/80 transition-[width] duration-75"
-            style={{ width: `${Math.round(Math.min(1, Math.max(0, level)) * 100)}%` }}
-          />
-        </span>
-      )}
-    </label>
-  )
-}
 
 type InputMode = "image" | "video" | "camera" | null
 
@@ -112,7 +61,7 @@ export const MotionCapture = ({
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
   const [currentImage, setCurrentImage] = useState<string>("/4.png")
-  const [videoSrc, setVideoSrc] = useState<string>("/flash.mp4")
+  const [videoSrc, setVideoSrc] = useState<string>("/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4")
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
   const solverRef = useRef<Solver>(new Solver())
   const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver>(new FaceBlendshapeSolver())
@@ -130,42 +79,10 @@ export const MotionCapture = ({
   // smile threshold triggers later — so exposing them raw meant three sliders
   // where "more" meant different things. The mapping lives here; the UI only
   // ever says "more sensitive to the right".
-  const [tuning, setTuning] = useState({ smoothing: 1.5, beta: 1.5, blink: 0.35, mouth: 0.5, smile: 0.75 })
-  const [tuningOpen, setTuningOpen] = useState(false)
-  // Face capture is the flakiest part of the pipeline — a bad blink read is worse
-  // than no blink at all — so it can be switched off and the body kept.
-  const [faceEnabled, setFaceEnabled] = useState(true)
+  // Face capture runs with the body. The solver's thresholds are its own
+  // business — surfacing them as unlabelled dials asked people to tune what the
+  // defaults already handle.
   const faceEnabledRef = useRef(true)
-  useEffect(() => {
-    faceEnabledRef.current = faceEnabled
-    // Written, not merely stopped: without this the model keeps the last
-    // expression it was given, mid-blink or mid-smile, forever.
-    if (!faceEnabled) {
-      const rest = faceBlendshapeSolverRef.current.restWeights()
-      currentMorphWeightsRef.current = rest
-      applyFaceRef.current({ boneStates: [], morphWeights: rest }, 120)
-      setLevels({ blink: 0, mouth: 0, smile: 0 })
-    }
-  }, [faceEnabled])
-  const mix = (a: number, b: number, t: number) => a + (b - a) * t
-  useEffect(() => {
-    solverRef.current.setSmoothing(tuning.smoothing, tuning.beta)
-    faceBlendshapeSolverRef.current.setThresholds({
-      eyeClosed: mix(0.02, 0.25, tuning.blink),
-      mouthOpen: mix(0.4, 0.05, tuning.mouth),
-      smile: mix(0.03, 0.001, tuning.smile),
-    })
-  }, [tuning])
-
-  // Live expression levels for the meters. Polled while the panel is open —
-  // reading them per frame would re-render the panel at detection rate for bars
-  // that only need to look continuous.
-  const [levels, setLevels] = useState({ blink: 0, mouth: 0, smile: 0 })
-  useEffect(() => {
-    if (!tuningOpen) return
-    const id = setInterval(() => setLevels({ ...faceBlendshapeSolverRef.current.getLevels() }), 80)
-    return () => clearInterval(id)
-  }, [tuningOpen])
 
   // Offline conversion state. Nothing is "recorded" as it plays — the video is
   // stepped frame by frame, so the result does not depend on how fast this
@@ -222,6 +139,24 @@ export const MotionCapture = ({
     else videoRef.current.pause()
   }
 
+  // Space toggles playback, the way every player does. A focused control keeps
+  // its own Space (that is the control's job), and typing is never intercepted.
+  const toggleVideoPlayRef = useRef(toggleVideoPlay)
+  useEffect(() => {
+    toggleVideoPlayRef.current = toggleVideoPlay
+  })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return
+      const t = e.target as HTMLElement | null
+      if (t && (["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(t.tagName) || t.isContentEditable)) return
+      e.preventDefault()
+      toggleVideoPlayRef.current()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
   // Babylon-based skeleton preview, loaded client-side only so @babylonjs/*
   // code-splits out of the initial bundle (the main viewport is reze-engine/WebGPU).
   const [DebugScene, setDebugScene] = useState<ComponentType<DebugSceneProps> | null>(null)
@@ -259,6 +194,13 @@ export const MotionCapture = ({
     applyFaceRef.current = applyFace
   }, [applyPose, applyFace])
 
+  // The live loop reads this without re-subscribing: a still is solved
+  // unfiltered (no time axis to smooth along).
+  const inputModeRef = useRef<InputMode>(null)
+  useEffect(() => {
+    inputModeRef.current = inputMode
+  }, [inputMode])
+
   const lastDebugUpdateRef = useRef(0)
   // Detection results arrive at ~25-35 Hz while the renderer runs at 60 —
   // tween each pose over the measured inter-result interval (EMA, slight
@@ -285,9 +227,11 @@ export const MotionCapture = ({
 
     if (!modelLoadedRef.current) return
 
-    const pose = solverRef.current.solve(result, timestampMs)
+    const pose = solverRef.current.solve(result, timestampMs, inputModeRef.current === "image")
     currentBoneStatesRef.current = pose
-    applyPoseRef.current(pose, tweenMs)
+    // A still has nothing to tween FROM — easing into it just replays the
+    // previous upload on the way to this one.
+    applyPoseRef.current(pose, inputModeRef.current === "image" ? 0 : tweenMs)
 
     if (faceEnabledRef.current && result.faceLandmarks?.[0]) {
       const faceResult = faceBlendshapeSolverRef.current.solve(result.faceLandmarks[0], timestampMs)
@@ -414,6 +358,9 @@ export const MotionCapture = ({
       faceBlendshapeSolverRef.current.reset()
       // Worker messages are FIFO — the mode switch lands before the next frame.
       workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
+      // ...and the landmarker forgets the previous still, so this one is solved
+      // on its own merits rather than tracked from the last.
+      workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
       setCurrentImage(url)
       setVideoSrc("")
       setInputMode("image")
@@ -820,90 +767,6 @@ export const MotionCapture = ({
           {!inputMode && (
             <div className="flex h-full w-full items-center justify-center">
               <Camera className="size-8 text-white/30" />
-            </div>
-          )}
-        </div>
-
-        {/* Tuning — desktop only, folded away until asked for. Every value here
-            feeds the live solvers, so a drag is visible on the next frame. */}
-        <div className="hidden border-t border-white/5 md:block">
-          <button
-            type="button"
-            onClick={() => setTuningOpen((v) => !v)}
-            className="flex w-full items-center justify-between px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-white/50 transition-colors hover:text-white/80"
-          >
-            Tuning
-            <ChevronDown className={`size-3 transition-transform ${tuningOpen ? "rotate-180" : ""}`} />
-          </button>
-          {tuningOpen && (
-            <div className="space-y-2 px-3 pb-2.5">
-              <Knob
-                label="Smoothing"
-                hint="Left: calmer at rest, and laggier. Right: tracks tighter, and jitters"
-                value={tuning.smoothing}
-                min={0.2}
-                max={5}
-                step={0.1}
-                onChange={(v) => setTuning((t) => ({ ...t, smoothing: v }))}
-              />
-              <Knob
-                label="Responsiveness"
-                hint="Right: fast motion keeps its shape instead of being smoothed flat"
-                value={tuning.beta}
-                min={0}
-                max={6}
-                step={0.1}
-                onChange={(v) => setTuning((t) => ({ ...t, beta: v }))}
-              />
-              <button
-                type="button"
-                onClick={() => setFaceEnabled((v) => !v)}
-                className="flex w-full items-center justify-between rounded-md py-0.5 text-[11px] text-white/70 transition-colors hover:text-white"
-              >
-                Face capture
-                <span
-                  className={`relative h-3 w-6 rounded-full transition-colors ${faceEnabled ? "bg-emerald-400/70" : "bg-white/20"}`}
-                >
-                  <span
-                    className={`absolute top-0.5 size-2 rounded-full bg-white transition-[left] ${faceEnabled ? "left-3.5" : "left-0.5"}`}
-                  />
-                </span>
-              </button>
-              <div className={faceEnabled ? "space-y-2" : "pointer-events-none space-y-2 opacity-40"}>
-              <Knob
-                label="Blink"
-                hint="How readily a blink registers"
-                value={tuning.blink}
-                min={0}
-                max={1}
-                step={0.01}
-                percent
-                level={levels.blink}
-                onChange={(v) => setTuning((t) => ({ ...t, blink: v }))}
-              />
-              <Knob
-                label="Mouth"
-                hint="How readily the mouth opens"
-                value={tuning.mouth}
-                min={0}
-                max={1}
-                step={0.01}
-                percent
-                level={levels.mouth}
-                onChange={(v) => setTuning((t) => ({ ...t, mouth: v }))}
-              />
-              <Knob
-                label="Smile"
-                hint="How readily a smile registers"
-                value={tuning.smile}
-                min={0}
-                max={1}
-                step={0.01}
-                percent
-                level={levels.smile}
-                onChange={(v) => setTuning((t) => ({ ...t, smile: v }))}
-              />
-              </div>
             </div>
           )}
         </div>

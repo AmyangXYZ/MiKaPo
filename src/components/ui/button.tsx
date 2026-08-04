@@ -40,6 +40,7 @@ function Button({
   variant,
   size,
   asChild = false,
+  onClick,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
@@ -51,6 +52,13 @@ function Button({
     <Comp
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      onClick={(e) => {
+        // A mouse click leaves the button focused, so the next Space — meant for
+        // play/pause — re-fires whatever was clicked last instead. Keyboard
+        // activation (detail === 0) keeps its focus, as it must.
+        if (e.detail > 0) (e.currentTarget as HTMLElement).blur()
+        onClick?.(e)
+      }}
       {...props}
     />
   )
