@@ -14,7 +14,7 @@ One piece of the **Reze MMD family**, covering the whole MMD workflow on the web
 
 ## Overview
 
-[MiKaPo](https://mikapo.vercel.app) covers all three motion modalities in one pipeline:
+[MiKaPo](https://mikapo.reze.one) covers all three motion modalities in one pipeline:
 
 - **Body and hands** are driven by MMD **bone rotations** — 3D landmarks from MediaPipe are mapped to per-bone quaternions in each bone's parent-local frame. The root and the leg IK bones also carry **translation**, so the body has a height over the ground and each foot has a place to be.
 - **Face is driven by MMD morphs**, not bone retargeting — face blendshapes from MediaPipe are converted directly into MMD morph weights (`まばたき`, `あ`, `ワ`, `ウィンク`, `ウィンク右`), which is how MMD models are natively rigged for facial expression. Eye direction is the one face channel that does drive bones (`左目` / `右目`).
