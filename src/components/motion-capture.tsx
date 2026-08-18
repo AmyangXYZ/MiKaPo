@@ -62,8 +62,10 @@ export const MotionCapture = ({
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
   // ONNX model download progress (0..1); null once loaded or when unknown.
   const [modelLoadPct, setModelLoadPct] = useState<number | null>(null)
-  // Which execution provider the ONNX engine landed on (webgpu vs wasm).
+  // Which execution provider the ONNX engine landed on (webgpu vs wasm), and
+  // why the better ones refused if it fell back — shown in the badge tooltip.
   const [engineEp, setEngineEp] = useState<string | null>(null)
+  const [engineNote, setEngineNote] = useState<string | null>(null)
   const [landmarks, setLandmarks] = useState<PoseWorkerResult | null>(null)
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
@@ -265,6 +267,7 @@ export const MotionCapture = ({
         setMediaPipeReady(true)
         setModelLoadPct(null)
         if (msg.ep) setEngineEp(msg.ep)
+        if (msg.note) setEngineNote(msg.note)
         onMediaPipeReadyChangeRef.current?.(true)
       } else if (msg.type === "progress") {
         setModelLoadPct(msg.total > 0 ? msg.loaded / msg.total : null)
@@ -661,7 +664,7 @@ export const MotionCapture = ({
                       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300/80"
                       : "border-amber-500/40 bg-amber-500/15 text-amber-300/90"
                   }`}
-                  title={`ONNX execution provider: ${engineEp}`}
+                  title={`ONNX execution provider: ${engineEp}${engineNote ? ` — ${engineNote}` : ""}`}
                 >
                   {engineEp}
                 </span>

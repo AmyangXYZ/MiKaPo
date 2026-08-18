@@ -25,19 +25,21 @@ import {
   type Decoded,
 } from "./onnx/rtmw3d"
 
-// Preferred first: local fp16 (half the download, and WebGPU runs f16 shaders
-// on Apple Silicon). Falls back to the fp32 HuggingFace original when the
-// local file isn't deployed.
-const MODEL_SOURCES = [
-  "/models/rtmw3d-x-fp16.onnx",
-  "https://huggingface.co/Soykaf/RTMW3D-x/resolve/main/onnx/rtmw3d-x_8xb64_cocktail14-384x288-b0a0eab7_20240626.onnx",
-]
+// fp16 is for WebGPU ONLY (half the download, f16 shaders on Apple Silicon).
+// The wasm fallback gets fp32: CPUs have no fp16 arithmetic, so ORT emulates
+// it with per-op conversions — fp16 on wasm is SLOWER than fp32.
+const MODEL_FP16 = "/models/rtmw3d-x-fp16.onnx"
+const MODEL_FP32 =
+  "https://huggingface.co/Soykaf/RTMW3D-x/resolve/main/onnx/rtmw3d-x_8xb64_cocktail14-384x288-b0a0eab7_20240626.onnx"
 const MODEL_CACHE = "mikapo-onnx-models"
 
 // Serve the ORT wasm runtime from the CDN, mirroring how the MediaPipe worker
 // loads its fileset — keep the version in lock-step with package.json.
 ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/"
 ort.env.webgpu.powerPreference = "high-performance"
+// Takes effect only when the page is cross-origin isolated (see next.config
+// headers); harmless otherwise. Without threads a wasm fallback is 1-thread.
+ort.env.wasm.numThreads = Math.min(8, (navigator.hardwareConcurrency || 4) - 1)
 
 let session: ort.InferenceSession | null = null
 let inputName = ""
@@ -101,44 +103,48 @@ async function fetchModel(url: string): Promise<ArrayBuffer> {
 /** Which provider actually took the session — surfaced because a silent wasm
  * fallback is a 100× slowdown that otherwise looks like "the model is slow". */
 let epUsed = ""
+/** Why the preferred providers refused, surfaced through the ready message so
+ * diagnosing a fallback doesn't require devtools archaeology. */
+let epNote = ""
 
 async function init(): Promise<void> {
-  let model: ArrayBuffer | null = null
-  let src = ""
-  for (const url of MODEL_SOURCES) {
-    try {
-      model = await fetchModel(url)
-      src = url
-      break
-    } catch (e) {
-      console.warn(`[rtmw3d] model source failed: ${url}`, e)
-    }
+  let model16: ArrayBuffer | null = null
+  let model32: ArrayBuffer | null = null
+  try {
+    model16 = await fetchModel(MODEL_FP16)
+  } catch (e) {
+    console.warn(`[rtmw3d] fp16 model unavailable:`, e)
   }
-  if (!model) throw new Error("no model source reachable")
+  const fp32 = async () => (model32 ??= await fetchModel(MODEL_FP32))
 
   // Attempt ladder: WebGPU with graph capture (static shapes make it legal,
-  // and it strips per-run CPU overhead), plain WebGPU, then wasm as the
-  // last resort. Warmup runs INSIDE each attempt — WebGPU failures can
-  // surface at first run rather than at create.
-  const attempts: [string, ort.InferenceSession.SessionOptions][] = [
-    ["webgpu+capture", { executionProviders: ["webgpu"], graphOptimizationLevel: "all", enableGraphCapture: true }],
-    ["webgpu", { executionProviders: ["webgpu"], graphOptimizationLevel: "all" }],
-    ["wasm", { executionProviders: ["wasm"] }],
+  // and it strips per-run CPU overhead), plain WebGPU, then wasm as the last
+  // resort — each with the model precision that suits it. Warmup runs INSIDE
+  // each attempt: WebGPU failures can surface at first run, not at create.
+  const attempts: [string, () => Promise<ArrayBuffer>, ort.InferenceSession.SessionOptions][] = [
+    [
+      "webgpu+capture",
+      async () => model16 ?? (await fp32()),
+      { executionProviders: ["webgpu"], graphOptimizationLevel: "all", enableGraphCapture: true },
+    ],
+    ["webgpu", async () => model16 ?? (await fp32()), { executionProviders: ["webgpu"], graphOptimizationLevel: "all" }],
+    ["wasm", fp32, { executionProviders: ["wasm"] }],
   ]
   let warm: Awaited<ReturnType<ort.InferenceSession["run"]>> | null = null
-  for (const [name, opts] of attempts) {
+  for (const [name, pickModel, opts] of attempts) {
     try {
-      const s = await ort.InferenceSession.create(model, opts)
+      const s = await ort.InferenceSession.create(await pickModel(), opts)
       const t0 = performance.now()
       warm = await s.run({
         [s.inputNames[0]]: new ort.Tensor("float32", inputData, [1, 3, MODEL_H, MODEL_W]),
       })
-      console.log(`[rtmw3d] ${name} warmup ${(performance.now() - t0).toFixed(0)}ms (${src.split("/").pop()})`)
+      console.log(`[rtmw3d] ${name} warmup ${(performance.now() - t0).toFixed(0)}ms`)
       session = s
       epUsed = name
       break
     } catch (e) {
       console.warn(`[rtmw3d] ${name} failed:`, e)
+      epNote += `${name}: ${e instanceof Error ? e.message : String(e)}; `
     }
   }
   if (!session || !warm) throw new Error("no execution provider worked")
@@ -153,7 +159,7 @@ async function init(): Promise<void> {
   if (!outY || xz.length !== 2) throw new Error(`unexpected model outputs: ${session.outputNames.join(", ")}`)
   ;[outX, outZ] = xz
 
-  post({ type: "ready", ep: epUsed })
+  post({ type: "ready", ep: epUsed, note: epNote || undefined })
 }
 
 let inferEma = 0

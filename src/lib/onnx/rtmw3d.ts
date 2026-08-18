@@ -267,6 +267,193 @@ export function estimateMetersPerPixel(kpts: Float32Array, scores: Float32Array)
   return estimates[estimates.length >> 1]
 }
 
+// ---------------------------------------------------------------------------
+// Head orientation by Procrustes fit
+//
+// The head basis downstream reads ears and eyes, and at a profile turn the
+// occluded side of the face is exactly where single points go wrong: the body
+// far-ear hallucinates depth, and the 68-point jaw CONTOUR follows the visible
+// silhouette (iBUG convention), not anatomy. So instead of trusting any point,
+// fit a canonical 3D face template to the stable INNER-face points — nose
+// bridge, eye corners, mouth corners, chin — and synthesize ears/eyes from the
+// fitted rotation. A dozen mutually-constraining points make one bad depth bin
+// an outlier instead of an axis.
+//
+// Template frame matches the measurement frame (person facing the camera):
+// x = subject's left (image right), y down, z away. Meters, head-centred.
+// ---------------------------------------------------------------------------
+
+const FACE_FIT_POINTS: [number, number, number, number][] = [
+  // [iBUG index, x, y, z]
+  [27, 0, -0.042, -0.040], // nasion
+  [28, 0, -0.026, -0.052],
+  [29, 0, -0.01, -0.063],
+  [30, 0, 0.004, -0.072], // nose tip
+  [31, -0.02, 0.014, -0.055], // nostril outer right
+  [33, 0, 0.016, -0.062], // subnasale
+  [35, 0.02, 0.014, -0.055],
+  [36, -0.044, -0.03, -0.03], // right eye outer corner
+  [39, -0.015, -0.03, -0.04], // right eye inner corner
+  [42, 0.015, -0.03, -0.04], // left eye inner corner
+  [45, 0.044, -0.03, -0.03],
+  [48, -0.026, 0.036, -0.048], // mouth corners
+  [54, 0.026, 0.036, -0.048],
+  [8, 0, 0.078, -0.048], // chin — silhouette-stable at every yaw
+]
+
+/** Synthetic outputs in the same template frame. */
+const HEAD_SYNTH = {
+  nose: [0, 0.004, -0.072],
+  leftEye: [0.031, -0.03, -0.036],
+  rightEye: [-0.031, -0.03, -0.036],
+  leftEar: [0.069, 0.005, 0.015],
+  rightEar: [-0.069, 0.005, 0.015],
+} as const
+
+/**
+ * Weighted rotation template→measured via Horn's quaternion method (largest
+ * eigenvector of the 4×4 profile matrix, found by power iteration — always a
+ * proper rotation, no reflection risk). Returns null when too little of the
+ * face is confident to constrain a fit.
+ */
+function fitHead(
+  kpts: Float32Array,
+  scores: Float32Array,
+  mpp: number,
+): { r: number[]; cx: number; cy: number; cz: number; tx: number; ty: number; tz: number; score: number } | null {
+  let wSum = 0
+  let mcx = 0
+  let mcy = 0
+  let mcz = 0
+  let tcx = 0
+  let tcy = 0
+  let tcz = 0
+  const used: [number, number, number, number, number, number, number][] = []
+  for (const [idx, tx, ty, tz] of FACE_FIT_POINTS) {
+    const i = COCO.face + idx
+    const w = scores[i]
+    if (w < 0.35) continue
+    const mx = kpts[i * 3] * mpp
+    const my = kpts[i * 3 + 1] * mpp
+    const mz = kpts[i * 3 + 2]
+    used.push([w, mx, my, mz, tx, ty, tz])
+    wSum += w
+    mcx += w * mx
+    mcy += w * my
+    mcz += w * mz
+    tcx += w * tx
+    tcy += w * ty
+    tcz += w * tz
+  }
+  if (used.length < 6 || wSum < 2) return null
+  mcx /= wSum
+  mcy /= wSum
+  mcz /= wSum
+  tcx /= wSum
+  tcy /= wSum
+  tcz /= wSum
+
+  // Weighted covariance S = Σ w · (t − t̄)(m − m̄)ᵀ
+  let sxx = 0, sxy = 0, sxz = 0, syx = 0, syy = 0, syz = 0, szx = 0, szy = 0, szz = 0
+  for (const [w, mx0, my0, mz0, tx0, ty0, tz0] of used) {
+    const mx = mx0 - mcx
+    const my = my0 - mcy
+    const mz = mz0 - mcz
+    const tx = tx0 - tcx
+    const ty = ty0 - tcy
+    const tz = tz0 - tcz
+    sxx += w * tx * mx
+    sxy += w * tx * my
+    sxz += w * tx * mz
+    syx += w * ty * mx
+    syy += w * ty * my
+    syz += w * ty * mz
+    szx += w * tz * mx
+    szy += w * tz * my
+    szz += w * tz * mz
+  }
+
+  // Horn's K matrix; its top eigenvector is the quaternion of the best rotation.
+  const K = [
+    sxx + syy + szz, syz - szy, szx - sxz, sxy - syx,
+    syz - szy, sxx - syy - szz, sxy + syx, szx + sxz,
+    szx - sxz, sxy + syx, -sxx + syy - szz, syz + szy,
+    sxy - syx, szx + sxz, syz + szy, -sxx - syy + szz,
+  ]
+  // Shift so the top eigenvalue dominates in magnitude, then power-iterate.
+  const shift = 2 * Math.hypot(sxx, sxy, sxz, syx, syy, syz, szx, szy, szz) + 1e-9
+  let q = [1, 0.1, 0.1, 0.1]
+  for (let iter = 0; iter < 40; iter++) {
+    const n = [0, 1, 2, 3].map(
+      (r) => K[r * 4] * q[0] + K[r * 4 + 1] * q[1] + K[r * 4 + 2] * q[2] + K[r * 4 + 3] * q[3] + shift * q[r],
+    )
+    const len = Math.hypot(n[0], n[1], n[2], n[3])
+    if (len < 1e-12) return null
+    q = [n[0] / len, n[1] / len, n[2] / len, n[3] / len]
+  }
+  const [w, x, y, z] = q
+  const r = [
+    1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
+    2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
+    2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y),
+  ]
+  return { r, cx: mcx, cy: mcy, cz: mcz, tx: tcx, ty: tcy, tz: tcz, score: Math.min(1, wSum / used.length) }
+}
+
+// ---------------------------------------------------------------------------
+// Skeleton-wide depth sanity
+//
+// z comes from classification bins spanning ±2.17m, so one occluded joint can
+// report a depth meters off while x/y — and its score — stay plausible.
+// MediaPipe's z errors were small and its visibility honest; these are neither.
+// But bone lengths don't lie: walk the skeleton torso-outward and wherever a
+// bone's 3D length overshoots anatomy, pull the LOWER-confidence endpoint's z
+// back into range. Undershoot is left alone — foreshortening is real.
+// ---------------------------------------------------------------------------
+
+const BONE_EDGES: [number, number, number][] = [
+  [COCO.left_shoulder, COCO.right_shoulder, 0.37],
+  [COCO.left_hip, COCO.right_hip, 0.19],
+  [COCO.left_shoulder, COCO.left_hip, 0.5],
+  [COCO.right_shoulder, COCO.right_hip, 0.5],
+  [COCO.left_shoulder, COCO.left_elbow, 0.28],
+  [COCO.left_elbow, COCO.left_wrist, 0.26],
+  [COCO.right_shoulder, COCO.right_elbow, 0.28],
+  [COCO.right_elbow, COCO.right_wrist, 0.26],
+  [COCO.left_hip, COCO.left_knee, 0.44],
+  [COCO.left_knee, COCO.left_ankle, 0.43],
+  [COCO.right_hip, COCO.right_knee, 0.44],
+  [COCO.right_knee, COCO.right_ankle, 0.43],
+  [COCO.left_ankle, COCO.left_big_toe, 0.2],
+  [COCO.right_ankle, COCO.right_big_toe, 0.2],
+  // Palm metacarpals are rigid — their length holds whatever the hand does.
+  [COCO.left_hand, COCO.left_hand + 9, 0.085],
+  [COCO.right_hand, COCO.right_hand + 9, 0.085],
+]
+
+const LENGTH_TOLERANCE = 1.45
+
+/** Mutates kpts z in place. Ordered torso-out so corrections propagate. */
+export function enforceBoneLengths(kpts: Float32Array, scores: Float32Array, mpp: number): number {
+  let corrected = 0
+  for (const [a, b, len] of BONE_EDGES) {
+    if (scores[a] < KPT_THR || scores[b] < KPT_THR) continue
+    const px = (kpts[a * 3] - kpts[b * 3]) * mpp
+    const py = (kpts[a * 3 + 1] - kpts[b * 3 + 1]) * mpp
+    const p2 = px * px + py * py
+    const dz = kpts[a * 3 + 2] - kpts[b * 3 + 2]
+    const max = len * LENGTH_TOLERANCE
+    if (p2 + dz * dz <= max * max) continue
+    const dzMax = Math.sqrt(Math.max(0, max * max - p2))
+    const target = Math.sign(dz) * Math.min(Math.abs(dz), dzMax)
+    // The endpoint the model was less sure about wears the correction.
+    if (scores[a] < scores[b]) kpts[a * 3 + 2] = kpts[b * 3 + 2] + target
+    else kpts[b * 3 + 2] = kpts[a * 3 + 2] - target
+    corrected++
+  }
+  return corrected
+}
+
 // MediaPipe pose index ← COCO-WholeBody index, for everything the app reads.
 // The debug preview draws all POSE_CONNECTIONS, so MediaPipe-only points are
 // filled from close equivalents rather than left at the origin: inner/outer
@@ -317,6 +504,7 @@ const MP_FROM_COCO: [number, number][] = [
  * Face ships empty on this engine (no mesh, and morphs are out of scope).
  */
 export function toWorkerResult(kpts: Float32Array, scores: Float32Array, mpp: number): Rtmw3dResult {
+  enforceBoneLengths(kpts, scores, mpp)
   const bodyVisible =
     (scores[COCO.left_hip] >= KPT_THR || scores[COCO.right_hip] >= KPT_THR) &&
     (scores[COCO.left_shoulder] >= KPT_THR || scores[COCO.right_shoulder] >= KPT_THR)
@@ -342,47 +530,31 @@ export function toWorkerResult(kpts: Float32Array, scores: Float32Array, mpp: nu
   const pose: WorldLandmark[] = new Array(33)
   for (const [mp, coco] of MP_FROM_COCO) pose[mp] = world(coco)
 
-  // Head landmarks from the 68-point face when it is confident. The body's
-  // four lone eye/ear points are exactly what the head basis solve reads, and
-  // under a profile turn the OCCLUDED far ear has nothing to see — its z-bin
-  // argmax can land meters away while x/y stay plausible, which rolls the head
-  // basis catastrophically (and reads fine in a front-view debug draw, where z
-  // barely shows). The face set is dense, mutually consistent, and scored much
-  // higher; jaw endpoints stand in for ears, eyelid centroids for eyes.
-  const avg = (from: number, to: number): [number, number, number, number] => {
-    let x = 0
-    let y = 0
-    let z = 0
-    let s = 0
-    const n = to - from + 1
-    for (let i = from; i <= to; i++) {
-      x += kpts[i * 3]
-      y += kpts[i * 3 + 1]
-      z += kpts[i * 3 + 2]
-      s += scores[i]
+  // Head landmarks synthesized from the Procrustes face fit (see fitHead).
+  // The measured single points fail exactly where the head basis needs them —
+  // occluded far ear, silhouette-following jaw — so ears and eyes are placed
+  // by rotating canonical head geometry with the fitted orientation instead.
+  const fit = fitHead(kpts, scores, mpp)
+  if (fit) {
+    const put = (mp: number, [tx, ty, tz]: readonly [number, number, number]) => {
+      const dx = tx - fit.tx
+      const dy = ty - fit.ty
+      const dz = tz - fit.tz
+      const x = fit.cx + fit.r[0] * dx + fit.r[1] * dy + fit.r[2] * dz
+      const y = fit.cy + fit.r[3] * dx + fit.r[4] * dy + fit.r[5] * dz
+      const z = fit.cz + fit.r[6] * dx + fit.r[7] * dy + fit.r[8] * dz
+      // fit space is meters; convert back through the shared root transform.
+      pose[mp] = { x: x - rx * mpp, y: y - ry * mpp, z: z - rz, visibility: fit.score }
     }
-    return [x / n, y / n, z / n, s / n]
-  }
-  const F = COCO.face
-  const rightJaw = avg(F, F) // iBUG 0 — contour start at the subject's right ear
-  const leftJaw = avg(F + 16, F + 16)
-  const rightEye = avg(F + 36, F + 41)
-  const leftEye = avg(F + 42, F + 47)
-  const noseTip = avg(F + 30, F + 30)
-  const faceScore = (rightJaw[3] + leftJaw[3] + rightEye[3] + leftEye[3]) / 4
-  if (faceScore >= 0.5) {
-    const put = (mp: number, [x, y, z, s]: [number, number, number, number]) => {
-      pose[mp] = { x: (x - rx) * mpp, y: (y - ry) * mpp, z: z - rz, visibility: Math.min(1, Math.max(0, s)) }
-    }
-    put(0, noseTip)
-    put(1, leftEye)
-    put(2, leftEye)
-    put(3, leftEye)
-    put(4, rightEye)
-    put(5, rightEye)
-    put(6, rightEye)
-    put(7, leftJaw)
-    put(8, rightJaw)
+    put(0, HEAD_SYNTH.nose)
+    put(1, HEAD_SYNTH.leftEye)
+    put(2, HEAD_SYNTH.leftEye)
+    put(3, HEAD_SYNTH.leftEye)
+    put(4, HEAD_SYNTH.rightEye)
+    put(5, HEAD_SYNTH.rightEye)
+    put(6, HEAD_SYNTH.rightEye)
+    put(7, HEAD_SYNTH.leftEar)
+    put(8, HEAD_SYNTH.rightEar)
   }
 
   // Depth sanity for the whole head: no point of a skull sits more than ~25cm
