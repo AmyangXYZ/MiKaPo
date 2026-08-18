@@ -20,17 +20,20 @@ import {
   imageDataToTensor,
   decodeSimCC3D,
   bboxFromKeypoints,
+  bodyScore,
   estimateMetersPerPixel,
   toWorkerResult,
   type Decoded,
 } from "./onnx/rtmw3d"
 
-// fp16 is for WebGPU ONLY (half the download, f16 shaders on Apple Silicon).
-// The wasm fallback gets fp32: CPUs have no fp16 arithmetic, so ORT emulates
-// it with per-op conversions — fp16 on wasm is SLOWER than fp32.
-const MODEL_FP16 = "/models/rtmw3d-x-fp16.onnx"
-const MODEL_FP32 =
+// RTMW3D-L first: 0.678 whole-body AP vs the X model's 0.680 at roughly half
+// the compute (decode verified equivalent offline). fp16 goes to the GPU
+// providers only; the wasm fallback gets fp32 — CPUs have no fp16 arithmetic,
+// so ORT emulates it per-op and fp16-on-wasm comes out SLOWER than fp32.
+const HF_X_FP32 =
   "https://huggingface.co/Soykaf/RTMW3D-x/resolve/main/onnx/rtmw3d-x_8xb64_cocktail14-384x288-b0a0eab7_20240626.onnx"
+const MODELS_GPU = ["/models/rtmw3d-l-fp16.onnx", "/models/rtmw3d-x-fp16.onnx", HF_X_FP32]
+const MODELS_CPU = ["/models/rtmw3d-l.onnx", HF_X_FP32]
 const MODEL_CACHE = "mikapo-onnx-models"
 
 // Serve the ORT wasm runtime from the CDN, mirroring how the MediaPipe worker
@@ -53,6 +56,8 @@ let runningMode: "VIDEO" | "IMAGE" = "VIDEO"
 
 /** Crop box carried between frames; null = full frame next. */
 let trackedBbox: number[] | null = null
+/** Media time of the frame trackedBbox was measured on — its staleness clock. */
+let trackedTs = 0
 /** EMA'd meters-per-pixel — camera distance changes slowly. */
 let metersPerPixel: number | null = null
 
@@ -108,27 +113,40 @@ let epUsed = ""
 let epNote = ""
 
 async function init(): Promise<void> {
-  let model16: ArrayBuffer | null = null
-  let model32: ArrayBuffer | null = null
-  try {
-    model16 = await fetchModel(MODEL_FP16)
-  } catch (e) {
-    console.warn(`[rtmw3d] fp16 model unavailable:`, e)
+  const cached: Record<string, ArrayBuffer> = {}
+  const firstAvailable = async (urls: string[]): Promise<ArrayBuffer> => {
+    for (const url of urls) {
+      if (cached[url]) return cached[url]
+      try {
+        return (cached[url] = await fetchModel(url))
+      } catch (e) {
+        console.warn(`[rtmw3d] model source failed: ${url}`, e)
+      }
+    }
+    throw new Error("no model source reachable")
   }
-  const fp32 = async () => (model32 ??= await fetchModel(MODEL_FP32))
+  const gpuModel = () => firstAvailable(MODELS_GPU)
+  const cpuModel = () => firstAvailable(MODELS_CPU)
 
-  // Attempt ladder: WebGPU with graph capture (static shapes make it legal,
-  // and it strips per-run CPU overhead), plain WebGPU, then wasm as the last
-  // resort — each with the model precision that suits it. Warmup runs INSIDE
-  // each attempt: WebGPU failures can surface at first run, not at create.
+  // Attempt ladder: WebNN first (Chrome can route it through CoreML on Macs,
+  // which beats generic WebGPU shaders when it works), then WebGPU with graph
+  // capture (static shapes make it legal, and it strips per-run CPU overhead),
+  // plain WebGPU, then wasm as the last resort — each with the model precision
+  // that suits it. Warmup runs INSIDE each attempt: provider failures can
+  // surface at first run, not at create.
   const attempts: [string, () => Promise<ArrayBuffer>, ort.InferenceSession.SessionOptions][] = [
     [
+      "webnn",
+      gpuModel,
+      { executionProviders: [{ name: "webnn", deviceType: "gpu" } as never], graphOptimizationLevel: "all" },
+    ],
+    [
       "webgpu+capture",
-      async () => model16 ?? (await fp32()),
+      gpuModel,
       { executionProviders: ["webgpu"], graphOptimizationLevel: "all", enableGraphCapture: true },
     ],
-    ["webgpu", async () => model16 ?? (await fp32()), { executionProviders: ["webgpu"], graphOptimizationLevel: "all" }],
-    ["wasm", fp32, { executionProviders: ["wasm"] }],
+    ["webgpu", gpuModel, { executionProviders: ["webgpu"], graphOptimizationLevel: "all" }],
+    ["wasm", cpuModel, { executionProviders: ["wasm"] }],
   ]
   let warm: Awaited<ReturnType<ort.InferenceSession["run"]>> | null = null
   for (const [name, pickModel, opts] of attempts) {
@@ -202,9 +220,21 @@ async function detect(bitmap: ImageBitmap, mediaTs: number, still: boolean): Pro
   if (still) {
     const refined = bboxFromKeypoints(decoded.kpts, decoded.scores, w, h)
     if (refined) decoded = await runOnce(bitmap, refined)
+  } else if (bbox && bodyScore(decoded.scores) < 0.45) {
+    // The tracked crop went bad (subject moved out of the stale box, and a
+    // bad crop feeds a worse box). Re-detect on the full frame NOW rather
+    // than emitting a broken pose and hoping next frame recovers.
+    decoded = await runOnce(bitmap, [0, 0, w, h])
+    bbox = null
   }
 
-  trackedBbox = bboxFromKeypoints(decoded.kpts, decoded.scores, w, h)
+  // The next crop must cover wherever the subject can move before the next
+  // detection — the box is used one inference later, so its margin grows with
+  // the measured capture interval (a dancer covers about a body-width per
+  // second; ~1.2×dt of box size keeps them inside).
+  const dtSec = trackedTs > 0 ? Math.min(1, Math.max(0, (mediaTs - trackedTs) / 1000)) : 0.1
+  trackedBbox = bboxFromKeypoints(decoded.kpts, decoded.scores, w, h, 0.1 + 1.2 * dtSec)
+  trackedTs = mediaTs
 
   const estimate = estimateMetersPerPixel(decoded.kpts, decoded.scores)
   if (estimate) {
@@ -231,6 +261,7 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
         break
       case "reset":
         trackedBbox = null
+        trackedTs = 0
         metersPerPixel = null
         break
       case "video":

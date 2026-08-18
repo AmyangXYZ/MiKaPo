@@ -188,15 +188,23 @@ export const KPT_THR = 0.3
 /**
  * Next frame's crop box from this frame's keypoints — the single-person
  * replacement for a detector model. Body, feet and hand extents (confident
- * points only) plus a 10% margin; bboxCenterScale adds its 1.25 padding on
- * top. Null when too little of the body is confident, which sends the caller
- * back to a full-frame crop.
+ * points only) plus a margin; bboxCenterScale adds its 1.25 padding on top.
+ * Null when too little of the body is confident, which sends the caller back
+ * to a full-frame crop.
+ *
+ * `marginFrac` MUST grow with the time since these keypoints were measured:
+ * the box is always one detection old, and at slow capture rates a dancer
+ * moves half a body-width per interval. A tight stale box amputates limbs
+ * from the crop, which poisons the next detection, which shrinks the next
+ * box — a feedback loop that reads as "the pose broke", while any per-still
+ * test (fresh box every time) passes.
  */
 export function bboxFromKeypoints(
   kpts: Float32Array,
   scores: Float32Array,
   imgW: number,
   imgH: number,
+  marginFrac = 0.1,
 ): number[] | null {
   let bodyCount = 0
   for (let i = 0; i <= COCO.right_ankle; i++) if (scores[i] >= KPT_THR) bodyCount++
@@ -217,13 +225,20 @@ export function bboxFromKeypoints(
     if (y > y2) y2 = y
   }
   if (!(x2 > x1) || !(y2 > y1)) return null
-  const margin = 0.1 * Math.max(x2 - x1, y2 - y1)
+  const margin = marginFrac * Math.max(x2 - x1, y2 - y1)
   return [
     Math.max(0, x1 - margin),
     Math.max(0, y1 - margin),
     Math.min(imgW, x2 + margin),
     Math.min(imgH, y2 + margin),
   ]
+}
+
+/** Mean body-keypoint score — the crop-quality signal the tracker resets on. */
+export function bodyScore(scores: Float32Array): number {
+  let sum = 0
+  for (let i = 0; i <= COCO.right_ankle; i++) sum += scores[i]
+  return sum / (COCO.right_ankle + 1)
 }
 
 // Canonical adult segment lengths in meters, used to recover the image's
