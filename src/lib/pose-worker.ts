@@ -27,6 +27,9 @@ export type PoseWorkerResponse =
   | { type: "ready" }
   | { type: "result"; result: PoseWorkerResult; mediaTs: number }
   | { type: "error"; message: string }
+  // Model download progress — only the ONNX engine sends this (its model is
+  // ~370MB against MediaPipe's ~30MB; a silent load that long reads as a hang).
+  | { type: "progress"; loaded: number; total: number }
 
 let landmarker: HolisticLandmarker | null = null
 let runningMode: "VIDEO" | "IMAGE" = "VIDEO"

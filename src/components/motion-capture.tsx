@@ -11,6 +11,10 @@ import { Camera, Image as ImageIcon, Video, Webcam, Pause, Play, Download, Squar
 
 type DebugSceneProps = { landmarks: PoseWorkerResult | null }
 
+/** Pose engine. RTMW3D: one ONNX model, whole-body 3D (body+hands), WebGPU.
+ * Flip to false to fall back to MediaPipe holistic for A/B comparison. */
+const USE_RTMW3D = true
+
 /**
  * One tuning row: name, setting, slider — and for anything with a live signal, a
  * meter under it showing what the solver is currently reading.
@@ -57,6 +61,8 @@ export const MotionCapture = ({
   const videoInputRef = useRef<HTMLInputElement>(null)
   const workerRef = useRef<Worker | null>(null)
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
+  // ONNX model download progress (0..1); null once loaded or when unknown.
+  const [modelLoadPct, setModelLoadPct] = useState<number | null>(null)
   const [landmarks, setLandmarks] = useState<PoseWorkerResult | null>(null)
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
@@ -255,7 +261,9 @@ export const MotionCapture = ({
     let pending = false
     let pendingSince = 0
 
-    const worker = new Worker(new URL("../lib/pose-worker.ts", import.meta.url))
+    const worker = USE_RTMW3D
+      ? new Worker(new URL("../lib/onnx-pose-worker.ts", import.meta.url))
+      : new Worker(new URL("../lib/pose-worker.ts", import.meta.url))
     workerRef.current = worker
     const send = (msg: PoseWorkerRequest, transfer?: Transferable[]) =>
       worker.postMessage(msg, transfer ?? [])
@@ -265,7 +273,10 @@ export const MotionCapture = ({
       if (msg.type === "ready") {
         ready = true
         setMediaPipeReady(true)
+        setModelLoadPct(null)
         onMediaPipeReadyChangeRef.current?.(true)
+      } else if (msg.type === "progress") {
+        setModelLoadPct(msg.total > 0 ? msg.loaded / msg.total : null)
       } else if (msg.type === "result") {
         pending = false
         // A conversion owns the worker while it runs; its awaiting frame takes
@@ -573,8 +584,13 @@ export const MotionCapture = ({
     setExported(`${n}f · ${seconds.toFixed(1)}s`)
   }, [])
 
+  const loadingLabel =
+    modelLoadPct != null ? `Loading model… ${Math.round(modelLoadPct * 100)}%` : "Loading…"
+
   const statusPill =
-    inputMode === "camera" ? (
+    !mediaPipeReady && modelLoadPct != null ? (
+      <span className="font-mono text-[10px] tabular-nums text-blue-300/90">{Math.round(modelLoadPct * 100)}%</span>
+    ) : inputMode === "camera" ? (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-red-300">
         <span className="size-1.5 animate-pulse rounded-full bg-red-500" />
         Live
@@ -612,7 +628,7 @@ export const MotionCapture = ({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {!mediaPipeReady ? "Loading…" : isStreamActive ? "Stop webcam" : "Start webcam"}
+                {!mediaPipeReady ? loadingLabel : isStreamActive ? "Stop webcam" : "Start webcam"}
               </TooltipContent>
             </Tooltip>
 
@@ -628,7 +644,7 @@ export const MotionCapture = ({
                   <ImageIcon className="size-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{!mediaPipeReady ? "Loading…" : "Upload image"}</TooltipContent>
+              <TooltipContent>{!mediaPipeReady ? loadingLabel : "Upload image"}</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -643,7 +659,7 @@ export const MotionCapture = ({
                   <Video className="size-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{!mediaPipeReady ? "Loading…" : "Upload video"}</TooltipContent>
+              <TooltipContent>{!mediaPipeReady ? loadingLabel : "Upload video"}</TooltipContent>
             </Tooltip>
 
             <div className="ml-auto hidden items-center gap-1.5 md:flex">
