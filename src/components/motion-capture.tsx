@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useCallback, type ComponentType } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import Image from "next/image"
+import DebugScene from "./debug-scene"
 import { BoneState, Solver, type BodyCollider } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
 import { buildClip, clipSummary, RecordedFrame } from "@/lib/vmd"
@@ -8,8 +9,6 @@ import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Camera, Image as ImageIcon, Video, Webcam, Pause, Play, Download, Square } from "lucide-react"
-
-type DebugSceneProps = { landmarks: PoseWorkerResult | null }
 
 /** Pose engine. RTMW3D: one ONNX model, whole-body 3D (body+hands), WebGPU.
  * Flip to false to fall back to MediaPipe holistic for A/B comparison. */
@@ -63,6 +62,8 @@ export const MotionCapture = ({
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
   // ONNX model download progress (0..1); null once loaded or when unknown.
   const [modelLoadPct, setModelLoadPct] = useState<number | null>(null)
+  // Which execution provider the ONNX engine landed on (webgpu vs wasm).
+  const [engineEp, setEngineEp] = useState<string | null>(null)
   const [landmarks, setLandmarks] = useState<PoseWorkerResult | null>(null)
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
@@ -163,19 +164,6 @@ export const MotionCapture = ({
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  // Babylon-based skeleton preview, loaded client-side only so @babylonjs/*
-  // code-splits out of the initial bundle (the main viewport is reze-engine/WebGPU).
-  const [DebugScene, setDebugScene] = useState<ComponentType<DebugSceneProps> | null>(null)
-  useEffect(() => {
-    let mounted = true
-    import("./debug-scene").then((mod) => {
-      if (mounted) setDebugScene(() => mod.default)
-    })
-    return () => {
-      mounted = false
-    }
-  }, [])
-
   // Re-calibrate solver reference directions when a (new) model's rest pose arrives.
   useEffect(() => {
     if (restPose) solverRef.current.calibrate(restPose)
@@ -229,7 +217,9 @@ export const MotionCapture = ({
     lastResultAtRef.current = now
     // 0.9×: finish the tween just before the average next result — chasing with
     // a longer duration compounds into extra latency and shaved motion peaks.
-    const tweenMs = Math.min(100, resultIntervalEmaRef.current * 0.9)
+    // The cap only binds below ~2.5 Hz: at slow capture rates a snap-and-wait
+    // reads worse than the latency, so let the tween span the real interval.
+    const tweenMs = Math.min(400, resultIntervalEmaRef.current * 0.9)
 
     if (!modelLoadedRef.current) return
 
@@ -274,6 +264,7 @@ export const MotionCapture = ({
         ready = true
         setMediaPipeReady(true)
         setModelLoadPct(null)
+        if (msg.ep) setEngineEp(msg.ep)
         onMediaPipeReadyChangeRef.current?.(true)
       } else if (msg.type === "progress") {
         setModelLoadPct(msg.total > 0 ? msg.loaded / msg.total : null)
@@ -663,6 +654,18 @@ export const MotionCapture = ({
             </Tooltip>
 
             <div className="ml-auto hidden items-center gap-1.5 md:flex">
+              {engineEp && (
+                <span
+                  className={`rounded-full border px-1.5 py-0.5 font-mono text-[9px] lowercase tracking-wide ${
+                    engineEp.startsWith("webgpu")
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300/80"
+                      : "border-amber-500/40 bg-amber-500/15 text-amber-300/90"
+                  }`}
+                  title={`ONNX execution provider: ${engineEp}`}
+                >
+                  {engineEp}
+                </span>
+              )}
               {converting ? (
                 <span className="font-mono text-[10px] tabular-nums text-blue-300/90">
                   {Math.round(progress * 100)}%
@@ -787,9 +790,9 @@ export const MotionCapture = ({
           )}
         </div>
 
-        {/* Skeleton preview — desktop only */}
+        {/* Raw-landmark preview — desktop only. Drag to orbit. */}
         <div className="hidden aspect-[16/10] border-t border-white/5 bg-black/50 md:block">
-          {DebugScene && <DebugScene landmarks={landmarks} />}
+          <DebugScene landmarks={landmarks} />
         </div>
       </div>
     </div>

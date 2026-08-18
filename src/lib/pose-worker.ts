@@ -24,7 +24,9 @@ export interface PoseWorkerResult {
 }
 
 export type PoseWorkerResponse =
-  | { type: "ready" }
+  // `ep` reports which execution provider took the session (ONNX engine only —
+  // a silent webgpu→wasm fallback is a 100× slowdown worth surfacing).
+  | { type: "ready"; ep?: string }
   | { type: "result"; result: PoseWorkerResult; mediaTs: number }
   | { type: "error"; message: string }
   // Model download progress — only the ONNX engine sends this (its model is

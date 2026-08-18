@@ -342,6 +342,61 @@ export function toWorkerResult(kpts: Float32Array, scores: Float32Array, mpp: nu
   const pose: WorldLandmark[] = new Array(33)
   for (const [mp, coco] of MP_FROM_COCO) pose[mp] = world(coco)
 
+  // Head landmarks from the 68-point face when it is confident. The body's
+  // four lone eye/ear points are exactly what the head basis solve reads, and
+  // under a profile turn the OCCLUDED far ear has nothing to see — its z-bin
+  // argmax can land meters away while x/y stay plausible, which rolls the head
+  // basis catastrophically (and reads fine in a front-view debug draw, where z
+  // barely shows). The face set is dense, mutually consistent, and scored much
+  // higher; jaw endpoints stand in for ears, eyelid centroids for eyes.
+  const avg = (from: number, to: number): [number, number, number, number] => {
+    let x = 0
+    let y = 0
+    let z = 0
+    let s = 0
+    const n = to - from + 1
+    for (let i = from; i <= to; i++) {
+      x += kpts[i * 3]
+      y += kpts[i * 3 + 1]
+      z += kpts[i * 3 + 2]
+      s += scores[i]
+    }
+    return [x / n, y / n, z / n, s / n]
+  }
+  const F = COCO.face
+  const rightJaw = avg(F, F) // iBUG 0 — contour start at the subject's right ear
+  const leftJaw = avg(F + 16, F + 16)
+  const rightEye = avg(F + 36, F + 41)
+  const leftEye = avg(F + 42, F + 47)
+  const noseTip = avg(F + 30, F + 30)
+  const faceScore = (rightJaw[3] + leftJaw[3] + rightEye[3] + leftEye[3]) / 4
+  if (faceScore >= 0.5) {
+    const put = (mp: number, [x, y, z, s]: [number, number, number, number]) => {
+      pose[mp] = { x: (x - rx) * mpp, y: (y - ry) * mpp, z: z - rz, visibility: Math.min(1, Math.max(0, s)) }
+    }
+    put(0, noseTip)
+    put(1, leftEye)
+    put(2, leftEye)
+    put(3, leftEye)
+    put(4, rightEye)
+    put(5, rightEye)
+    put(6, rightEye)
+    put(7, leftJaw)
+    put(8, rightJaw)
+  }
+
+  // Depth sanity for the whole head: no point of a skull sits more than ~25cm
+  // from the rest of it. Clamp each head z toward their median so one bad
+  // depth bin cannot fold the neck or roll the head, whatever its source.
+  const headZ = [] as number[]
+  for (let i = 0; i <= 10; i++) headZ.push(pose[i].z)
+  headZ.sort((a, b) => a - b)
+  const medZ = headZ[headZ.length >> 1]
+  for (let i = 0; i <= 10; i++) {
+    if (pose[i].z > medZ + 0.25) pose[i].z = medZ + 0.25
+    else if (pose[i].z < medZ - 0.25) pose[i].z = medZ - 0.25
+  }
+
   const hand = (start: number): WorldLandmark[][] => {
     let sum = 0
     for (let i = 0; i < 21; i++) sum += scores[start + i]

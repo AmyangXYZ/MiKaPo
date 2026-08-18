@@ -25,13 +25,19 @@ import {
   type Decoded,
 } from "./onnx/rtmw3d"
 
-const MODEL_URL =
-  "https://huggingface.co/Soykaf/RTMW3D-x/resolve/main/onnx/rtmw3d-x_8xb64_cocktail14-384x288-b0a0eab7_20240626.onnx"
+// Preferred first: local fp16 (half the download, and WebGPU runs f16 shaders
+// on Apple Silicon). Falls back to the fp32 HuggingFace original when the
+// local file isn't deployed.
+const MODEL_SOURCES = [
+  "/models/rtmw3d-x-fp16.onnx",
+  "https://huggingface.co/Soykaf/RTMW3D-x/resolve/main/onnx/rtmw3d-x_8xb64_cocktail14-384x288-b0a0eab7_20240626.onnx",
+]
 const MODEL_CACHE = "mikapo-onnx-models"
 
 // Serve the ORT wasm runtime from the CDN, mirroring how the MediaPipe worker
 // loads its fileset — keep the version in lock-step with package.json.
 ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/"
+ort.env.webgpu.powerPreference = "high-performance"
 
 let session: ort.InferenceSession | null = null
 let inputName = ""
@@ -55,7 +61,9 @@ const inputData = new Float32Array(3 * MODEL_W * MODEL_H)
 const post = (msg: PoseWorkerResponse) => (self as unknown as Worker).postMessage(msg)
 
 async function fetchModel(url: string): Promise<ArrayBuffer> {
-  const cache = await caches.open(MODEL_CACHE).catch(() => null)
+  // Same-origin files come off local disk — Cache Storage would only duplicate
+  // them; the cache earns its keep on the cross-origin fallback.
+  const cache = url.startsWith("/") ? null : await caches.open(MODEL_CACHE).catch(() => null)
   const hit = await cache?.match(url)
   if (hit) return hit.arrayBuffer()
 
@@ -90,23 +98,52 @@ async function fetchModel(url: string): Promise<ArrayBuffer> {
   return buf.buffer
 }
 
+/** Which provider actually took the session — surfaced because a silent wasm
+ * fallback is a 100× slowdown that otherwise looks like "the model is slow". */
+let epUsed = ""
+
 async function init(): Promise<void> {
-  const model = await fetchModel(MODEL_URL)
-  try {
-    session = await ort.InferenceSession.create(model, {
-      executionProviders: ["webgpu"],
-      graphOptimizationLevel: "all",
-    })
-  } catch (gpuError) {
-    console.warn("WebGPU EP failed, falling back to wasm:", gpuError)
-    session = await ort.InferenceSession.create(model, { executionProviders: ["wasm"] })
+  let model: ArrayBuffer | null = null
+  let src = ""
+  for (const url of MODEL_SOURCES) {
+    try {
+      model = await fetchModel(url)
+      src = url
+      break
+    } catch (e) {
+      console.warn(`[rtmw3d] model source failed: ${url}`, e)
+    }
   }
+  if (!model) throw new Error("no model source reachable")
+
+  // Attempt ladder: WebGPU with graph capture (static shapes make it legal,
+  // and it strips per-run CPU overhead), plain WebGPU, then wasm as the
+  // last resort. Warmup runs INSIDE each attempt — WebGPU failures can
+  // surface at first run rather than at create.
+  const attempts: [string, ort.InferenceSession.SessionOptions][] = [
+    ["webgpu+capture", { executionProviders: ["webgpu"], graphOptimizationLevel: "all", enableGraphCapture: true }],
+    ["webgpu", { executionProviders: ["webgpu"], graphOptimizationLevel: "all" }],
+    ["wasm", { executionProviders: ["wasm"] }],
+  ]
+  let warm: Awaited<ReturnType<ort.InferenceSession["run"]>> | null = null
+  for (const [name, opts] of attempts) {
+    try {
+      const s = await ort.InferenceSession.create(model, opts)
+      const t0 = performance.now()
+      warm = await s.run({
+        [s.inputNames[0]]: new ort.Tensor("float32", inputData, [1, 3, MODEL_H, MODEL_W]),
+      })
+      console.log(`[rtmw3d] ${name} warmup ${(performance.now() - t0).toFixed(0)}ms (${src.split("/").pop()})`)
+      session = s
+      epUsed = name
+      break
+    } catch (e) {
+      console.warn(`[rtmw3d] ${name} failed:`, e)
+    }
+  }
+  if (!session || !warm) throw new Error("no execution provider worked")
   inputName = session.inputNames[0]
 
-  // Warmup runs the shader compilation AND reveals which output is which axis.
-  const warm = await session.run({
-    [inputName]: new ort.Tensor("float32", inputData, [1, 3, MODEL_H, MODEL_W]),
-  })
   const xz: string[] = []
   for (const name of session.outputNames) {
     const bins = warm[name].dims[warm[name].dims.length - 1]
@@ -116,8 +153,11 @@ async function init(): Promise<void> {
   if (!outY || xz.length !== 2) throw new Error(`unexpected model outputs: ${session.outputNames.join(", ")}`)
   ;[outX, outZ] = xz
 
-  post({ type: "ready" })
+  post({ type: "ready", ep: epUsed })
 }
+
+let inferEma = 0
+let inferCount = 0
 
 async function runOnce(bitmap: ImageBitmap, bbox: readonly number[]): Promise<Decoded> {
   const cs = bboxCenterScale(bbox)
@@ -129,9 +169,14 @@ async function runOnce(bitmap: ImageBitmap, bbox: readonly number[]): Promise<De
   ctx.drawImage(bitmap, 0, 0)
   const rgba = ctx.getImageData(0, 0, MODEL_W, MODEL_H).data
   imageDataToTensor(rgba, inputData)
+  const t0 = performance.now()
   const outputs = await session!.run({
     [inputName]: new ort.Tensor("float32", inputData, [1, 3, MODEL_H, MODEL_W]),
   })
+  const ms = performance.now() - t0
+  inferEma = inferEma === 0 ? ms : inferEma * 0.9 + ms * 0.1
+  if (++inferCount % 30 === 0)
+    console.log(`[rtmw3d] ${epUsed}: ${inferEma.toFixed(0)}ms/inference (~${(1000 / inferEma).toFixed(1)} Hz)`)
   return decodeSimCC3D(
     outputs[outX].data as Float32Array,
     outputs[outY].data as Float32Array,
