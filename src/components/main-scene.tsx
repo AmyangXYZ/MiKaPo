@@ -98,6 +98,8 @@ export default function MainScene() {
   const loadGenerationRef = useRef(0)
   const [modelLoaded, setModelLoaded] = useState(false)
   const [restPose, setRestPose] = useState<Record<string, Vec3> | null>(null)
+  // True when the loaded model's IK chains were disabled (full-FK mode).
+  const fullFkRef = useRef(false)
   const [colliders, setColliders] = useState<BodyCollider[] | null>(null)
   const [modelMorphs, setModelMorphs] = useState<string[] | null>(null)
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
@@ -123,6 +125,27 @@ export default function MainScene() {
   )
 
   const buildRestPose = useCallback((model: Model) => {
+    // Full FK by default: the solver already emits complete leg rotations, and
+    // running engine IK on top of them makes two authorities per knee — at low
+    // capture rates their tweens (quaternion vs linear target) disagree
+    // mid-flight and the legs jitter. `?ik=1` restores IK. Reaches into
+    // engine-private state (ikDisabled is clip-driven; live capture plays no
+    // clip, so entries persist) — worth upstreaming a public setIkEnabled().
+    if (new URLSearchParams(window.location.search).get("ik") !== "1") {
+      try {
+        const internals = model as unknown as {
+          runtimeSkeleton?: { ikSolvers?: { ikBoneIndex: number }[] }
+          ikDisabled?: Set<number>
+        }
+        const solvers = internals.runtimeSkeleton?.ikSolvers ?? []
+        for (const s of solvers) internals.ikDisabled?.add(s.ikBoneIndex)
+        fullFkRef.current = solvers.length > 0
+        console.log(`[mikapo] full-FK: ${solvers.length} IK chains disabled (?ik=1 restores)`)
+      } catch {
+        // engine internals moved — IK stays on
+      }
+    }
+
     const dict: Record<string, Vec3> = {}
     for (const name of SOLVER_REST_BONES) {
       try {
@@ -357,6 +380,9 @@ export default function MainScene() {
       const pose: Record<string, Quat> = {}
       const moves: Record<string, Vec3> = {}
       for (const bone of boneStates) {
+        // Under full FK the ＩＫ bones are dead weight — their chains are
+        // disabled, and moving the targets anyway only confuses a later ?ik=1.
+        if (fullFkRef.current && bone.name.includes("ＩＫ")) continue
         pose[bone.name] = new Quat(bone.rotation.x, bone.rotation.y, bone.rotation.z, bone.rotation.w)
         // センター and the leg IK bones carry translation — the body's height
         // over the ground and where each foot lands.

@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+/// <reference types="@webgpu/types" />
 // RTMW3D detection worker — the ONNX/WebGPU counterpart of pose-worker.ts,
 // speaking the same message protocol so the capture panel can swap engines
 // with one constant.
@@ -34,6 +35,9 @@ const HF_X_FP32 =
   "https://huggingface.co/Soykaf/RTMW3D-x/resolve/main/onnx/rtmw3d-x_8xb64_cocktail14-384x288-b0a0eab7_20240626.onnx"
 const MODELS_GPU = ["/models/rtmw3d-l-fp16.onnx", "/models/rtmw3d-x-fp16.onnx", HF_X_FP32]
 const MODELS_CPU = ["/models/rtmw3d-l.onnx", HF_X_FP32]
+// DepthToSpace rewritten as a batch-1 5D chain — WebNN caps tensor rank at 5
+// and refuses the standard rank-6 decomposition.
+const MODELS_WEBNN = ["/models/rtmw3d-l-webnn.onnx"]
 const MODEL_CACHE = "mikapo-onnx-models"
 
 // Serve the ORT wasm runtime from the CDN, mirroring how the MediaPipe worker
@@ -61,7 +65,25 @@ interface Slot {
 }
 let slots: Slot[] = []
 let gpuLock: Promise<void> = Promise.resolve()
-let inputName = ""
+/** Graph-capture mode: I/O lives in externally-owned GPU buffers. */
+let gpuIO = false
+let gpuDevice: GPUDevice | null = null
+let gpuInput: GPUBuffer | null = null
+
+function runFeeds(
+  s: ort.InferenceSession,
+  data: Float32Array,
+  useGpu: boolean,
+): ReturnType<ort.InferenceSession["run"]> {
+  const name = s.inputNames[0]
+  if (useGpu && gpuDevice && gpuInput) {
+    gpuDevice.queue.writeBuffer(gpuInput, 0, data.buffer, data.byteOffset, data.byteLength)
+    return s.run({
+      [name]: ort.Tensor.fromGpuBuffer(gpuInput as never, { dataType: "float32", dims: [1, 3, MODEL_H, MODEL_W] }),
+    })
+  }
+  return s.run({ [name]: new ort.Tensor("float32", data, [1, 3, MODEL_H, MODEL_W]) })
+}
 // Output names resolved to axes after warmup: y is the unique MODEL_H×2-bin
 // tensor; x and z share a bin count (width and depth dims are both 288) and
 // keep their graph order, x first — for this export: output, 1554, 1556.
@@ -152,53 +174,65 @@ async function init(): Promise<void> {
   }
   const gpuModel = () => firstAvailable(MODELS_GPU)
   const cpuModel = () => firstAvailable(MODELS_CPU)
+  const webnnModel = () => firstAvailable(MODELS_WEBNN)
 
   // Attempt ladder: WebNN first (Chrome can route it through CoreML on Macs,
   // which beats generic WebGPU shaders when it works), then WebGPU with graph
-  // capture (static shapes make it legal, and it strips per-run CPU overhead),
-  // plain WebGPU, then wasm as the last resort — each with the model precision
-  // that suits it. Warmup runs INSIDE each attempt: provider failures can
-  // surface at first run, not at create.
-  const attempts: [string, () => Promise<ArrayBuffer>, ort.InferenceSession.SessionOptions][] = [
+  // capture (static shapes make it legal, and replaying a captured graph
+  // strips the per-dispatch overhead that dominates this model's cost), plain
+  // WebGPU, then wasm as the last resort — each with the model that suits it.
+  // Warmup runs INSIDE each attempt: provider failures can surface at first
+  // run, not at create. Graph capture requires externally-owned GPU buffers
+  // for I/O (`gpuIO`), so its runs feed a persistent device buffer.
+  const attempts: [string, () => Promise<ArrayBuffer>, ort.InferenceSession.SessionOptions, boolean?][] = [
     [
       "webnn",
-      gpuModel,
-      { executionProviders: [{ name: "webnn", deviceType: "gpu" } as never], graphOptimizationLevel: "all" },
-    ],
-    // The fp16 conversion litters the graph with Cast nodes some WebNN
-    // backends reject — the fp32 original is a separate shot at CoreML.
-    [
-      "webnn-fp32",
-      cpuModel,
+      webnnModel,
       { executionProviders: [{ name: "webnn", deviceType: "gpu" } as never], graphOptimizationLevel: "all" },
     ],
     [
       "webgpu+capture",
       gpuModel,
-      { executionProviders: ["webgpu"], graphOptimizationLevel: "all", enableGraphCapture: true },
+      {
+        executionProviders: ["webgpu"],
+        graphOptimizationLevel: "all",
+        enableGraphCapture: true,
+        preferredOutputLocation: "gpu-buffer",
+      } as ort.InferenceSession.SessionOptions,
+      true,
     ],
     ["webgpu", gpuModel, { executionProviders: ["webgpu"], graphOptimizationLevel: "all" }],
     ["wasm", cpuModel, { executionProviders: ["wasm"] }],
   ]
   let warm: Awaited<ReturnType<ort.InferenceSession["run"]>> | null = null
-  for (const [name, pickModel, opts] of attempts) {
+  for (const [name, pickModel, opts, wantGpuIO] of attempts) {
     try {
       const s = await ort.InferenceSession.create(await pickModel(), opts)
+      if (wantGpuIO) {
+        const device = (ort.env.webgpu as unknown as { device?: GPUDevice }).device
+        if (!device) throw new Error("no webgpu device exposed for gpu I/O")
+        gpuInput = device.createBuffer({
+          size: inputData.byteLength,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+        })
+        gpuDevice = device
+      }
       const t0 = performance.now()
-      warm = await s.run({
-        [s.inputNames[0]]: new ort.Tensor("float32", inputData, [1, 3, MODEL_H, MODEL_W]),
-      })
+      warm = await runFeeds(s, inputData, wantGpuIO === true)
       console.log(`[rtmw3d] ${name} warmup ${(performance.now() - t0).toFixed(0)}ms`)
       session = s
       epUsed = name
+      gpuIO = wantGpuIO === true
       break
     } catch (e) {
       console.warn(`[rtmw3d] ${name} failed:`, e)
       epNote += `${name}: ${e instanceof Error ? e.message : String(e)}; `
+      gpuInput?.destroy()
+      gpuInput = null
+      gpuDevice = null
     }
   }
   if (!session || !warm) throw new Error("no execution provider worked")
-  inputName = session.inputNames[0]
   slots = [makeSlot(session)]
   // Second SLOT (same session): lets the next frame preprocess while this one
   // is on the GPU. Meaningless on single-thread wasm, where run() occupies
@@ -231,18 +265,24 @@ async function runOnce(slot: Slot, bitmap: ImageBitmap, bbox: readonly number[])
   ctx.drawImage(bitmap, 0, 0)
   const rgba = ctx.getImageData(0, 0, MODEL_W, MODEL_H).data
   imageDataToTensor(rgba, slot.input)
-  // Serialize the GPU part only — preprocessing above and decoding below run
-  // concurrently across slots; run() calls must not.
+  // Serialize the GPU part only — preprocessing above runs concurrently
+  // across slots; run() calls (and, under capture, output downloads — the
+  // captured replay reuses the same output buffers) must not.
   const prev = gpuLock
   let release!: () => void
   gpuLock = new Promise((r) => (release = r))
   await prev
   const t0 = performance.now()
-  let outputs: Awaited<ReturnType<ort.InferenceSession["run"]>>
+  let x: Float32Array
+  let y: Float32Array
+  let z: Float32Array
   try {
-    outputs = await slot.session.run({
-      [inputName]: new ort.Tensor("float32", slot.input, [1, 3, MODEL_H, MODEL_W]),
-    })
+    const outputs = await runFeeds(slot.session, slot.input, gpuIO)
+    ;[x, y, z] = (await Promise.all([
+      outputs[outX].getData(),
+      outputs[outY].getData(),
+      outputs[outZ].getData(),
+    ])) as [Float32Array, Float32Array, Float32Array]
   } finally {
     release()
   }
@@ -250,12 +290,7 @@ async function runOnce(slot: Slot, bitmap: ImageBitmap, bbox: readonly number[])
   inferEma = inferEma === 0 ? ms : inferEma * 0.9 + ms * 0.1
   if (++inferCount % 30 === 0)
     console.log(`[rtmw3d] ${epUsed}: ${inferEma.toFixed(0)}ms GPU/inference (~${(1000 / inferEma).toFixed(1)} Hz ceiling)`)
-  return decodeSimCC3D(
-    outputs[outX].data as Float32Array,
-    outputs[outY].data as Float32Array,
-    outputs[outZ].data as Float32Array,
-    warp,
-  )
+  return decodeSimCC3D(x, y, z, warp)
 }
 
 // Two frames can be in flight; results must still leave IN ORDER — the
