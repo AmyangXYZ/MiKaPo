@@ -45,9 +45,13 @@ ort.env.webgpu.powerPreference = "high-performance"
 ort.env.wasm.numThreads = Math.min(8, (navigator.hardwareConcurrency || 4) - 1)
 
 let session: ort.InferenceSession | null = null
-/** GPU providers get a second session so two frames pipeline: one frame's
- * pre/post-processing overlaps the other's GPU time. Each slot owns its
- * canvas and input buffer — sharing them across in-flight frames is a race. */
+/** GPU providers get two preprocessing slots so two frames pipeline: one
+ * frame's pre/post-processing overlaps the other's GPU time. Each slot owns
+ * its canvas and input buffer — sharing them across in-flight frames is a
+ * race. The SESSION stays singular and its run() calls are serialized by
+ * `gpuLock`: ORT-web's WebGPU sessions share one device and buffer manager
+ * per worker, and concurrent OrtRun races buffer downloads ("Buffer was
+ * unmapped before mapping was resolved"). */
 interface Slot {
   session: ort.InferenceSession
   canvas: OffscreenCanvas
@@ -56,6 +60,7 @@ interface Slot {
   busy: boolean
 }
 let slots: Slot[] = []
+let gpuLock: Promise<void> = Promise.resolve()
 let inputName = ""
 // Output names resolved to axes after warmup: y is the unique MODEL_H×2-bin
 // tensor; x and z share a bin count (width and depth dims are both 288) and
@@ -188,18 +193,10 @@ async function init(): Promise<void> {
   if (!session || !warm) throw new Error("no execution provider worked")
   inputName = session.inputNames[0]
   slots = [makeSlot(session)]
-  // A second session doubles GPU weight memory but lets two frames overlap.
-  // GPU providers only — a second wasm session just thrashes the same cores.
-  if (epUsed !== "wasm") {
-    try {
-      const opts = attempts.find(([n]) => n === epUsed)![2]
-      const s2 = await ort.InferenceSession.create(await gpuModel(), opts)
-      await s2.run({ [inputName]: new ort.Tensor("float32", inputData, [1, 3, MODEL_H, MODEL_W]) })
-      slots.push(makeSlot(s2))
-    } catch (e) {
-      console.warn("[rtmw3d] second session failed (staying single):", e)
-    }
-  }
+  // Second SLOT (same session): lets the next frame preprocess while this one
+  // is on the GPU. Meaningless on single-thread wasm, where run() occupies
+  // this very thread.
+  if (epUsed !== "wasm") slots.push(makeSlot(session))
 
   const xz: string[] = []
   for (const name of session.outputNames) {
@@ -227,16 +224,25 @@ async function runOnce(slot: Slot, bitmap: ImageBitmap, bbox: readonly number[])
   ctx.drawImage(bitmap, 0, 0)
   const rgba = ctx.getImageData(0, 0, MODEL_W, MODEL_H).data
   imageDataToTensor(rgba, slot.input)
+  // Serialize the GPU part only — preprocessing above and decoding below run
+  // concurrently across slots; run() calls must not.
+  const prev = gpuLock
+  let release!: () => void
+  gpuLock = new Promise((r) => (release = r))
+  await prev
   const t0 = performance.now()
-  const outputs = await slot.session.run({
-    [inputName]: new ort.Tensor("float32", slot.input, [1, 3, MODEL_H, MODEL_W]),
-  })
+  let outputs: Awaited<ReturnType<ort.InferenceSession["run"]>>
+  try {
+    outputs = await slot.session.run({
+      [inputName]: new ort.Tensor("float32", slot.input, [1, 3, MODEL_H, MODEL_W]),
+    })
+  } finally {
+    release()
+  }
   const ms = performance.now() - t0
   inferEma = inferEma === 0 ? ms : inferEma * 0.9 + ms * 0.1
   if (++inferCount % 30 === 0)
-    console.log(
-      `[rtmw3d] ${epUsed}×${slots.length}: ${inferEma.toFixed(0)}ms/inference (~${((1000 / inferEma) * slots.length).toFixed(1)} Hz pipelined)`,
-    )
+    console.log(`[rtmw3d] ${epUsed}: ${inferEma.toFixed(0)}ms GPU/inference (~${(1000 / inferEma).toFixed(1)} Hz ceiling)`)
   return decodeSimCC3D(
     outputs[outX].data as Float32Array,
     outputs[outY].data as Float32Array,
@@ -332,13 +338,16 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
         slot.busy = true
         detect(slot, msg.bitmap, msg.mediaTs, false, seq)
           .catch((err) => {
+            // The empty result keeps the sequence emitter flowing AND settles
+            // the main thread's in-flight accounting — do not ALSO post an
+            // error for this frame (that would decrement pending twice).
+            console.warn("[rtmw3d] frame failed:", err)
             emitOrdered(seq, msg.mediaTs, {
               poseWorldLandmarks: [],
               leftHandWorldLandmarks: [],
               rightHandWorldLandmarks: [],
               faceLandmarks: [],
             })
-            post({ type: "error", message: err instanceof Error ? err.message : String(err) })
           })
           .finally(() => {
             slot.busy = false
