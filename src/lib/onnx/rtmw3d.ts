@@ -553,7 +553,34 @@ export function toWorkerResult(kpts: Float32Array, scores: Float32Array, mpp: nu
   // The measured single points fail exactly where the head basis needs them —
   // occluded far ear, silhouette-following jaw — so ears and eyes are placed
   // by rotating canonical head geometry with the fitted orientation instead.
-  const fit = fitHead(kpts, scores, mpp)
+  //
+  // Anatomy veto: the model paints a FRONTAL face on the back of a turned
+  // head — unlike MediaPipe, whose face detector simply fails there — and a
+  // faithful fit of hallucinated points puts the head 180° backwards on a
+  // turned body. A neck cannot yaw much past ~100° relative to the trunk, so
+  // when the fitted head-forward disagrees with the shoulder-line's trunk-
+  // forward beyond that, every head landmark drops below the solver's
+  // visibility gate instead: the head HOLDS and rides the body's turn.
+  let fit = fitHead(kpts, scores, mpp)
+  let headTrusted = true
+  {
+    // Shoulder line in meters (x is pixels, z is already metric).
+    const sx = (kpts[COCO.left_shoulder * 3] - kpts[COCO.right_shoulder * 3]) * mpp
+    const sz = kpts[COCO.left_shoulder * 3 + 2] - kpts[COCO.right_shoulder * 3 + 2]
+    // Trunk forward = shoulder line × down, in the ground (xz) plane.
+    const fx = sz
+    const fz = -sx
+    if (fit && Math.hypot(fx, fz) > 1e-3) {
+      const hx = -fit.r[2]
+      const hz = -fit.r[8]
+      const cosRel = (fx * hx + fz * hz) / (Math.hypot(fx, fz) * Math.hypot(hx, hz) + 1e-9)
+      if (cosRel < -0.17) headTrusted = false // past ~100° — hallucinated
+    }
+  }
+  if (!headTrusted) {
+    fit = null
+    for (let i = 0; i <= 8; i++) pose[i].visibility = Math.min(pose[i].visibility, 0.2)
+  }
   if (fit) {
     const put = (mp: number, [tx, ty, tz]: readonly [number, number, number]) => {
       const dx = tx - fit.tx

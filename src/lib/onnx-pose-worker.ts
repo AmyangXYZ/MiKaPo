@@ -165,6 +165,13 @@ async function init(): Promise<void> {
       gpuModel,
       { executionProviders: [{ name: "webnn", deviceType: "gpu" } as never], graphOptimizationLevel: "all" },
     ],
+    // The fp16 conversion litters the graph with Cast nodes some WebNN
+    // backends reject — the fp32 original is a separate shot at CoreML.
+    [
+      "webnn-fp32",
+      cpuModel,
+      { executionProviders: [{ name: "webnn", deviceType: "gpu" } as never], graphOptimizationLevel: "all" },
+    ],
     [
       "webgpu+capture",
       gpuModel,
