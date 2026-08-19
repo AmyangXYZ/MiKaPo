@@ -49,6 +49,15 @@ export class OneEuroFilter {
     this.prevTs = null
   }
 
+  /** Change the cutoffs and KEEP the filter's history — the alternative,
+   *  rebuilding the filter, throws away `prev` and lets one raw sample through
+   *  unsmoothed, which is a visible snap on every retune. */
+  retune(minCutoff: number, beta: number, dCutoff: number): void {
+    this.minCutoff = minCutoff
+    this.beta = beta
+    this.dCutoff = dCutoff
+  }
+
   private static smoothing(cutoff: number, dt: number): number {
     const tau = 1 / (2 * Math.PI * cutoff)
     return 1 / (1 + tau / dt)
@@ -60,8 +69,8 @@ export class QuaternionOneEuroFilter {
   private hasPrev = false
   private prevTs = 0
   private speedFilter: OneEuroFilter
-  private readonly minCutoff: number
-  private readonly beta: number
+  private minCutoff: number
+  private beta: number
   /** Fastest rotation treated as real, radians/second.
    *
    *  Set against what a joint actually does, not what is comfortable: 30 rad/s
@@ -186,6 +195,13 @@ export class QuaternionOneEuroFilter {
     this.prevSpeed = 0
     this.speedFilter.reset()
   }
+
+  /** Retune without losing history (see OneEuroFilter.retune). */
+  retune(minCutoff: number, beta: number, dCutoff: number): void {
+    this.minCutoff = minCutoff
+    this.beta = beta
+    this.speedFilter.retune(dCutoff, 0, dCutoff)
+  }
 }
 
 /** Three One-Euro filters for a position, with the same physical plausibility
@@ -216,6 +232,13 @@ export class Vec3OneEuroFilter {
     this.fx = new OneEuroFilter(minCutoff, beta, dCutoff)
     this.fy = new OneEuroFilter(minCutoff, beta, dCutoff)
     this.fz = new OneEuroFilter(minCutoff, beta, dCutoff)
+  }
+
+  /** Retune without losing history (see OneEuroFilter.retune). */
+  retune(minCutoff: number, beta: number, dCutoff: number): void {
+    this.fx.retune(minCutoff, beta, dCutoff)
+    this.fy.retune(minCutoff, beta, dCutoff)
+    this.fz.retune(minCutoff, beta, dCutoff)
   }
 
   filterInto(x: number, y: number, z: number, ts: number, out: Vec3): Vec3 {

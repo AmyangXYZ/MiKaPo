@@ -354,16 +354,18 @@ export class Solver {
   private smoothing = { minCutoff: 1.5, beta: 1.5, dCutoff: 4.0 }
 
   /**
-   * Retune smoothing. Existing filters are dropped so the new values take effect
-   * on the next frame rather than only on bones that appear later — a filter
-   * carries its cutoffs from construction.
+   * Retune smoothing. Live filters are retuned IN PLACE — dropping them (the
+   * old approach) also dropped their history, so the next sample passed through
+   * raw and every retune cost a visible snap. That made rate-adaptive smoothing
+   * unusable; now it is free.
    */
   setSmoothing(minCutoff: number, beta: number, dCutoff?: number): void {
     this.smoothing = { ...this.smoothing, minCutoff, beta, dCutoff: dCutoff ?? this.smoothing.dCutoff }
-    this.filters = {}
-    // Position filters carry the same cutoffs and must be rebuilt too, or the
-    // IK targets keep smoothing at the old settings while the rotations change.
-    this.moveFilters = {}
+    const { dCutoff: d } = this.smoothing
+    for (const key of Object.keys(this.filters)) this.filters[key].retune(minCutoff, beta, d)
+    // Position filters carry the same cutoffs, or the IK targets and body
+    // height keep smoothing at the old settings while the rotations change.
+    for (const key of Object.keys(this.moveFilters)) this.moveFilters[key].retune(minCutoff, beta, d)
   }
 
   /** The live smoothing settings, so an offline pass can match them. */

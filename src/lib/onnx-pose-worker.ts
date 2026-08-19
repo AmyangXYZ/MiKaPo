@@ -297,19 +297,26 @@ async function runOnce(slot: Slot, bitmap: ImageBitmap, bbox: readonly number[])
 // solver's filters and the tween assume monotonic media time.
 let seqNext = 0
 let seqEmit = 0
-const held = new Map<number, { mediaTs: number; result: ReturnType<typeof toWorkerResult>; echoSeq?: number }>()
+interface HeldResult {
+  mediaTs: number
+  result: ReturnType<typeof toWorkerResult>
+  echoSeq?: number
+  tracker?: { bbox: number[] | null; mpp: number | null }
+}
+const held = new Map<number, HeldResult>()
 
 function emitOrdered(
   seq: number,
   mediaTs: number,
   result: ReturnType<typeof toWorkerResult>,
   echoSeq?: number,
+  tracker?: { bbox: number[] | null; mpp: number | null },
 ): void {
-  held.set(seq, { mediaTs, result, echoSeq })
+  held.set(seq, { mediaTs, result, echoSeq, tracker })
   while (held.has(seqEmit)) {
     const h = held.get(seqEmit)!
     held.delete(seqEmit)
-    post({ type: "result", mediaTs: h.mediaTs, result: h.result, seq: h.echoSeq })
+    post({ type: "result", mediaTs: h.mediaTs, result: h.result, seq: h.echoSeq, tracker: h.tracker })
     seqEmit++
   }
 }
@@ -321,7 +328,17 @@ async function detect(
   still: boolean,
   seq: number,
   echoSeq?: number,
+  shared?: { bbox: number[] | null; mpp: number | null },
 ): Promise<void> {
+  // When the main thread carries tracker state (parallel engines), it is the
+  // authority: two engines each keeping their own crop box and scale means
+  // alternating frames are cropped and scaled slightly differently, and the
+  // solver turns that into a limb angle that oscillates at the alternation
+  // rate — a vibration no amount of filtering can distinguish from motion.
+  if (shared) {
+    trackedBbox = shared.bbox
+    if (shared.mpp) metersPerPixel = shared.mpp
+  }
   const w = bitmap.width
   const h = bitmap.height
   let bbox = still ? null : trackedBbox
@@ -361,7 +378,10 @@ async function detect(
     metersPerPixel = 1.7 / Math.max(1, bbox[3] - bbox[1])
   }
 
-  emitOrdered(seq, mediaTs, toWorkerResult(decoded.kpts, decoded.scores, metersPerPixel), echoSeq)
+  emitOrdered(seq, mediaTs, toWorkerResult(decoded.kpts, decoded.scores, metersPerPixel), echoSeq, {
+    bbox: trackedBbox,
+    mpp: metersPerPixel,
+  })
 }
 
 const EMPTY_RESULT = () => ({
@@ -400,7 +420,7 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
         // GPU. detect() closes the bitmap and emits in sequence order.
         const seq = seqNext++
         slot.busy = true
-        detect(slot, msg.bitmap, msg.mediaTs, false, seq, msg.seq)
+        detect(slot, msg.bitmap, msg.mediaTs, false, seq, msg.seq, msg.tracker)
           .catch((err) => {
             // The empty result keeps the sequence emitter flowing AND settles
             // the main thread's in-flight accounting — do not ALSO post an

@@ -10,7 +10,16 @@ export type PoseWorkerRequest =
   | { type: "mode"; running: "VIDEO" | "IMAGE" }
   // `seq`: main-thread global sequence — echoed in the result so frames split
   // across parallel workers can be re-woven in order (ONNX engine only).
-  | { type: "video"; bitmap: ImageBitmap; ts: number; mediaTs: number; seq?: number }
+  // `tracker`: crop box + scale carried by the MAIN thread, so parallel
+  // engines share one tracker instead of drifting into per-engine versions.
+  | {
+      type: "video"
+      bitmap: ImageBitmap
+      ts: number
+      mediaTs: number
+      seq?: number
+      tracker?: { bbox: number[] | null; mpp: number | null }
+    }
   | { type: "image"; bitmap: ImageBitmap; mediaTs: number }
   | { type: "reset" }
 
@@ -31,7 +40,14 @@ export type PoseWorkerResponse =
   // carries why the preferred providers refused; `parallel` is how many frames
   // the worker can hold in flight (pipelined sessions).
   | { type: "ready"; ep?: string; note?: string; parallel?: number }
-  | { type: "result"; result: PoseWorkerResult; mediaTs: number; seq?: number }
+  | {
+      type: "result"
+      result: PoseWorkerResult
+      mediaTs: number
+      seq?: number
+      /** Updated tracker state for the main thread to carry to the next frame. */
+      tracker?: { bbox: number[] | null; mpp: number | null }
+    }
   | { type: "error"; message: string }
   // Model download progress — only the ONNX engine sends this (its model is
   // ~370MB against MediaPipe's ~30MB; a silent load that long reads as a hang).

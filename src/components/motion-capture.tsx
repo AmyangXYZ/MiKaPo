@@ -64,8 +64,12 @@ export const MotionCapture = ({
   const workerRef = useRef<Worker | null>(null)
   // All live workers — mode/reset must reach every engine, not just the primary.
   const enginesRef = useRef<{ worker: Worker }[]>([])
+  /** Clears the shared crop/scale tracker — set by the worker-pool effect. */
+  const resetTrackerRef = useRef<() => void>(() => {})
   const broadcast = (msg: PoseWorkerRequest) => {
     for (const e of enginesRef.current) e.worker.postMessage(msg)
+    // New media means the old crop box and pose cadence describe nothing.
+    if (msg.type === "reset" || msg.type === "mode") resetTrackerRef.current()
   }
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
   // ONNX model download progress (0..1); null once loaded or when unknown.
@@ -217,12 +221,16 @@ export const MotionCapture = ({
   }, [inputMode])
 
   const lastDebugUpdateRef = useRef(0)
-  // Detection results arrive at ~25-35 Hz while the renderer runs at 60 —
-  // tween each pose over the measured inter-result interval (EMA, slight
-  // overlap) so the model is always mid-motion between results instead of
-  // reaching its target early and stepping.
-  const lastResultAtRef = useRef(0)
-  const resultIntervalEmaRef = useRef(33)
+  // Tween length comes from MEDIA time, not arrival time. Two engines finish
+  // out of step, so results land in bursts — a pair milliseconds apart, then a
+  // gap — and an arrival-based estimate reads that pair as a ~5ms interval and
+  // snaps the model through the pose it should have taken 150ms to reach. That
+  // burst-snap IS the jitter. Media time says how much of the take each pose
+  // covers, which is what the tween should span, and it is immune to when the
+  // result happened to come back.
+  const lastMediaTsRef = useRef(-1)
+  const mediaIntervalEmaRef = useRef(120)
+  const smoothingBucketRef = useRef(0)
   const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
     // Throttled React update — feeds only the debug skeleton preview.
     const now = performance.now()
@@ -231,16 +239,29 @@ export const MotionCapture = ({
       setLandmarks(result)
     }
 
-    if (lastResultAtRef.current > 0) {
-      const dt = now - lastResultAtRef.current
-      if (dt < 500) resultIntervalEmaRef.current = resultIntervalEmaRef.current * 0.8 + dt * 0.2
+    const lastMedia = lastMediaTsRef.current
+    if (lastMedia >= 0) {
+      const dt = timestampMs - lastMedia
+      if (dt > 0 && dt < 600) mediaIntervalEmaRef.current = mediaIntervalEmaRef.current * 0.7 + dt * 0.3
     }
-    lastResultAtRef.current = now
-    // 0.9×: finish the tween just before the average next result — chasing with
-    // a longer duration compounds into extra latency and shaved motion peaks.
-    // The cap only binds below ~2.5 Hz: at slow capture rates a snap-and-wait
-    // reads worse than the latency, so let the tween span the real interval.
-    const tweenMs = Math.min(400, resultIntervalEmaRef.current * 0.9)
+    lastMediaTsRef.current = timestampMs
+    const interval = mediaIntervalEmaRef.current
+    // Span the whole interval: the tween re-targets from wherever it has got
+    // to, so a full-length tween is continuous motion, while a short one is
+    // motion followed by a hold — and a hold between two noisy poses is what
+    // reads as vibration.
+    const tweenMs = Math.min(400, Math.max(33, interval))
+
+    // One-Euro rejects noise above its cutoff, but at 6 Hz per-frame noise
+    // aliases down to ~3 Hz — right where a cutoff tuned for 30 Hz capture
+    // lets it through. Lower the cutoff as capture slows: bucketed with wide
+    // edges so it settles, and retuning is now free of state loss.
+    const bucket = interval > 160 ? 2 : interval > 90 ? 1 : 0
+    if (bucket !== smoothingBucketRef.current) {
+      smoothingBucketRef.current = bucket
+      const minCutoff = bucket === 2 ? 0.8 : bucket === 1 ? 1.1 : 1.5
+      solverRef.current.setSmoothing(minCutoff, 1.5)
+    }
 
     if (!modelLoadedRef.current) return
 
@@ -283,6 +304,15 @@ export const MotionCapture = ({
     let sendSeq = 0
     let emitSeq = 0
     const heldResults = new Map<number, { result: PoseWorkerResult; mediaTs: number }>()
+    // One tracker for all engines (crop box + metres-per-pixel), carried here
+    // so parallel workers can't drift into per-engine crops and scales.
+    const tracker: { bbox: number[] | null; mpp: number | null; ts: number } = { bbox: null, mpp: null, ts: -1 }
+    resetTrackerRef.current = () => {
+      tracker.bbox = null
+      tracker.mpp = null
+      tracker.ts = -1
+      lastMediaTsRef.current = -1
+    }
 
     const spawn = (primary: boolean): void => {
       const worker = USE_RTMW3D
@@ -311,6 +341,12 @@ export const MotionCapture = ({
           if (primary) setModelLoadPct(msg.total > 0 ? msg.loaded / msg.total : null)
         } else if (msg.type === "result") {
           eng.inFlight = Math.max(0, eng.inFlight - 1)
+          // Newest measurement wins — a pipelined frame can answer late.
+          if (msg.tracker && msg.mediaTs >= tracker.ts) {
+            tracker.bbox = msg.tracker.bbox
+            tracker.mpp = msg.tracker.mpp
+            tracker.ts = msg.mediaTs
+          }
           // A conversion owns the primary worker while it runs; its awaiting
           // frame takes the reply instead of the live path.
           const awaiting = awaitingRef.current
@@ -384,7 +420,14 @@ export const MotionCapture = ({
             // the workers, even if two bitmap creations resolve out of order.
             const seq = sendSeq++
             target.worker.postMessage(
-              { type: "video", bitmap, ts: performance.now(), mediaTs, seq } satisfies PoseWorkerRequest,
+              {
+                type: "video",
+                bitmap,
+                ts: performance.now(),
+                mediaTs,
+                seq,
+                tracker: { bbox: tracker.bbox, mpp: tracker.mpp },
+              } satisfies PoseWorkerRequest,
               [bitmap],
             )
           })
