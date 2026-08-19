@@ -185,6 +185,11 @@ export function decodeSimCC3D(
 /** Score below which a keypoint is noise for tracking/visibility purposes. */
 export const KPT_THR = 0.3
 
+/** A/B switches for the adapter's corrections, so an offline harness can
+ *  measure what each one costs in smoothness (same purpose as the solver's
+ *  `witnessEnabled` / `bendClampEnabled`). */
+export const adapterFlags = { boneLengthGuard: true, headVeto: true }
+
 /**
  * Next frame's crop box from this frame's keypoints — the single-person
  * replacement for a detector model. Body, feet and hand extents (confident
@@ -523,7 +528,7 @@ const MP_FROM_COCO: [number, number][] = [
  * Face ships empty on this engine (no mesh, and morphs are out of scope).
  */
 export function toWorkerResult(kpts: Float32Array, scores: Float32Array, mpp: number): Rtmw3dResult {
-  enforceBoneLengths(kpts, scores, mpp)
+  if (adapterFlags.boneLengthGuard) enforceBoneLengths(kpts, scores, mpp)
   const bodyVisible =
     (scores[COCO.left_hip] >= KPT_THR || scores[COCO.right_hip] >= KPT_THR) &&
     (scores[COCO.left_shoulder] >= KPT_THR || scores[COCO.right_shoulder] >= KPT_THR)
@@ -577,6 +582,7 @@ export function toWorkerResult(kpts: Float32Array, scores: Float32Array, mpp: nu
       if (cosRel < -0.17) headTrusted = false // past ~100° — hallucinated
     }
   }
+  if (!adapterFlags.headVeto) headTrusted = true
   if (!headTrusted) {
     fit = null
     for (let i = 0; i <= 8; i++) pose[i].visibility = Math.min(pose[i].visibility, 0.2)

@@ -231,6 +231,53 @@ export const MotionCapture = ({
   const lastMediaTsRef = useRef(-1)
   const mediaIntervalEmaRef = useRef(120)
   const smoothingBucketRef = useRef(0)
+  // Measured detection throughput, and the playback rate it buys.
+  const [captureHz, setCaptureHz] = useState(0)
+  const playbackScaleRef = useRef(1)
+  const [playbackScale, setPlaybackScale] = useState(1)
+  const hzWindowRef = useRef<{ count: number; since: number }>({ count: 0, since: 0 })
+  /**
+   * Smoothness is sampling density, not filtering.
+   *
+   * Measured on this dance clip: the same pipeline scores 3.3° of frame-to-
+   * frame non-smoothness at 30 Hz and 13.3° at 6 Hz. The extra is not noise —
+   * it is motion that happened between samples and was never seen. No filter
+   * or tween can restore it, because the information was never captured.
+   *
+   * A FILE, though, does not have to run at 1×. Slowing playback until the
+   * detector sees a frame every ~55ms of media time gives the same sampling
+   * density a 18 Hz capture would, and the preview becomes smooth slow motion
+   * instead of jerky real time. The exported VMD is untouched — conversion
+   * steps every 1/30s frame regardless. A webcam has no such dial, so this
+   * only ever touches video files.
+   */
+  const MEDIA_STEP_TARGET_MS = 55
+  const adaptPlayback = useCallback(() => {
+    const video = videoRef.current
+    const w = hzWindowRef.current
+    const now = performance.now()
+    w.count++
+    if (w.since === 0) {
+      w.since = now
+      return
+    }
+    const span = now - w.since
+    if (span < 700) return
+    const hz = (w.count * 1000) / span
+    w.count = 0
+    w.since = now
+    setCaptureHz(hz)
+    if (!video || inputModeRef.current !== "video" || convertingRef.current) return
+    if (new URLSearchParams(window.location.search).get("realtime") === "1") return
+    const wanted = Math.min(1, Math.max(0.25, (MEDIA_STEP_TARGET_MS * hz) / 1000))
+    // Only move on a real change — nudging playbackRate every second is
+    // audible on the source audio and pointless.
+    if (Math.abs(wanted - playbackScaleRef.current) > 0.06) {
+      playbackScaleRef.current = wanted
+      setPlaybackScale(wanted)
+      video.playbackRate = wanted
+    }
+  }, [])
   const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
     // Throttled React update — feeds only the debug skeleton preview.
     const now = performance.now()
@@ -246,11 +293,13 @@ export const MotionCapture = ({
     }
     lastMediaTsRef.current = timestampMs
     const interval = mediaIntervalEmaRef.current
+    adaptPlayback()
     // Span the whole interval: the tween re-targets from wherever it has got
     // to, so a full-length tween is continuous motion, while a short one is
     // motion followed by a hold — and a hold between two noisy poses is what
-    // reads as vibration.
-    const tweenMs = Math.min(400, Math.max(33, interval))
+    // reads as vibration. The engine tweens on WALL time while the interval is
+    // MEDIA time, so slowed playback stretches the tween to match.
+    const tweenMs = Math.min(400, Math.max(33, interval / playbackScaleRef.current))
 
     // One-Euro rejects noise above its cutoff, but at 6 Hz per-frame noise
     // aliases down to ~3 Hz — right where a cutoff tuned for 30 Hz capture
@@ -276,7 +325,7 @@ export const MotionCapture = ({
       currentMorphWeightsRef.current = faceResult.morphWeights
       applyFaceRef.current(faceResult, tweenMs)
     }
-  }, [])
+  }, [adaptPlayback])
   const handleResultRef = useRef(handleResult)
   handleResultRef.current = handleResult
   const exportVmdRef = useRef(exportVmd)
@@ -504,6 +553,11 @@ export const MotionCapture = ({
       setInputMode("video")
       if (videoRef.current) {
         videoRef.current.currentTime = 0
+        // A new clip re-measures its own pace.
+        videoRef.current.playbackRate = 1
+        playbackScaleRef.current = 1
+        setPlaybackScale(1)
+        hzWindowRef.current = { count: 0, since: 0 }
       }
       setLastMedia("VIDEO")
     }
@@ -705,8 +759,18 @@ export const MotionCapture = ({
         Live
       </span>
     ) : inputMode === "video" ? (
-      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/60">
-        Video
+      <span
+        className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] tabular-nums text-white/60"
+        title={
+          playbackScale < 1
+            ? `Capture runs at ${captureHz.toFixed(0)} Hz, so playback slows to ${playbackScale.toFixed(
+                2,
+              )}× — the tracker then sees the motion densely enough to look smooth. The exported VMD is unaffected (?realtime=1 to disable).`
+            : `Capture ${captureHz.toFixed(0)} Hz`
+        }
+      >
+        {captureHz > 0 ? `${captureHz.toFixed(0)} Hz` : "Video"}
+        {playbackScale < 1 ? ` · ${playbackScale.toFixed(2)}×` : ""}
       </span>
     ) : inputMode === "image" ? (
       <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/60">
