@@ -78,6 +78,8 @@ export const MotionCapture = ({
   // why the better ones refused if it fell back — shown in the badge tooltip.
   const [engineEp, setEngineEp] = useState<string | null>(null)
   const [engineNote, setEngineNote] = useState<string | null>(null)
+  /** How many detection workers are live (each owns a WebGPU device). */
+  const [engineCount, setEngineCount] = useState(1)
   const [landmarks, setLandmarks] = useState<PoseWorkerResult | null>(null)
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
@@ -352,6 +354,13 @@ export const MotionCapture = ({
     enginesRef.current = engines
     let sendSeq = 0
     let emitSeq = 0
+    // Round-trip time per frame, and when each was sent — together they pace
+    // dispatch. Without pacing, a free engine grabs a frame immediately, so
+    // two engines sample the video 8ms apart and then nothing for 150ms:
+    // pairs of near-identical poses separated by jumps. Evenly spaced sends
+    // turn that into a genuinely doubled, evenly sampled rate.
+    const sentAt = new Map<number, number>()
+    let latencyEma = 0
     const heldResults = new Map<number, { result: PoseWorkerResult; mediaTs: number }>()
     // One tracker for all engines (crop box + metres-per-pixel), carried here
     // so parallel workers can't drift into per-engine crops and scales.
@@ -382,14 +391,26 @@ export const MotionCapture = ({
             if (msg.ep) setEngineEp(msg.ep)
             if (msg.note) setEngineNote(msg.note)
             onMediaPipeReadyChangeRef.current?.(true)
-            if (USE_RTMW3D && msg.ep && msg.ep !== "wasm" && engines.length < 2) spawn(false)
+            // A second worker owns a second WebGPU device, which is the only
+            // way two frames actually overlap on the GPU (ORT serialises runs
+            // per device). ?workers=1 turns it off for A/B.
+            const wantWorkers = Number(new URLSearchParams(window.location.search).get("workers") ?? 2)
+            if (USE_RTMW3D && msg.ep && msg.ep !== "wasm" && engines.length < wantWorkers) spawn(false)
           } else {
-            setEngineEp((prev) => (prev && !prev.endsWith("×2") ? `${prev} ×2` : prev))
+            setEngineCount(engines.filter((e) => e.ready).length)
           }
         } else if (msg.type === "progress") {
           if (primary) setModelLoadPct(msg.total > 0 ? msg.loaded / msg.total : null)
         } else if (msg.type === "result") {
           eng.inFlight = Math.max(0, eng.inFlight - 1)
+          if (msg.seq !== undefined) {
+            const t0 = sentAt.get(msg.seq)
+            sentAt.delete(msg.seq)
+            if (t0 !== undefined) {
+              const lat = performance.now() - t0
+              latencyEma = latencyEma === 0 ? lat : latencyEma * 0.8 + lat * 0.2
+            }
+          }
           // Newest measurement wins — a pipelined frame can answer late.
           if (msg.tracker && msg.mediaTs >= tracker.ts) {
             tracker.bbox = msg.tracker.bbox
@@ -446,6 +467,9 @@ export const MotionCapture = ({
         if (now - lastSentAt > 2000) ready.forEach((en) => (en.inFlight = 0))
         else return
       }
+      // Even pacing: one frame every (round-trip ÷ engines), so N engines
+      // sample the source N× as often at EQUAL spacing rather than in bursts.
+      if (latencyEma > 0 && now - lastSentAt < latencyEma / ready.length - 4) return
       const video = videoRef.current
       if (video && video.videoWidth > 0 && video.currentTime !== lastVideoTime) {
         // Pacing: the in-flight guard above plus the new-frame gate (source
@@ -468,6 +492,7 @@ export const MotionCapture = ({
             // seq assigned at SEND so the weave order matches what reaches
             // the workers, even if two bitmap creations resolve out of order.
             const seq = sendSeq++
+            sentAt.set(seq, performance.now())
             target.worker.postMessage(
               {
                 type: "video",
@@ -759,18 +784,8 @@ export const MotionCapture = ({
         Live
       </span>
     ) : inputMode === "video" ? (
-      <span
-        className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] tabular-nums text-white/60"
-        title={
-          playbackScale < 1
-            ? `Capture runs at ${captureHz.toFixed(0)} Hz, so playback slows to ${playbackScale.toFixed(
-                2,
-              )}× — the tracker then sees the motion densely enough to look smooth. The exported VMD is unaffected (?realtime=1 to disable).`
-            : `Capture ${captureHz.toFixed(0)} Hz`
-        }
-      >
-        {captureHz > 0 ? `${captureHz.toFixed(0)} Hz` : "Video"}
-        {playbackScale < 1 ? ` · ${playbackScale.toFixed(2)}×` : ""}
+      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/60">
+        Video
       </span>
     ) : inputMode === "image" ? (
       <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/60">
@@ -843,7 +858,12 @@ export const MotionCapture = ({
                       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300/80"
                       : "border-amber-500/40 bg-amber-500/15 text-amber-300/90"
                   }`}
-                  title={`ONNX execution provider: ${engineEp}${engineNote ? ` — ${engineNote}` : ""}`}
+                  title={
+                    `${engineEp} · ${engineCount} worker${engineCount > 1 ? "s" : ""} · ` +
+                    `${captureHz.toFixed(0)} Hz capture` +
+                    (playbackScale < 1 ? ` · playback ${playbackScale.toFixed(2)}× so tracking keeps up` : "") +
+                    (engineNote ? `\n${engineNote}` : "")
+                  }
                 >
                   {engineEp}
                 </span>
