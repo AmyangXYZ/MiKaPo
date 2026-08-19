@@ -1,6 +1,6 @@
 import { Landmark } from "@mediapipe/tasks-vision"
 import { Quat, Vec3 } from "reze-engine"
-import { QuaternionOneEuroFilter, Vec3OneEuroFilter } from "./filters"
+import { OneEuroFilter, QuaternionOneEuroFilter, Vec3OneEuroFilter } from "./filters"
 import { HandIndexTable, PoseLandmarksTable } from "./landmarks"
 
 /** One of the model's rigid bodies, flattened for the solver's clearance pass. */
@@ -236,9 +236,39 @@ const BASIS_LANDMARKS: Record<string, string[]> = {
 const MIN_VISIBILITY = 0.35
 
 // Witness blend: sine of the child-joint bend angle below which roll is
-// unobservable (straight limb) and we fall back to shortest-arc.
+// unobservable (straight limb) and we hold the roll we already had.
 const WITNESS_FADE_LO = 0.15
 const WITNESS_FADE_HI = 0.35
+
+// How much of the roll a FALLBACK witness may claim. The thigh's fallback is
+// the foot — the noisiest landmark on the body (measured: ~11°/frame of
+// direction jitter against the thigh's own 2°) — and handing it full authority
+// made the thigh the shakiest bone in the rig at 5.7× its own input's jitter.
+// It still resolves the standing-leg twist, at half the volume.
+const ROLL_FALLBACK_TRUST = 0.5
+
+// A witness basis is built from the child segment's component across the bone
+// axis. As a limb passes through straight that component crosses zero and comes
+// out the other side, so the basis rotates 180° about the axis while the limb
+// itself did nothing — a full spin of the arm and everything hanging off it.
+// (Measured: a 178° single-frame flip on 右腕.) Past this much disagreement
+// with the roll we already have, the witness is not seeing a fast twist, it is
+// crossing that singularity: fade it out instead of following it.
+const ROLL_FLIP_SUSPECT_DEG = 110
+const ROLL_FLIP_KILL_DEG = 165
+
+// Roll deserves a slower filter than the direction it rides on.
+//
+// Nothing measures roll: it is inferred from a CHILD segment's bearing, so it
+// carries that landmark's noise at full strength while the bone's own
+// direction stays steady. Measured on a dance clip, the witness doubles arm
+// roll jitter (3.9° → 7.8°/frame) and nearly triples the thigh's (2.4° →
+// 6.5°), which the shin then inherits — a whole leg spinning about itself
+// while pointing exactly where it should. A limb's real roll also changes far
+// more slowly than its swing, so a cutoff this much lower costs almost nothing
+// in tracking and takes most of that noise out.
+const ROLL_CUTOFF_SCALE = 0.3
+const ROLL_BETA_SCALE = 0.25
 
 // Canonical rest bend planes in parent-local frame. MMD rest poses have straight
 // elbows/knees, so the rest child direction can't serve as the roll reference —
@@ -324,6 +354,13 @@ const sQ2 = Quat.identity()
 // first is still waiting to be blended.
 const sQ3 = Quat.identity()
 const sQ4 = Quat.identity()
+// Roll continuity: last frame's local rotation, the same direction carrying
+// last frame's roll, and scratch for extracting it.
+const sPrev = Quat.identity()
+const sHeld = Quat.identity()
+const sRoll = Quat.identity()
+const sRollA = Quat.identity()
+const sPrevDir = Vec3.zeros()
 
 export class Solver {
   private pose: Landmark[] | null = null
@@ -338,6 +375,11 @@ export class Solver {
   private filteredWorlds: Record<string, Quat> = {}
   private moveFilters: Record<string, Vec3OneEuroFilter> = {}
   private filters: Record<string, QuaternionOneEuroFilter> = {}
+  /** Slow filters for the roll component alone (see ROLL_CUTOFF_SCALE). */
+  private rollFilters: Record<string, OneEuroFilter> = {}
+  /** Last unwrapped roll angle per bone, so the scalar filter sees a
+   *  continuous signal instead of a saw-tooth at ±180°. */
+  private rollPrev: Record<string, number> = {}
   // One-Euro tuning: minCutoff governs rest-pose jitter suppression (lower =
   // calmer, laggier at rest); beta governs how fast the cutoff opens with
   // speed (higher = fast/dramatic moves track tighter with less lag and less
@@ -366,6 +408,8 @@ export class Solver {
     // Position filters carry the same cutoffs, or the IK targets and body
     // height keep smoothing at the old settings while the rotations change.
     for (const key of Object.keys(this.moveFilters)) this.moveFilters[key].retune(minCutoff, beta, d)
+    for (const key of Object.keys(this.rollFilters))
+      this.rollFilters[key].retune(minCutoff * ROLL_CUTOFF_SCALE, beta * ROLL_BETA_SCALE, d)
   }
 
   /** The live smoothing settings, so an offline pass can match them. */
@@ -414,6 +458,8 @@ export class Solver {
 
   reset(): void {
     this.heldDy = 0
+    for (const key of Object.keys(this.rollFilters)) this.rollFilters[key].reset()
+    this.rollPrev = {}
     for (const key of Object.keys(this.filters)) this.filters[key].reset()
     // Position filters too, or a second still eases out of the first one's
     // body placement instead of simply being that pose.
@@ -951,6 +997,12 @@ export class Solver {
         this.filters[def.name] = f
       }
       f.filterInto(this.locals[def.name], timestampMs, this.outputByName[def.name].rotation)
+      // Witness-driven bones carry an inferred roll — smooth that axis harder
+      // than the swing it rides on. Children inherit the result, so calming
+      // the thigh calms the whole leg.
+      if (def.kind === "direction" && def.witness) {
+        this.stabilizeRoll(def.name, timestampMs, this.outputByName[def.name].rotation)
+      }
     }
 
     for (const name of SHOULDER_BONES) {
@@ -1064,9 +1116,13 @@ export class Solver {
     if (sDir.length() < 1e-6) return
     sDir.normalizeInPlace()
 
+    const useWitness = !!def.witness && this.witnessEnabled
+    // Roll continuity needs what this bone was doing a frame ago, and `out` IS
+    // the stored local — snapshot before overwriting it.
+    if (useWitness) sPrev.set(out)
     Quat.fromUnitVectorsInto(this.getRef(def.name), sDir, out)
 
-    if (def.witness && this.witnessEnabled) this.applyWitness(def, parentWorld, out)
+    if (useWitness) this.applyWitness(def, parentWorld, out)
     if (def.bend && this.bendClampEnabled) Solver.clampBend(def.bend, out)
   }
 
@@ -1107,10 +1163,21 @@ export class Solver {
    * the roll actually is (≈ sine of the child bend angle).
    */
   private applyWitness(def: DirectionDef, parentWorld: Quat | null, out: Quat): void {
+    // Base the blend on the roll we ALREADY HAVE, not on shortest-arc's zero.
+    //
+    // Shortest-arc carries no roll, so every frame the witness fades out the
+    // limb was yanked back to an arbitrary roll and then pushed away again as
+    // it faded in — motion invented entirely by the fade, on a bone whose own
+    // landmark direction is the steadiest in the rig. Holding the previous
+    // roll makes the unobservable degree of freedom *stay put*, which is the
+    // only honest thing to do with a quantity nothing is measuring.
+    Solver.holdRoll(this.getRef(def.name), sPrev, out, sHeld)
+
     const primary = this.witnessSolution(def, def.witness!, WITNESS_REST[def.name] ?? null, parentWorld, sQ3)
-    // How much of the roll the primary witness could actually see. Whatever it
-    // leaves is the room the fallback may claim.
-    const t = Solver.witnessFade(primary)
+    // How much of the roll the primary witness could actually see, discounted
+    // if it disagrees so violently that it is crossing its own singularity.
+    const t = Solver.witnessFade(primary) * Solver.flipGuard(sHeld, sQ3)
+    out.set(sHeld)
     if (t > 0) {
       if (Quat.dot(out, sQ3) < 0) sQ3.setXYZW(-sQ3.x, -sQ3.y, -sQ3.z, -sQ3.w)
       Quat.nlerpInto(out, sQ3, t, out)
@@ -1122,10 +1189,79 @@ export class Solver {
     const room = 1 - t
     if (room <= 1e-3 || !def.rollFallback) return
     const fallback = this.witnessSolution(def, def.rollFallback, this.getRef(def.rollFallback), parentWorld, sQ4)
-    const t2 = Solver.witnessFade(fallback) * room
+    const t2 = Solver.witnessFade(fallback) * room * ROLL_FALLBACK_TRUST * Solver.flipGuard(out, sQ4)
     if (t2 <= 0) return
     if (Quat.dot(out, sQ4) < 0) sQ4.setXYZW(-sQ4.x, -sQ4.y, -sQ4.z, -sQ4.w)
     Quat.nlerpInto(out, sQ4, t2, out)
+  }
+
+  /**
+   * `swing` (a zero-roll rotation of `ref` onto the live direction) wearing the
+   * roll `prev` had, written into `outQ`.
+   *
+   * `prev` maps ref onto wherever the bone pointed last frame, so its own swing
+   * is recoverable, and what is left over is the roll — the part no direction
+   * measurement constrains.
+   */
+  private static holdRoll(ref: Vec3, prev: Quat, swing: Quat, outQ: Quat): void {
+    Quat.rotateVecInto(prev, ref, sPrevDir)
+    if (sPrevDir.length() < 1e-6) {
+      outQ.set(swing)
+      return
+    }
+    sPrevDir.normalizeInPlace()
+    Quat.fromUnitVectorsInto(ref, sPrevDir, sRollA)
+    Quat.conjugateInto(sRollA, sRoll)
+    Quat.multiplyInto(sRoll, prev, sRollA) // roll of the previous frame, about ref
+    Quat.multiplyInto(swing, sRollA, outQ)
+  }
+
+  /**
+   * Low-pass the roll of `q` in place, leaving its direction untouched.
+   *
+   * Swing-twist about the bone's own rest axis: the twist angle is filtered as
+   * a scalar (unwrapped, so ±180° is not a cliff) and the difference is applied
+   * back as a rotation about that same axis, which composes on the right and so
+   * cannot disturb where the bone points.
+   */
+  private stabilizeRoll(name: string, timestampMs: number, q: Quat): void {
+    const ref = this.getRef(name)
+    if (!ref) return
+    const proj = q.x * ref.x + q.y * ref.y + q.z * ref.z
+    let angle = 2 * Math.atan2(proj, q.w)
+    // Continue the previous branch rather than jumping a full turn.
+    const prev = this.rollPrev[name]
+    if (prev !== undefined) {
+      while (angle - prev > Math.PI) angle -= 2 * Math.PI
+      while (angle - prev < -Math.PI) angle += 2 * Math.PI
+    }
+    let f = this.rollFilters[name]
+    if (!f) {
+      f = new OneEuroFilter(
+        this.smoothing.minCutoff * ROLL_CUTOFF_SCALE,
+        this.smoothing.beta * ROLL_BETA_SCALE,
+        this.smoothing.dCutoff,
+      )
+      this.rollFilters[name] = f
+    }
+    const smoothed = f.filter(angle, timestampMs)
+    this.rollPrev[name] = angle
+    const delta = smoothed - angle
+    if (Math.abs(delta) < 1e-5) return
+    Quat.fromAxisAngleInto(ref.x, ref.y, ref.z, delta, sRoll)
+    Quat.multiplyInto(q, sRoll, sRollA)
+    q.set(sRollA)
+  }
+
+  /** 1 while a witness broadly agrees with the roll in hand, fading to 0 as it
+   *  approaches the half-turn that means its basis flipped, not that the limb
+   *  spun. */
+  private static flipGuard(current: Quat, candidate: Quat): number {
+    const dot = Math.min(1, Math.abs(Quat.dot(current, candidate)))
+    const deg = 2 * Math.acos(dot) * (180 / Math.PI)
+    if (deg <= ROLL_FLIP_SUSPECT_DEG) return 1
+    if (deg >= ROLL_FLIP_KILL_DEG) return 0
+    return (ROLL_FLIP_KILL_DEG - deg) / (ROLL_FLIP_KILL_DEG - ROLL_FLIP_SUSPECT_DEG)
   }
 
   /** Smoothstep from "roll unobservable" to "witness fully trusted". */
