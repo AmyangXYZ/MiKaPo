@@ -75,6 +75,13 @@ function fileStem(filename: string) {
 }
 
 /** webkitdirectory attrs — cast kept outside JSX so `<` is not parsed as a tag */
+/** Bones the debug inset's "applied" panel reads live from the engine. */
+const LIVE_POSE_BONES = [
+  "下半身", "上半身", "首", "頭", "左目", "右目",
+  "左肩", "左腕", "左ひじ", "左手首", "右肩", "右腕", "右ひじ", "右手首",
+  "左足", "左ひざ", "左足首", "左つま先", "右足", "右ひざ", "右足首", "右つま先",
+] as const
+
 const pmxFolderInputAttrs = {
   webkitdirectory: "",
   mozdirectory: "",
@@ -329,6 +336,21 @@ export default function MainScene() {
     return () => window.removeEventListener("keydown", onKey)
   }, [dismissPmxPickDialog, pmxPickDialogOpen])
 
+  // The applied truth: where the ENGINE actually put the bones this frame,
+  // after tween, IK and appends — what the debug inset's second panel draws.
+  // When this diverges from the raw landmarks, the fault is in solving or
+  // application; when it matches and the render looks wrong, it is skinning.
+  const getLivePose = useCallback((): { name: string; x: number; y: number; z: number }[] => {
+    const model = modelRef.current
+    if (!model) return []
+    const out: { name: string; x: number; y: number; z: number }[] = []
+    for (const name of LIVE_POSE_BONES) {
+      const p = model.getBoneWorldPosition(name)
+      if (p) out.push({ name, x: p.x, y: p.y, z: p.z })
+    }
+    return out
+  }, [])
+
   const applyPose = useCallback(
     (boneStates: BoneState[], tweenMs: number = 30) => {
       if (!engineRef.current) return
@@ -562,6 +584,7 @@ export default function MainScene() {
 
       <MotionCapture
         applyPose={applyPose}
+        getLivePose={getLivePose}
         applyFace={applyFace}
         modelLoaded={modelLoaded}
         onMediaPipeReadyChange={setMediaPipeReady}

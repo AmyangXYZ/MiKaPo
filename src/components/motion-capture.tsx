@@ -32,6 +32,7 @@ const DEBUG_PREVIEW_INTERVAL_MS = 66
 export const MotionCapture = ({
   applyPose,
   applyFace,
+  getLivePose,
   modelLoaded,
   onMediaPipeReadyChange,
   resetModel,
@@ -42,6 +43,8 @@ export const MotionCapture = ({
 }: {
   applyPose: (boneStates: BoneState[], tweenMs: number) => void
   applyFace: (faceResult: FaceSolverResult, tweenMs: number) => void
+  /** Live engine bone positions, for the debug inset's "applied" panel. */
+  getLivePose?: () => { name: string; x: number; y: number; z: number }[]
   modelLoaded: boolean
   onMediaPipeReadyChange?: (ready: boolean) => void
   resetModel?: () => void
@@ -171,6 +174,17 @@ export const MotionCapture = ({
     if (restPose) solverRef.current.calibrate(restPose)
     if (restPose && colliders) solverRef.current.calibrateColliders(colliders, restPose)
   }, [restPose, colliders])
+
+  // Bisection switches: ?ground=0 ?clear=0 ?rhythm=0 ?witness=0 disable one
+  // post-solve stage each, to isolate which one breaks a pose live.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search)
+    const s = solverRef.current
+    if (p.get("ground") === "0") s.groundingGain = 0
+    if (p.get("clear") === "0") s.clearanceSlack = 1e9
+    if (p.get("rhythm") === "0") s.shoulderRatio = 0
+    if (p.get("witness") === "0") s.witnessEnabled = false
+  }, [])
 
   // Resolve blendshape→morph mappings against the loaded model's morph list.
   useEffect(() => {
@@ -799,9 +813,10 @@ export const MotionCapture = ({
           )}
         </div>
 
-        {/* Raw-landmark preview — desktop only. Drag to orbit. */}
+        {/* Landmarks (left) vs applied engine pose (right) — desktop only.
+            Drag to orbit both. */}
         <div className="hidden aspect-[16/10] border-t border-white/5 bg-black/50 md:block">
-          <DebugScene landmarks={landmarks} />
+          <DebugScene landmarks={landmarks} getLivePose={getLivePose} />
         </div>
       </div>
     </div>

@@ -52,7 +52,22 @@ function lerpResults(a: LmSet, b: LmSet, t: number): LmSet {
   }
 }
 
-function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
+/** Applied-pose connections, by MMD bone name (drawn when both ends exist). */
+const BONE_PAIRS: [string, string][] = [
+  ["下半身", "上半身"], ["上半身", "首"], ["首", "頭"],
+  ["上半身", "左肩"], ["左肩", "左腕"], ["左腕", "左ひじ"], ["左ひじ", "左手首"],
+  ["上半身", "右肩"], ["右肩", "右腕"], ["右腕", "右ひじ"], ["右ひじ", "右手首"],
+  ["下半身", "左足"], ["左足", "左ひざ"], ["左ひざ", "左足首"], ["左足首", "左つま先"],
+  ["下半身", "右足"], ["右足", "右ひざ"], ["右ひざ", "右足首"], ["右足首", "右つま先"],
+]
+
+function DebugScene({
+  landmarks,
+  getLivePose,
+}: {
+  landmarks: PoseWorkerResult | null
+  getLivePose?: () => { name: string; x: number; y: number; z: number }[]
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const yawRef = useRef(0)
   const dragRef = useRef<{ x: number; yaw: number } | null>(null)
@@ -73,6 +88,8 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
     currRef.current = landmarks
     currAtRef.current = now
   }
+  const getLivePoseRef = useRef(getLivePose)
+  getLivePoseRef.current = getLivePose
 
   const drawRef = useRef<() => void>(() => {})
   useEffect(() => {
@@ -86,7 +103,7 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
 
     // World landmarks are hip-centred meters; a standing body spans ~1.9m, so
     // a fixed scale frames it without per-frame zoom jitter.
-    const scale = H / 2.1
+    const scale = H / 2.4
     const PITCH = 0.26
     const cosP = Math.cos(PITCH)
     const sinP = Math.sin(PITCH)
@@ -102,16 +119,26 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
       const yaw = yawRef.current
       const cos = Math.cos(yaw)
       const sin = Math.sin(yaw)
-      // MediaPipe world convention is y down, z away — flip y for drawing.
-      const project = (lm: { x: number; y: number; z: number }): [number, number] => {
-        const rx = lm.x * cos - lm.z * sin
-        const rz = lm.x * sin + lm.z * cos
-        return [W / 2 + rx * scale, H / 2 - (-lm.y * cosP - rz * sinP) * scale]
-      }
+      const half = W / 2
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, W, H)
+      ctx.strokeStyle = "rgba(255,255,255,0.08)"
+      ctx.beginPath()
+      ctx.moveTo(half, 0)
+      ctx.lineTo(half, H)
+      ctx.stroke()
+      ctx.fillStyle = "rgba(255,255,255,0.35)"
+      ctx.font = "9px monospace"
+      ctx.fillText("landmarks", 4, 10)
+      ctx.fillText("applied", half + 4, 10)
 
+      // Left: raw landmarks (MediaPipe world: y down, z away — flip y).
+      const project = (lm: { x: number; y: number; z: number }): [number, number] => {
+        const rx = lm.x * cos - lm.z * sin
+        const rz = lm.x * sin + lm.z * cos
+        return [half / 2 + rx * scale, H / 2 - (-lm.y * cosP - rz * sinP) * scale]
+      }
       const drawSet = (
         pts: { x: number; y: number; z: number; visibility?: number }[] | undefined,
         connections: [number, number][],
@@ -140,10 +167,55 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
           ctx.fill()
         }
       }
-
       drawSet(lms?.poseWorldLandmarks[0], POSE_CONNECTIONS, "rgba(102,153,255,0.95)", "rgba(102,153,255,0.3)")
       drawSet(lms?.leftHandWorldLandmarks[0], HAND_CONNECTIONS, "rgba(120,220,180,0.9)", "rgba(120,220,180,0.3)")
       drawSet(lms?.rightHandWorldLandmarks[0], HAND_CONNECTIONS, "rgba(255,180,120,0.9)", "rgba(255,180,120,0.3)")
+
+      // Right: the engine's live bone positions (MMD model space, y UP).
+      const live = getLivePoseRef.current?.()
+      if (live && live.length > 0) {
+        const byName: Record<string, { x: number; y: number; z: number }> = {}
+        let minY = Infinity
+        let maxY = -Infinity
+        let cx = 0
+        for (const b of live) {
+          byName[b.name] = b
+          if (b.y < minY) minY = b.y
+          if (b.y > maxY) maxY = b.y
+        }
+        const hips = byName["下半身"]
+        if (hips) cx = hips.x
+        const cz = hips?.z ?? 0
+        const s2 = (H * 0.8) / Math.max(1e-3, maxY - minY)
+        const cy = (minY + maxY) / 2
+        const proj2 = (p: { x: number; y: number; z: number }): [number, number] => {
+          const x = p.x - cx
+          const z = p.z - cz
+          const rx = x * cos - z * sin
+          const rz = x * sin + z * cos
+          return [half + half / 2 + rx * s2, H / 2 - ((p.y - cy) * cosP - rz * sinP) * s2]
+        }
+        ctx.strokeStyle = "rgba(255,210,100,0.95)"
+        ctx.lineWidth = 1.5
+        for (const [a, b] of BONE_PAIRS) {
+          const pa = byName[a]
+          const pb = byName[b]
+          if (!pa || !pb) continue
+          const qa = proj2(pa)
+          const qb = proj2(pb)
+          ctx.beginPath()
+          ctx.moveTo(qa[0], qa[1])
+          ctx.lineTo(qb[0], qb[1])
+          ctx.stroke()
+        }
+        ctx.fillStyle = "rgba(255,255,255,0.9)"
+        for (const b of live) {
+          const q = proj2(b)
+          ctx.beginPath()
+          ctx.arc(q[0], q[1], 1.7, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      }
     }
     // Continuous redraw: interpolation means every frame differs. The canvas
     // is small; this costs far less than the WebGPU viewport beside it.
