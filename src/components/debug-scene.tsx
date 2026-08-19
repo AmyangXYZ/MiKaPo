@@ -29,12 +29,50 @@ const HAND_CONNECTIONS: [number, number][] = [
   [0, 17],
 ]
 
+type LmSet = PoseWorkerResult
+
+/** Lerp every landmark between two results; t clamps at 1 (hold). */
+function lerpResults(a: LmSet, b: LmSet, t: number): LmSet {
+  const lerpArr = (pa?: { x: number; y: number; z: number; visibility?: number }[], pb?: typeof pa) => {
+    if (!pa || !pb || pa.length !== pb.length) return pb ? [pb] : []
+    return [
+      pb.map((q, i) => ({
+        x: pa[i].x + (q.x - pa[i].x) * t,
+        y: pa[i].y + (q.y - pa[i].y) * t,
+        z: pa[i].z + (q.z - pa[i].z) * t,
+        visibility: q.visibility,
+      })),
+    ]
+  }
+  return {
+    poseWorldLandmarks: lerpArr(a.poseWorldLandmarks[0], b.poseWorldLandmarks[0]) as LmSet["poseWorldLandmarks"],
+    leftHandWorldLandmarks: lerpArr(a.leftHandWorldLandmarks[0], b.leftHandWorldLandmarks[0]) as LmSet["leftHandWorldLandmarks"],
+    rightHandWorldLandmarks: lerpArr(a.rightHandWorldLandmarks[0], b.rightHandWorldLandmarks[0]) as LmSet["rightHandWorldLandmarks"],
+    faceLandmarks: [],
+  }
+}
+
 function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const yawRef = useRef(0)
   const dragRef = useRef<{ x: number; yaw: number } | null>(null)
-  const landmarksRef = useRef(landmarks)
-  landmarksRef.current = landmarks
+  // Interpolation state: the inset tweens between the last two results over
+  // the measured arrival interval, so it moves at display rate like the main
+  // scene instead of stepping at capture rate.
+  const prevRef = useRef<PoseWorkerResult | null>(null)
+  const currRef = useRef<PoseWorkerResult | null>(null)
+  const currAtRef = useRef(0)
+  const intervalRef = useRef(200)
+  if (landmarks && landmarks !== currRef.current) {
+    const now = performance.now()
+    if (currRef.current) {
+      const dt = now - currAtRef.current
+      if (dt < 2000) intervalRef.current = intervalRef.current * 0.7 + dt * 0.3
+    }
+    prevRef.current = currRef.current
+    currRef.current = landmarks
+    currAtRef.current = now
+  }
 
   const drawRef = useRef<() => void>(() => {})
   useEffect(() => {
@@ -54,7 +92,13 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
     const sinP = Math.sin(PITCH)
 
     drawRef.current = () => {
-      const lms = landmarksRef.current
+      const curr = currRef.current
+      const prev = prevRef.current
+      let lms = curr
+      if (curr && prev) {
+        const t = Math.min(1, (performance.now() - currAtRef.current) / Math.max(16, intervalRef.current))
+        lms = lerpResults(prev, curr, t)
+      }
       const yaw = yawRef.current
       const cos = Math.cos(yaw)
       const sin = Math.sin(yaw)
@@ -101,12 +145,16 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
       drawSet(lms?.leftHandWorldLandmarks[0], HAND_CONNECTIONS, "rgba(120,220,180,0.9)", "rgba(120,220,180,0.3)")
       drawSet(lms?.rightHandWorldLandmarks[0], HAND_CONNECTIONS, "rgba(255,180,120,0.9)", "rgba(255,180,120,0.3)")
     }
-    drawRef.current()
+    // Continuous redraw: interpolation means every frame differs. The canvas
+    // is small; this costs far less than the WebGPU viewport beside it.
+    let raf = 0
+    const loop = () => {
+      raf = requestAnimationFrame(loop)
+      drawRef.current()
+    }
+    loop()
+    return () => cancelAnimationFrame(raf)
   }, [])
-
-  useEffect(() => {
-    drawRef.current()
-  }, [landmarks])
 
   return (
     <canvas

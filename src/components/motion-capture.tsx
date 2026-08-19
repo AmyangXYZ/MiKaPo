@@ -248,9 +248,11 @@ export const MotionCapture = ({
   useEffect(() => {
     let rafId = 0
     let ready = false
-    // In-flight guard: never queue a second frame while the worker is busy —
-    // detection latency then paces capture instead of building a frame backlog.
-    let pending = false
+    // In-flight guard: at most `maxParallel` frames with the worker at once
+    // (1 for MediaPipe/wasm; 2 when the ONNX worker pipelines two sessions) —
+    // detection latency paces capture instead of building a frame backlog.
+    let pending = 0
+    let maxParallel = 1
     let pendingSince = 0
 
     const worker = USE_RTMW3D
@@ -264,6 +266,7 @@ export const MotionCapture = ({
       const msg = e.data
       if (msg.type === "ready") {
         ready = true
+        maxParallel = msg.parallel ?? 1
         setMediaPipeReady(true)
         setModelLoadPct(null)
         if (msg.ep) setEngineEp(msg.ep)
@@ -272,7 +275,7 @@ export const MotionCapture = ({
       } else if (msg.type === "progress") {
         setModelLoadPct(msg.total > 0 ? msg.loaded / msg.total : null)
       } else if (msg.type === "result") {
-        pending = false
+        pending = Math.max(0, pending - 1)
         // A conversion owns the worker while it runs; its awaiting frame takes
         // the reply instead of the live path.
         const awaiting = awaitingRef.current
@@ -283,7 +286,7 @@ export const MotionCapture = ({
           handleResultRef.current(msg.result, msg.mediaTs)
         }
       } else if (msg.type === "error") {
-        pending = false
+        pending = Math.max(0, pending - 1)
         const awaiting = awaitingRef.current
         if (awaiting) {
           awaitingRef.current = null
@@ -304,27 +307,30 @@ export const MotionCapture = ({
       // it for the worker and re-solve the same frames.
       if (!ready || convertingRef.current) return
       const now = performance.now()
-      if (pending) {
-        // Recover if the worker dropped a frame (e.g. mode switch mid-flight).
-        if (now - pendingSince > 2000) pending = false
+      if (pending >= maxParallel) {
+        // Recover if the worker dropped frames (e.g. mode switch mid-flight).
+        if (now - pendingSince > 2000) pending = 0
         else return
       }
       const video = videoRef.current
       if (video && video.videoWidth > 0 && video.currentTime !== lastVideoTime) {
-        // Pacing: the in-flight guard above (one frame in the worker at a time)
-        // plus the new-frame gate (source fps) — no artificial rate floor, so
-        // result cadence stays as steady as the worker can deliver.
+        // Pacing: the in-flight guard above plus the new-frame gate (source
+        // fps) — no artificial rate floor, so result cadence stays as steady
+        // as the worker can deliver.
         lastVideoTime = video.currentTime
         // Media time drives the solver's smoothing filters so pause/seek
         // reset them correctly; detectForVideo gets wall time because it
         // requires a monotonically increasing clock.
         const mediaTs = video.currentTime * 1000
-        pending = true
+        pending++
         pendingSince = now
-        createImageBitmap(video)
+        // Downscale at capture: the crop model input is only 288×384, so a
+        // 1080p transfer + draw per frame is pure overhead.
+        const resize = video.videoWidth > 800 ? { resizeWidth: 720 } : undefined
+        createImageBitmap(video, resize as ImageBitmapOptions)
           .then((bitmap) => send({ type: "video", bitmap, ts: performance.now(), mediaTs }, [bitmap]))
           .catch(() => {
-            pending = false
+            pending = Math.max(0, pending - 1)
           })
       } else if (
         imageRef.current &&
@@ -335,12 +341,12 @@ export const MotionCapture = ({
       ) {
         const img = imageRef.current
         lastImgSrc = img.src
-        pending = true
+        pending++
         pendingSince = now
         createImageBitmap(img)
           .then((bitmap) => send({ type: "image", bitmap, mediaTs: performance.now() }, [bitmap]))
           .catch(() => {
-            pending = false
+            pending = Math.max(0, pending - 1)
           })
       }
     }

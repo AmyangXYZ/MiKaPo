@@ -316,13 +316,17 @@ const FACE_FIT_POINTS: [number, number, number, number][] = [
   [8, 0, 0.078, -0.048], // chin — silhouette-stable at every yaw
 ]
 
-/** Synthetic outputs in the same template frame. */
+/** Synthetic outputs in the same template frame. The EARS must sit at EYE
+ * height (the tragus does, anatomically) — the 頭 basis reads ear−eye as its
+ * "back" axis and the 首 calibration builds its reference from eye bones, so
+ * ears placed lower pitch the whole head/neck forward by a constant ~30°.
+ * (Found by rendering the solved skeleton: 頭 read ~40° on neutral frames.) */
 const HEAD_SYNTH = {
   nose: [0, 0.004, -0.072],
   leftEye: [0.031, -0.03, -0.036],
   rightEye: [-0.031, -0.03, -0.036],
-  leftEar: [0.069, 0.005, 0.015],
-  rightEar: [-0.069, 0.005, 0.015],
+  leftEar: [0.069, -0.03, 0.015],
+  rightEar: [-0.069, -0.03, 0.015],
 } as const
 
 /**

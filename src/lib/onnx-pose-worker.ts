@@ -45,6 +45,17 @@ ort.env.webgpu.powerPreference = "high-performance"
 ort.env.wasm.numThreads = Math.min(8, (navigator.hardwareConcurrency || 4) - 1)
 
 let session: ort.InferenceSession | null = null
+/** GPU providers get a second session so two frames pipeline: one frame's
+ * pre/post-processing overlaps the other's GPU time. Each slot owns its
+ * canvas and input buffer — sharing them across in-flight frames is a race. */
+interface Slot {
+  session: ort.InferenceSession
+  canvas: OffscreenCanvas
+  ctx: OffscreenCanvasRenderingContext2D
+  input: Float32Array
+  busy: boolean
+}
+let slots: Slot[] = []
 let inputName = ""
 // Output names resolved to axes after warmup: y is the unique MODEL_H×2-bin
 // tensor; x and z share a bin count (width and depth dims are both 288) and
@@ -61,9 +72,18 @@ let trackedTs = 0
 /** EMA'd meters-per-pixel — camera distance changes slowly. */
 let metersPerPixel: number | null = null
 
-const canvas = new OffscreenCanvas(MODEL_W, MODEL_H)
-const ctx = canvas.getContext("2d", { willReadFrequently: true })!
 const inputData = new Float32Array(3 * MODEL_W * MODEL_H)
+
+const makeSlot = (s: ort.InferenceSession): Slot => {
+  const canvas = new OffscreenCanvas(MODEL_W, MODEL_H)
+  return {
+    session: s,
+    canvas,
+    ctx: canvas.getContext("2d", { willReadFrequently: true })!,
+    input: new Float32Array(3 * MODEL_W * MODEL_H),
+    busy: false,
+  }
+}
 
 const post = (msg: PoseWorkerResponse) => (self as unknown as Worker).postMessage(msg)
 
@@ -167,6 +187,19 @@ async function init(): Promise<void> {
   }
   if (!session || !warm) throw new Error("no execution provider worked")
   inputName = session.inputNames[0]
+  slots = [makeSlot(session)]
+  // A second session doubles GPU weight memory but lets two frames overlap.
+  // GPU providers only — a second wasm session just thrashes the same cores.
+  if (epUsed !== "wasm") {
+    try {
+      const opts = attempts.find(([n]) => n === epUsed)![2]
+      const s2 = await ort.InferenceSession.create(await gpuModel(), opts)
+      await s2.run({ [inputName]: new ort.Tensor("float32", inputData, [1, 3, MODEL_H, MODEL_W]) })
+      slots.push(makeSlot(s2))
+    } catch (e) {
+      console.warn("[rtmw3d] second session failed (staying single):", e)
+    }
+  }
 
   const xz: string[] = []
   for (const name of session.outputNames) {
@@ -177,30 +210,33 @@ async function init(): Promise<void> {
   if (!outY || xz.length !== 2) throw new Error(`unexpected model outputs: ${session.outputNames.join(", ")}`)
   ;[outX, outZ] = xz
 
-  post({ type: "ready", ep: epUsed, note: epNote || undefined })
+  post({ type: "ready", ep: epUsed, note: epNote || undefined, parallel: slots.length })
 }
 
 let inferEma = 0
 let inferCount = 0
 
-async function runOnce(bitmap: ImageBitmap, bbox: readonly number[]): Promise<Decoded> {
+async function runOnce(slot: Slot, bitmap: ImageBitmap, bbox: readonly number[]): Promise<Decoded> {
   const cs = bboxCenterScale(bbox)
   const warp = warpTransform(cs)
+  const { ctx } = slot
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.fillStyle = "#000"
   ctx.fillRect(0, 0, MODEL_W, MODEL_H)
   ctx.setTransform(warp.k, 0, 0, warp.k, warp.tx, warp.ty)
   ctx.drawImage(bitmap, 0, 0)
   const rgba = ctx.getImageData(0, 0, MODEL_W, MODEL_H).data
-  imageDataToTensor(rgba, inputData)
+  imageDataToTensor(rgba, slot.input)
   const t0 = performance.now()
-  const outputs = await session!.run({
-    [inputName]: new ort.Tensor("float32", inputData, [1, 3, MODEL_H, MODEL_W]),
+  const outputs = await slot.session.run({
+    [inputName]: new ort.Tensor("float32", slot.input, [1, 3, MODEL_H, MODEL_W]),
   })
   const ms = performance.now() - t0
   inferEma = inferEma === 0 ? ms : inferEma * 0.9 + ms * 0.1
   if (++inferCount % 30 === 0)
-    console.log(`[rtmw3d] ${epUsed}: ${inferEma.toFixed(0)}ms/inference (~${(1000 / inferEma).toFixed(1)} Hz)`)
+    console.log(
+      `[rtmw3d] ${epUsed}×${slots.length}: ${inferEma.toFixed(0)}ms/inference (~${((1000 / inferEma) * slots.length).toFixed(1)} Hz pipelined)`,
+    )
   return decodeSimCC3D(
     outputs[outX].data as Float32Array,
     outputs[outY].data as Float32Array,
@@ -209,32 +245,52 @@ async function runOnce(bitmap: ImageBitmap, bbox: readonly number[]): Promise<De
   )
 }
 
-async function detect(bitmap: ImageBitmap, mediaTs: number, still: boolean): Promise<void> {
+// Two frames can be in flight; results must still leave IN ORDER — the
+// solver's filters and the tween assume monotonic media time.
+let seqNext = 0
+let seqEmit = 0
+const held = new Map<number, { mediaTs: number; result: ReturnType<typeof toWorkerResult> }>()
+
+function emitOrdered(seq: number, mediaTs: number, result: ReturnType<typeof toWorkerResult>): void {
+  held.set(seq, { mediaTs, result })
+  while (held.has(seqEmit)) {
+    const h = held.get(seqEmit)!
+    held.delete(seqEmit)
+    post({ type: "result", mediaTs: h.mediaTs, result: h.result })
+    seqEmit++
+  }
+}
+
+async function detect(slot: Slot, bitmap: ImageBitmap, mediaTs: number, still: boolean, seq: number): Promise<void> {
   const w = bitmap.width
   const h = bitmap.height
   let bbox = still ? null : trackedBbox
-  let decoded = await runOnce(bitmap, bbox ?? [0, 0, w, h])
+  let decoded = await runOnce(slot, bitmap, bbox ?? [0, 0, w, h])
 
   // A still gets a second pass: crop to the person found in the full frame,
   // which is what a detector would have provided.
   if (still) {
     const refined = bboxFromKeypoints(decoded.kpts, decoded.scores, w, h)
-    if (refined) decoded = await runOnce(bitmap, refined)
+    if (refined) decoded = await runOnce(slot, bitmap, refined)
   } else if (bbox && bodyScore(decoded.scores) < 0.45) {
     // The tracked crop went bad (subject moved out of the stale box, and a
     // bad crop feeds a worse box). Re-detect on the full frame NOW rather
     // than emitting a broken pose and hoping next frame recovers.
-    decoded = await runOnce(bitmap, [0, 0, w, h])
+    decoded = await runOnce(slot, bitmap, [0, 0, w, h])
     bbox = null
   }
+  bitmap.close()
 
   // The next crop must cover wherever the subject can move before the next
-  // detection — the box is used one inference later, so its margin grows with
-  // the measured capture interval (a dancer covers about a body-width per
-  // second; ~1.2×dt of box size keeps them inside).
-  const dtSec = trackedTs > 0 ? Math.min(1, Math.max(0, (mediaTs - trackedTs) / 1000)) : 0.1
-  trackedBbox = bboxFromKeypoints(decoded.kpts, decoded.scores, w, h, 0.1 + 1.2 * dtSec)
-  trackedTs = mediaTs
+  // detection — the box is used one-to-two inferences later, so its margin
+  // grows with the time since ITS OWN frame (a dancer covers about a
+  // body-width per second). A pipelined completion can land out of order;
+  // only ever track forward in media time.
+  if (mediaTs >= trackedTs) {
+    const dtSec = trackedTs > 0 ? Math.min(1, Math.max(0, (mediaTs - trackedTs) / 1000)) : 0.1
+    trackedBbox = bboxFromKeypoints(decoded.kpts, decoded.scores, w, h, 0.1 + 1.2 * dtSec)
+    trackedTs = mediaTs
+  }
 
   const estimate = estimateMetersPerPixel(decoded.kpts, decoded.scores)
   if (estimate) {
@@ -242,10 +298,10 @@ async function detect(bitmap: ImageBitmap, mediaTs: number, still: boolean): Pro
   } else if (metersPerPixel === null) {
     // Bootstrap from the crop: its height is a padded person, roughly 1.7m.
     bbox = trackedBbox ?? [0, 0, w, h]
-    metersPerPixel = 1.7 / Math.max(1, (bbox[3] - bbox[1]))
+    metersPerPixel = 1.7 / Math.max(1, bbox[3] - bbox[1])
   }
 
-  post({ type: "result", mediaTs, result: toWorkerResult(decoded.kpts, decoded.scores, metersPerPixel) })
+  emitOrdered(seq, mediaTs, toWorkerResult(decoded.kpts, decoded.scores, metersPerPixel))
 }
 
 self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
@@ -264,13 +320,42 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
         trackedTs = 0
         metersPerPixel = null
         break
-      case "video":
-        if (session && runningMode === "VIDEO") await detect(msg.bitmap, msg.mediaTs, false)
-        msg.bitmap.close()
+      case "video": {
+        const slot = slots.find((s) => !s.busy)
+        if (!slot || runningMode !== "VIDEO") {
+          msg.bitmap.close()
+          break
+        }
+        // Fire-and-forget: a second frame may start while this one is on the
+        // GPU. detect() closes the bitmap and emits in sequence order.
+        const seq = seqNext++
+        slot.busy = true
+        detect(slot, msg.bitmap, msg.mediaTs, false, seq)
+          .catch((err) => {
+            emitOrdered(seq, msg.mediaTs, {
+              poseWorldLandmarks: [],
+              leftHandWorldLandmarks: [],
+              rightHandWorldLandmarks: [],
+              faceLandmarks: [],
+            })
+            post({ type: "error", message: err instanceof Error ? err.message : String(err) })
+          })
+          .finally(() => {
+            slot.busy = false
+          })
         break
+      }
       case "image":
-        if (session && runningMode === "IMAGE") await detect(msg.bitmap, msg.mediaTs, true)
-        msg.bitmap.close()
+        if (slots[0] && runningMode === "IMAGE") {
+          slots[0].busy = true
+          try {
+            await detect(slots[0], msg.bitmap, msg.mediaTs, true, seqNext++)
+          } finally {
+            slots[0].busy = false
+          }
+        } else {
+          msg.bitmap.close()
+        }
         break
     }
   } catch (err) {
