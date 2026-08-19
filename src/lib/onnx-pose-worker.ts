@@ -262,19 +262,31 @@ async function runOnce(slot: Slot, bitmap: ImageBitmap, bbox: readonly number[])
 // solver's filters and the tween assume monotonic media time.
 let seqNext = 0
 let seqEmit = 0
-const held = new Map<number, { mediaTs: number; result: ReturnType<typeof toWorkerResult> }>()
+const held = new Map<number, { mediaTs: number; result: ReturnType<typeof toWorkerResult>; echoSeq?: number }>()
 
-function emitOrdered(seq: number, mediaTs: number, result: ReturnType<typeof toWorkerResult>): void {
-  held.set(seq, { mediaTs, result })
+function emitOrdered(
+  seq: number,
+  mediaTs: number,
+  result: ReturnType<typeof toWorkerResult>,
+  echoSeq?: number,
+): void {
+  held.set(seq, { mediaTs, result, echoSeq })
   while (held.has(seqEmit)) {
     const h = held.get(seqEmit)!
     held.delete(seqEmit)
-    post({ type: "result", mediaTs: h.mediaTs, result: h.result })
+    post({ type: "result", mediaTs: h.mediaTs, result: h.result, seq: h.echoSeq })
     seqEmit++
   }
 }
 
-async function detect(slot: Slot, bitmap: ImageBitmap, mediaTs: number, still: boolean, seq: number): Promise<void> {
+async function detect(
+  slot: Slot,
+  bitmap: ImageBitmap,
+  mediaTs: number,
+  still: boolean,
+  seq: number,
+  echoSeq?: number,
+): Promise<void> {
   const w = bitmap.width
   const h = bitmap.height
   let bbox = still ? null : trackedBbox
@@ -314,8 +326,15 @@ async function detect(slot: Slot, bitmap: ImageBitmap, mediaTs: number, still: b
     metersPerPixel = 1.7 / Math.max(1, bbox[3] - bbox[1])
   }
 
-  emitOrdered(seq, mediaTs, toWorkerResult(decoded.kpts, decoded.scores, metersPerPixel))
+  emitOrdered(seq, mediaTs, toWorkerResult(decoded.kpts, decoded.scores, metersPerPixel), echoSeq)
 }
+
+const EMPTY_RESULT = () => ({
+  poseWorldLandmarks: [],
+  leftHandWorldLandmarks: [],
+  rightHandWorldLandmarks: [],
+  faceLandmarks: [],
+})
 
 self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
   const msg = e.data
@@ -337,24 +356,22 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
         const slot = slots.find((s) => !s.busy)
         if (!slot || runningMode !== "VIDEO") {
           msg.bitmap.close()
+          // A dropped frame must still answer, or the main thread's sequence
+          // weaver waits on this seq forever.
+          if (msg.seq !== undefined) post({ type: "result", mediaTs: msg.mediaTs, result: EMPTY_RESULT(), seq: msg.seq })
           break
         }
         // Fire-and-forget: a second frame may start while this one is on the
         // GPU. detect() closes the bitmap and emits in sequence order.
         const seq = seqNext++
         slot.busy = true
-        detect(slot, msg.bitmap, msg.mediaTs, false, seq)
+        detect(slot, msg.bitmap, msg.mediaTs, false, seq, msg.seq)
           .catch((err) => {
             // The empty result keeps the sequence emitter flowing AND settles
             // the main thread's in-flight accounting — do not ALSO post an
             // error for this frame (that would decrement pending twice).
             console.warn("[rtmw3d] frame failed:", err)
-            emitOrdered(seq, msg.mediaTs, {
-              poseWorldLandmarks: [],
-              leftHandWorldLandmarks: [],
-              rightHandWorldLandmarks: [],
-              faceLandmarks: [],
-            })
+            emitOrdered(seq, msg.mediaTs, EMPTY_RESULT(), msg.seq)
           })
           .finally(() => {
             slot.busy = false

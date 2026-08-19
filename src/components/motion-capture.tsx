@@ -62,6 +62,11 @@ export const MotionCapture = ({
   const imageInputRef = useRef<HTMLInputElement>(null)
   const videoInputRef = useRef<HTMLInputElement>(null)
   const workerRef = useRef<Worker | null>(null)
+  // All live workers — mode/reset must reach every engine, not just the primary.
+  const enginesRef = useRef<{ worker: Worker }[]>([])
+  const broadcast = (msg: PoseWorkerRequest) => {
+    for (const e of enginesRef.current) e.worker.postMessage(msg)
+  }
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
   // ONNX model download progress (0..1); null once loaded or when unknown.
   const [modelLoadPct, setModelLoadPct] = useState<number | null>(null)
@@ -261,56 +266,84 @@ export const MotionCapture = ({
   // on it; this loop only snapshots frames (createImageBitmap) and ships them.
   useEffect(() => {
     let rafId = 0
-    let ready = false
-    // In-flight guard: at most `maxParallel` frames with the worker at once
-    // (1 for MediaPipe/wasm; 2 when the ONNX worker pipelines two sessions) —
-    // detection latency paces capture instead of building a frame backlog.
-    let pending = 0
-    let maxParallel = 1
-    let pendingSince = 0
+    let lastSentAt = 0
 
-    const worker = USE_RTMW3D
-      ? new Worker(new URL("../lib/onnx-pose-worker.ts", import.meta.url))
-      : new Worker(new URL("../lib/pose-worker.ts", import.meta.url))
-    workerRef.current = worker
-    const send = (msg: PoseWorkerRequest, transfer?: Transferable[]) =>
-      worker.postMessage(msg, transfer ?? [])
-
-    worker.onmessage = (e: MessageEvent<PoseWorkerResponse>) => {
-      const msg = e.data
-      if (msg.type === "ready") {
-        ready = true
-        maxParallel = msg.parallel ?? 1
-        setMediaPipeReady(true)
-        setModelLoadPct(null)
-        if (msg.ep) setEngineEp(msg.ep)
-        if (msg.note) setEngineNote(msg.note)
-        onMediaPipeReadyChangeRef.current?.(true)
-      } else if (msg.type === "progress") {
-        setModelLoadPct(msg.total > 0 ? msg.loaded / msg.total : null)
-      } else if (msg.type === "result") {
-        pending = Math.max(0, pending - 1)
-        // A conversion owns the worker while it runs; its awaiting frame takes
-        // the reply instead of the live path.
-        const awaiting = awaitingRef.current
-        if (awaiting) {
-          awaitingRef.current = null
-          awaiting(msg.result)
-        } else if (msg.result.poseWorldLandmarks[0]) {
-          handleResultRef.current(msg.result, msg.mediaTs)
-        }
-      } else if (msg.type === "error") {
-        pending = Math.max(0, pending - 1)
-        const awaiting = awaitingRef.current
-        if (awaiting) {
-          awaitingRef.current = null
-          awaiting(null)
-        }
-        console.error("Pose worker error:", msg.message)
-      }
+    // Engine pool. One worker normally; when the ONNX engine lands on a GPU
+    // provider, a SECOND worker spawns with its own WebGPU device — ORT-web
+    // serializes runs per device, so a second device is the only way two
+    // frames actually overlap on the GPU. Results are re-woven by `seq`.
+    interface Engine {
+      worker: Worker
+      inFlight: number
+      parallel: number
+      ready: boolean
     }
-    worker.onerror = (e) => console.error("Failed to initialize pose worker:", e.message)
-    send({ type: "init" })
+    const engines: Engine[] = []
+    enginesRef.current = engines
+    let sendSeq = 0
+    let emitSeq = 0
+    const heldResults = new Map<number, { result: PoseWorkerResult; mediaTs: number }>()
+
+    const spawn = (primary: boolean): void => {
+      const worker = USE_RTMW3D
+        ? new Worker(new URL("../lib/onnx-pose-worker.ts", import.meta.url))
+        : new Worker(new URL("../lib/pose-worker.ts", import.meta.url))
+      const eng: Engine = { worker, inFlight: 0, parallel: 1, ready: false }
+      engines.push(eng)
+      if (primary) workerRef.current = worker
+
+      worker.onmessage = (e: MessageEvent<PoseWorkerResponse>) => {
+        const msg = e.data
+        if (msg.type === "ready") {
+          eng.ready = true
+          eng.parallel = msg.parallel ?? 1
+          if (primary) {
+            setMediaPipeReady(true)
+            setModelLoadPct(null)
+            if (msg.ep) setEngineEp(msg.ep)
+            if (msg.note) setEngineNote(msg.note)
+            onMediaPipeReadyChangeRef.current?.(true)
+            if (USE_RTMW3D && msg.ep && msg.ep !== "wasm" && engines.length < 2) spawn(false)
+          } else {
+            setEngineEp((prev) => (prev && !prev.endsWith("×2") ? `${prev} ×2` : prev))
+          }
+        } else if (msg.type === "progress") {
+          if (primary) setModelLoadPct(msg.total > 0 ? msg.loaded / msg.total : null)
+        } else if (msg.type === "result") {
+          eng.inFlight = Math.max(0, eng.inFlight - 1)
+          // A conversion owns the primary worker while it runs; its awaiting
+          // frame takes the reply instead of the live path.
+          const awaiting = awaitingRef.current
+          if (awaiting) {
+            awaitingRef.current = null
+            awaiting(msg.result)
+          } else if (msg.seq !== undefined) {
+            // Weave results from both engines back into send order — the
+            // solver's filters need monotonic media time.
+            heldResults.set(msg.seq, { result: msg.result, mediaTs: msg.mediaTs })
+            while (heldResults.has(emitSeq)) {
+              const h = heldResults.get(emitSeq)!
+              heldResults.delete(emitSeq)
+              if (h.result.poseWorldLandmarks[0]) handleResultRef.current(h.result, h.mediaTs)
+              emitSeq++
+            }
+          } else if (msg.result.poseWorldLandmarks[0]) {
+            handleResultRef.current(msg.result, msg.mediaTs)
+          }
+        } else if (msg.type === "error") {
+          eng.inFlight = Math.max(0, eng.inFlight - 1)
+          const awaiting = awaitingRef.current
+          if (awaiting) {
+            awaitingRef.current = null
+            awaiting(null)
+          }
+          console.error("Pose worker error:", msg.message)
+        }
+      }
+      worker.onerror = (e) => console.error("Failed to initialize pose worker:", e.message)
+      worker.postMessage({ type: "init" } satisfies PoseWorkerRequest)
+    }
+    spawn(true)
 
     let lastVideoTime = -1
     let lastImgSrc = ""
@@ -318,33 +351,45 @@ export const MotionCapture = ({
     const detect = () => {
       rafId = requestAnimationFrame(detect)
       // A conversion steps the video itself; the opportunistic loop would fight
-      // it for the worker and re-solve the same frames.
-      if (!ready || convertingRef.current) return
+      // it for the workers and re-solve the same frames.
+      if (convertingRef.current) return
+      const ready = engines.filter((en) => en.ready)
+      if (ready.length === 0) return
       const now = performance.now()
-      if (pending >= maxParallel) {
-        // Recover if the worker dropped frames (e.g. mode switch mid-flight).
-        if (now - pendingSince > 2000) pending = 0
+      if (ready.every((en) => en.inFlight >= en.parallel)) {
+        // Recover if a worker dropped frames (e.g. mode switch mid-flight).
+        if (now - lastSentAt > 2000) ready.forEach((en) => (en.inFlight = 0))
         else return
       }
       const video = videoRef.current
       if (video && video.videoWidth > 0 && video.currentTime !== lastVideoTime) {
         // Pacing: the in-flight guard above plus the new-frame gate (source
         // fps) — no artificial rate floor, so result cadence stays as steady
-        // as the worker can deliver.
+        // as the workers can deliver.
         lastVideoTime = video.currentTime
         // Media time drives the solver's smoothing filters so pause/seek
-        // reset them correctly; detectForVideo gets wall time because it
-        // requires a monotonically increasing clock.
+        // reset them correctly; `ts` gets wall time (MediaPipe's clock).
         const mediaTs = video.currentTime * 1000
-        pending++
-        pendingSince = now
+        // Least-loaded engine takes the frame.
+        const target = ready.reduce((a, b) => (a.inFlight / a.parallel <= b.inFlight / b.parallel ? a : b))
+        if (target.inFlight >= target.parallel) return
+        target.inFlight++
+        lastSentAt = now
         // Downscale at capture: the crop model input is only 288×384, so a
         // 1080p transfer + draw per frame is pure overhead.
         const resize = video.videoWidth > 800 ? { resizeWidth: 720 } : undefined
         createImageBitmap(video, resize as ImageBitmapOptions)
-          .then((bitmap) => send({ type: "video", bitmap, ts: performance.now(), mediaTs }, [bitmap]))
+          .then((bitmap) => {
+            // seq assigned at SEND so the weave order matches what reaches
+            // the workers, even if two bitmap creations resolve out of order.
+            const seq = sendSeq++
+            target.worker.postMessage(
+              { type: "video", bitmap, ts: performance.now(), mediaTs, seq } satisfies PoseWorkerRequest,
+              [bitmap],
+            )
+          })
           .catch(() => {
-            pending = Math.max(0, pending - 1)
+            target.inFlight = Math.max(0, target.inFlight - 1)
           })
       } else if (
         imageRef.current &&
@@ -355,12 +400,18 @@ export const MotionCapture = ({
       ) {
         const img = imageRef.current
         lastImgSrc = img.src
-        pending++
-        pendingSince = now
+        const primary = engines[0]
+        if (!primary?.ready) return
+        primary.inFlight++
+        lastSentAt = now
         createImageBitmap(img)
-          .then((bitmap) => send({ type: "image", bitmap, mediaTs: performance.now() }, [bitmap]))
+          .then((bitmap) =>
+            primary.worker.postMessage({ type: "image", bitmap, mediaTs: performance.now() } satisfies PoseWorkerRequest, [
+              bitmap,
+            ]),
+          )
           .catch(() => {
-            pending = Math.max(0, pending - 1)
+            primary.inFlight = Math.max(0, primary.inFlight - 1)
           })
       }
     }
@@ -368,7 +419,8 @@ export const MotionCapture = ({
 
     return () => {
       cancelAnimationFrame(rafId)
-      worker.terminate()
+      for (const en of engines) en.worker.terminate()
+      engines.length = 0
       workerRef.current = null
     }
   }, [])
@@ -382,10 +434,10 @@ export const MotionCapture = ({
       solverRef.current.reset()
       faceBlendshapeSolverRef.current.reset()
       // Worker messages are FIFO — the mode switch lands before the next frame.
-      workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
+      broadcast({ type: "mode", running: "IMAGE" })
       // ...and the landmarker forgets the previous still, so this one is solved
       // on its own merits rather than tracked from the last.
-      workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
+      broadcast({ type: "reset" })
       setCurrentImage(url)
       setVideoSrc("")
       setInputMode("image")
@@ -402,7 +454,7 @@ export const MotionCapture = ({
       solverRef.current.reset()
       faceBlendshapeSolverRef.current.reset()
       if (lastMedia === "IMAGE") {
-        workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
+        broadcast({ type: "mode", running: "VIDEO" })
         setCurrentImage("")
       }
       setVideoSrc(url)
@@ -444,7 +496,7 @@ export const MotionCapture = ({
         setIsStreamActive(true)
 
         if (lastMedia === "IMAGE") {
-          workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
+          broadcast({ type: "mode", running: "VIDEO" })
         }
 
         const stream = await navigator.mediaDevices.getUserMedia({ video: true })

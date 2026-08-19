@@ -8,7 +8,9 @@ import { FilesetResolver, HolisticLandmarker, HolisticLandmarkerResult } from "@
 export type PoseWorkerRequest =
   | { type: "init" }
   | { type: "mode"; running: "VIDEO" | "IMAGE" }
-  | { type: "video"; bitmap: ImageBitmap; ts: number; mediaTs: number }
+  // `seq`: main-thread global sequence — echoed in the result so frames split
+  // across parallel workers can be re-woven in order (ONNX engine only).
+  | { type: "video"; bitmap: ImageBitmap; ts: number; mediaTs: number; seq?: number }
   | { type: "image"; bitmap: ImageBitmap; mediaTs: number }
   | { type: "reset" }
 
@@ -29,7 +31,7 @@ export type PoseWorkerResponse =
   // carries why the preferred providers refused; `parallel` is how many frames
   // the worker can hold in flight (pipelined sessions).
   | { type: "ready"; ep?: string; note?: string; parallel?: number }
-  | { type: "result"; result: PoseWorkerResult; mediaTs: number }
+  | { type: "result"; result: PoseWorkerResult; mediaTs: number; seq?: number }
   | { type: "error"; message: string }
   // Model download progress — only the ONNX engine sends this (its model is
   // ~370MB against MediaPipe's ~30MB; a silent load that long reads as a hang).
