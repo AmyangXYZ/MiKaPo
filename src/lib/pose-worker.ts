@@ -18,7 +18,7 @@ export type PoseWorkerRequest =
       ts: number
       mediaTs: number
       seq?: number
-      tracker?: { bbox: number[] | null; mpp: number | null }
+      tracker?: { bbox: number[] | null; mpp: number | null; facing: number }
     }
   | { type: "image"; bitmap: ImageBitmap; mediaTs: number }
   | { type: "reset" }
@@ -46,7 +46,7 @@ export type PoseWorkerResponse =
       mediaTs: number
       seq?: number
       /** Updated tracker state for the main thread to carry to the next frame. */
-      tracker?: { bbox: number[] | null; mpp: number | null }
+      tracker?: { bbox: number[] | null; mpp: number | null; facing: number }
     }
   | { type: "error"; message: string }
   // Model download progress — only the ONNX engine sends this (its model is

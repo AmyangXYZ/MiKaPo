@@ -24,6 +24,8 @@ import {
   bodyScore,
   estimateMetersPerPixel,
   toWorkerResult,
+  setTorsoFacing,
+  getTorsoFacing,
   type Decoded,
 } from "./onnx/rtmw3d"
 
@@ -301,7 +303,7 @@ interface HeldResult {
   mediaTs: number
   result: ReturnType<typeof toWorkerResult>
   echoSeq?: number
-  tracker?: { bbox: number[] | null; mpp: number | null }
+  tracker?: { bbox: number[] | null; mpp: number | null; facing: number }
 }
 const held = new Map<number, HeldResult>()
 
@@ -310,7 +312,7 @@ function emitOrdered(
   mediaTs: number,
   result: ReturnType<typeof toWorkerResult>,
   echoSeq?: number,
-  tracker?: { bbox: number[] | null; mpp: number | null },
+  tracker?: { bbox: number[] | null; mpp: number | null; facing: number },
 ): void {
   held.set(seq, { mediaTs, result, echoSeq, tracker })
   while (held.has(seqEmit)) {
@@ -328,7 +330,7 @@ async function detect(
   still: boolean,
   seq: number,
   echoSeq?: number,
-  shared?: { bbox: number[] | null; mpp: number | null },
+  shared?: { bbox: number[] | null; mpp: number | null; facing: number },
 ): Promise<void> {
   // When the main thread carries tracker state (parallel engines), it is the
   // authority: two engines each keeping their own crop box and scale means
@@ -338,6 +340,7 @@ async function detect(
   if (shared) {
     trackedBbox = shared.bbox
     if (shared.mpp) metersPerPixel = shared.mpp
+    setTorsoFacing(shared.facing)
   }
   const w = bitmap.width
   const h = bitmap.height
@@ -381,6 +384,7 @@ async function detect(
   emitOrdered(seq, mediaTs, toWorkerResult(decoded.kpts, decoded.scores, metersPerPixel, decoded.depth), echoSeq, {
     bbox: trackedBbox,
     mpp: metersPerPixel,
+    facing: getTorsoFacing(),
   })
 }
 

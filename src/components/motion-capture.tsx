@@ -290,10 +290,6 @@ export const MotionCapture = ({
       setPlaybackScale(wanted)
       video.playbackRate = wanted
     }
-    // Slowed audio is collateral, never the point: the slowdown buys the
-    // detector more samples per second of MEDIA, and nobody wants to hear the
-    // track at 0.5×. Full speed keeps its sound.
-    video.muted = wanted < 1
   }, [])
   const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
     // Throttled React update — feeds only the debug skeleton preview.
@@ -379,10 +375,19 @@ export const MotionCapture = ({
     const heldResults = new Map<number, { result: PoseWorkerResult; mediaTs: number }>()
     // One tracker for all engines (crop box + metres-per-pixel), carried here
     // so parallel workers can't drift into per-engine crops and scales.
-    const tracker: { bbox: number[] | null; mpp: number | null; ts: number } = { bbox: null, mpp: null, ts: -1 }
+    // `facing` is the accumulated evidence for which way the torso points; see
+    // snapTorsoDepth. Shared for the same reason the crop box is: two engines
+    // deciding it separately would flip against each other.
+    const tracker: { bbox: number[] | null; mpp: number | null; facing: number; ts: number } = {
+      bbox: null,
+      mpp: null,
+      facing: 0,
+      ts: -1,
+    }
     resetTrackerRef.current = () => {
       tracker.bbox = null
       tracker.mpp = null
+      tracker.facing = 0
       tracker.ts = -1
       lastMediaTsRef.current = -1
     }
@@ -430,6 +435,7 @@ export const MotionCapture = ({
           if (msg.tracker && msg.mediaTs >= tracker.ts) {
             tracker.bbox = msg.tracker.bbox
             tracker.mpp = msg.tracker.mpp
+            tracker.facing = msg.tracker.facing
             tracker.ts = msg.mediaTs
           }
           // A conversion owns the primary worker while it runs; its awaiting
@@ -515,7 +521,7 @@ export const MotionCapture = ({
                 ts: performance.now(),
                 mediaTs,
                 seq,
-                tracker: { bbox: tracker.bbox, mpp: tracker.mpp },
+                tracker: { bbox: tracker.bbox, mpp: tracker.mpp, facing: tracker.facing },
               } satisfies PoseWorkerRequest,
               [bitmap],
             )
@@ -596,7 +602,6 @@ export const MotionCapture = ({
         // A new clip re-measures its own pace.
         videoRef.current.playbackRate = 1
         playbackScaleRef.current = 1
-        videoRef.current.muted = false
         setPlaybackScale(1)
         hzWindowRef.current = { count: 0, since: 0 }
       }

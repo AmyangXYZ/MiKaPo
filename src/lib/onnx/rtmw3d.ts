@@ -238,7 +238,7 @@ export const KPT_THR = 0.3
 /** A/B switches for the adapter's corrections, so an offline harness can
  *  measure what each one costs in smoothness (same purpose as the solver's
  *  `witnessEnabled` / `bendClampEnabled`). */
-export const adapterFlags = { boneLengthGuard: true, headVeto: true, depthShrink: false }
+export const adapterFlags = { boneLengthGuard: true, headVeto: true, depthShrink: false, torsoDepth: true }
 
 /**
  * Decode the depth bin by EXPECTATION over the distribution rather than by its
@@ -566,6 +566,91 @@ export function enforceBoneLengths(
   return corrected
 }
 
+// The torso's two rigid spans. Their 3D length is a body constant, and the
+// depth difference across them IS the body's facing.
+const TORSO_PAIRS: [number, number, number][] = [
+  [COCO.left_shoulder, COCO.right_shoulder, 0.37],
+  [COCO.left_hip, COCO.right_hip, 0.19],
+]
+
+/**
+ * Rebuild the torso's depth from anatomy instead of believing the model's.
+ *
+ * The body's yaw is the depth difference across the shoulders — a 37cm span
+ * measured on the one axis this model cannot measure. What it CAN measure is
+ * where the two shoulders sit in the image, and that is steady. So use the
+ * relation the scale estimator already runs backwards: for a span of known
+ * length L whose image-plane separation is p, the depth separation must be
+ * sqrt(L² − p²). Magnitude from anatomy and the reliable axes; only the SIGN —
+ * which way the body faces — is left to the model.
+ *
+ * Measured on a turn: the model's own shoulder width wandered between 0.07m
+ * and 0.29m frame to frame, swinging trunk yaw over a 50° range (104°…155°)
+ * while the dancer held a steady turn. Rebuilt this way the same frames read
+ * 101, 103, 105, 106, 105, 102, 102, 105, 103, 102 — the turn, and nothing else.
+ *
+ * Shoulders and hips share one facing vote. They can still twist against each
+ * other, by however much their two image separations differ; what they cannot
+ * do is face opposite ways, which is not a pose but a decode error.
+ *
+ * The sign has to be a decision, not a blend: grading it by how strong the
+ * evidence looked THIS frame just moves the jitter into the magnitude (tried;
+ * 19.5°/frame became 22.9°). But taken bare it also cannot be trusted per
+ * frame — one weak reading mid-turn (−0.12m) flipped the whole torso 180°. So
+ * it is decided over TIME, from evidence accumulated across frames. Which way
+ * a body faces is the slowest thing about it: a real turn takes half a second
+ * and carries every frame with it, while a decode error lasts one.
+ *
+ * The running value lives on the main thread and is handed in each frame, like
+ * the crop box and the scale — two engines each keeping their own would flip
+ * against each other, which is worse than either flipping alone.
+ */
+/** How much of the facing evidence survives each frame (≈3-frame memory at
+ *  10Hz — long enough to outlast a bad frame, short enough to follow a turn). */
+const FACING_MEMORY = 0.7
+/** How square-on the shoulders must be before a facing flip is believable. */
+const FACING_FLIP_MIN = 0.7
+let facingEvidence = 0
+/** Seed from the shared tracker before decoding a frame. */
+export function setTorsoFacing(v: number): void {
+  facingEvidence = v
+}
+export function getTorsoFacing(): number {
+  return facingEvidence
+}
+export function snapTorsoDepth(kpts: Float32Array, scores: Float32Array, mpp: number): void {
+  let vote = 0
+  for (const [a, b] of TORSO_PAIRS) {
+    if (scores[a] < KPT_THR || scores[b] < KPT_THR) continue
+    vote += kpts[a * 3 + 2] - kpts[b * 3 + 2]
+  }
+  // How square-on the shoulders are: 1 when the span lies across the image
+  // (facing the camera or away from it), 0 in profile.
+  const [sa, sb, sL] = TORSO_PAIRS[0]
+  const squareOn =
+    Math.hypot((kpts[sa * 3] - kpts[sb * 3]) * mpp, (kpts[sa * 3 + 1] - kpts[sb * 3 + 1]) * mpp) / sL
+  const next = facingEvidence * FACING_MEMORY + vote * (1 - FACING_MEMORY)
+  // A body cannot swap which way it faces without passing through square-on —
+  // it is the same rotation either way, and the far side has to become the near
+  // side somewhere. In profile the reconstructed depth is at its LARGEST, so a
+  // sign change there costs a 180° flip of the whole torso and buys nothing
+  // that is physically possible. Near profile, hold the facing and let the
+  // evidence fade instead.
+  facingEvidence = squareOn < FACING_FLIP_MIN && next * facingEvidence < 0 ? facingEvidence * FACING_MEMORY : next
+  const facing = facingEvidence >= 0 ? 1 : -1
+  for (const [a, b, L] of TORSO_PAIRS) {
+    if (scores[a] < KPT_THR || scores[b] < KPT_THR) continue
+    const dx = (kpts[a * 3] - kpts[b * 3]) * mpp
+    const dy = (kpts[a * 3 + 1] - kpts[b * 3 + 1]) * mpp
+    const p = Math.min(L, Math.hypot(dx, dy))
+    const dz = facing * Math.sqrt(Math.max(0, L * L - p * p))
+    // Keep the span's own depth; replace only how it is split across the pair.
+    const mid = (kpts[a * 3 + 2] + kpts[b * 3 + 2]) / 2
+    kpts[a * 3 + 2] = mid + dz / 2
+    kpts[b * 3 + 2] = mid - dz / 2
+  }
+}
+
 // Limb chains, torso-out: each joint's depth anchor is the joint it hangs off.
 // The torso is deliberately absent — shoulder/hip depth differences ARE the
 // body's turn, and flattening them would take the turn with them.
@@ -697,6 +782,7 @@ export function toWorkerResult(
   depth?: Float32Array,
 ): Rtmw3dResult {
   if (depth && adapterFlags.depthShrink) shrinkUncertainDepth(kpts, scores, depth)
+  if (adapterFlags.torsoDepth) snapTorsoDepth(kpts, scores, mpp)
   if (adapterFlags.boneLengthGuard) enforceBoneLengths(kpts, scores, mpp, depth)
   const bodyVisible =
     (scores[COCO.left_hip] >= KPT_THR || scores[COCO.right_hip] >= KPT_THR) &&
