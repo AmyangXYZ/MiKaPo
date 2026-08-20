@@ -122,6 +122,41 @@ export interface Decoded {
   kpts: Float32Array
   /** K: min of the x/y SimCC max responses (rtmlib's 3D scoring). */
   scores: Float32Array
+  /** K: how much the DEPTH bin is worth believing, 0..1 — see `depthScore`. */
+  depth: Float32Array
+}
+
+// Depth confidence.
+//
+// `scores` is the x/y peak height, and it says nothing at all about z. Measured
+// on a dance clip: body-keypoint z distributions have a half-max width of 25–32
+// bins on average (38–48cm) and a runner-up mode reaching 0.6–0.99 of the peak,
+// while every score stays above 0.6. Two depth hypotheses half a metre apart,
+// argmax picking one, and possibly the other one next frame — which is a joint
+// that teleports in depth at full confidence. So score the shape of the z curve
+// instead of its height: a narrow, single-peaked distribution is a measurement,
+// a wide or bimodal one is the model shrugging.
+const Z_WIDTH_GOOD = 16
+const Z_WIDTH_BAD = 44
+const Z_MODE_GOOD = 0.3
+const Z_MODE_BAD = 0.85
+/** Bins away from the peak before a second maximum counts as a rival mode. */
+const Z_MODE_GAP = 12
+
+function depthScore(simccZ: Float32Array, k: number, bins: number, peak: number, loc: number): number {
+  if (!(peak > 0)) return 0
+  const half = peak * 0.5
+  let width = 0
+  let rival = 0
+  const base = k * bins
+  for (let j = 0; j < bins; j++) {
+    const v = simccZ[base + j]
+    if (v > half) width++
+    if (Math.abs(j - loc) > Z_MODE_GAP && v > rival) rival = v
+  }
+  const sharp = Math.min(1, Math.max(0, (Z_WIDTH_BAD - width) / (Z_WIDTH_BAD - Z_WIDTH_GOOD)))
+  const single = Math.min(1, Math.max(0, (Z_MODE_BAD - rival / peak) / (Z_MODE_BAD - Z_MODE_GOOD)))
+  return sharp * single
 }
 
 /**
@@ -141,6 +176,7 @@ export function decodeSimCC3D(
   const wz = simccZ.length / K
   const kpts = new Float32Array(K * 3)
   const scores = new Float32Array(K)
+  const depth = new Float32Array(K)
   for (let i = 0; i < K; i++) {
     let xLoc = 0
     let xMax = -Infinity
@@ -178,8 +214,9 @@ export function decodeSimCC3D(
     // mapped symmetrically to [-Z_RANGE, +Z_RANGE].
     kpts[i * 3 + 2] = ((zLoc / SIMCC_RATIO) / (wz / SIMCC_RATIO / 2) - 1) * Z_RANGE
     scores[i] = Math.min(xMax, yMax)
+    depth[i] = depthScore(simccZ, i, wz, zMax, zLoc)
   }
-  return { kpts, scores }
+  return { kpts, scores, depth }
 }
 
 /** Score below which a keypoint is noise for tracking/visibility purposes. */
@@ -188,7 +225,7 @@ export const KPT_THR = 0.3
 /** A/B switches for the adapter's corrections, so an offline harness can
  *  measure what each one costs in smoothness (same purpose as the solver's
  *  `witnessEnabled` / `bendClampEnabled`). */
-export const adapterFlags = { boneLengthGuard: true, headVeto: true }
+export const adapterFlags = { boneLengthGuard: true, headVeto: true, depthShrink: false }
 
 /**
  * Next frame's crop box from this frame's keypoints — the single-person
@@ -457,8 +494,15 @@ const BONE_EDGES: [number, number, number][] = [
 
 const LENGTH_TOLERANCE = 1.45
 
-/** Mutates kpts z in place. Ordered torso-out so corrections propagate. */
-export function enforceBoneLengths(kpts: Float32Array, scores: Float32Array, mpp: number): number {
+/** Mutates kpts z in place. Ordered torso-out so corrections propagate.
+ *  `depth` (optional) decides which end wears a correction: the x/y score has no
+ *  bearing on which of the two depths is the wrong one. */
+export function enforceBoneLengths(
+  kpts: Float32Array,
+  scores: Float32Array,
+  mpp: number,
+  depth?: Float32Array,
+): number {
   let corrected = 0
   for (const [a, b, len] of BONE_EDGES) {
     if (scores[a] < KPT_THR || scores[b] < KPT_THR) continue
@@ -470,12 +514,91 @@ export function enforceBoneLengths(kpts: Float32Array, scores: Float32Array, mpp
     if (p2 + dz * dz <= max * max) continue
     const dzMax = Math.sqrt(Math.max(0, max * max - p2))
     const target = Math.sign(dz) * Math.min(Math.abs(dz), dzMax)
-    // The endpoint the model was less sure about wears the correction.
-    if (scores[a] < scores[b]) kpts[a * 3 + 2] = kpts[b * 3 + 2] + target
+    // The endpoint whose DEPTH the model was less sure about wears the
+    // correction — one of the two z values is wrong, and the x/y peak height
+    // does not know which.
+    const ca = depth ? depth[a] : scores[a]
+    const cb = depth ? depth[b] : scores[b]
+    if (ca < cb) kpts[a * 3 + 2] = kpts[b * 3 + 2] + target
     else kpts[b * 3 + 2] = kpts[a * 3 + 2] - target
     corrected++
   }
   return corrected
+}
+
+// Limb chains, torso-out: each joint's depth anchor is the joint it hangs off.
+// The torso is deliberately absent — shoulder/hip depth differences ARE the
+// body's turn, and flattening them would take the turn with them.
+const DEPTH_CHAIN: [number, number][] = [
+  [COCO.left_shoulder, COCO.left_elbow],
+  [COCO.left_elbow, COCO.left_wrist],
+  [COCO.right_shoulder, COCO.right_elbow],
+  [COCO.right_elbow, COCO.right_wrist],
+  [COCO.left_hip, COCO.left_knee],
+  [COCO.left_knee, COCO.left_ankle],
+  [COCO.right_hip, COCO.right_knee],
+  [COCO.right_knee, COCO.right_ankle],
+  [COCO.left_ankle, COCO.left_big_toe],
+  [COCO.left_ankle, COCO.left_small_toe],
+  [COCO.left_ankle, COCO.left_heel],
+  [COCO.right_ankle, COCO.right_big_toe],
+  [COCO.right_ankle, COCO.right_small_toe],
+  [COCO.right_ankle, COCO.right_heel],
+]
+
+/** How much of a joint's own depth a hopeless distribution may cost it. Not 1:
+ *  even a shrug is weak evidence, and a limb genuinely pointing at the camera
+ *  should not be forced flat. */
+const DEPTH_SHRINK_MAX = 0.7
+
+/**
+ * Pull uncertain depths toward the joint they hang off. Mutates kpts z in place.
+ *
+ * When the depth distribution is wide or has two rival modes, the argmax is a
+ * coin toss over ~40cm — and a coin toss is what makes an elbow swing through
+ * the torso on a still frame and flip between takes on a moving one. The
+ * honest answer for a monocular estimate that does not know is "the same depth
+ * as the joint above it", i.e. the limb lies in the image plane: the maximum-
+ * entropy pose, and the one the landmark preview is already showing.
+ *
+ * Runs torso-out, so a corrected elbow anchors the wrist that follows it.
+ *
+ * OFF by default (`adapterFlags.depthShrink`), and here for A/B rather than for
+ * use, because the measurement that motivates it also indicts it: this model's
+ * depth confidence has a MEDIAN of 0.09–0.32 across the body on a real clip, so
+ * applying the pull everywhere it is warranted is not a confidence-weighted
+ * correction but a blanket flattening of the skeleton — which would take the
+ * body's genuine turns and reaches with it. The safe half of the same idea is
+ * already live: `enforceBoneLengths` moves the depth that anatomy CONTRADICTS,
+ * and now picks its endpoint by this score.
+ */
+export function shrinkUncertainDepth(kpts: Float32Array, scores: Float32Array, depth: Float32Array): number {
+  let n = 0
+  for (const [parent, child] of DEPTH_CHAIN) {
+    if (scores[parent] < KPT_THR || scores[child] < KPT_THR) continue
+    const t = (1 - depth[child]) * DEPTH_SHRINK_MAX
+    if (t <= 0.01) continue
+    const cz = kpts[child * 3 + 2]
+    kpts[child * 3 + 2] = cz + (kpts[parent * 3 + 2] - cz) * t
+    n++
+  }
+  // Hand points hang off their own wrist, all 21 of them.
+  for (const [start, wrist] of [
+    [COCO.left_hand, COCO.left_wrist],
+    [COCO.right_hand, COCO.right_wrist],
+  ] as const) {
+    if (scores[wrist] < KPT_THR) continue
+    for (let i = 0; i < 21; i++) {
+      const k = start + i
+      if (scores[k] < KPT_THR) continue
+      const t = (1 - depth[k]) * DEPTH_SHRINK_MAX
+      if (t <= 0.01) continue
+      const cz = kpts[k * 3 + 2]
+      kpts[k * 3 + 2] = cz + (kpts[wrist * 3 + 2] - cz) * t
+      n++
+    }
+  }
+  return n
 }
 
 // MediaPipe pose index ← COCO-WholeBody index, for everything the app reads.
@@ -527,8 +650,14 @@ const MP_FROM_COCO: [number, number][] = [
  *
  * Face ships empty on this engine (no mesh, and morphs are out of scope).
  */
-export function toWorkerResult(kpts: Float32Array, scores: Float32Array, mpp: number): Rtmw3dResult {
-  if (adapterFlags.boneLengthGuard) enforceBoneLengths(kpts, scores, mpp)
+export function toWorkerResult(
+  kpts: Float32Array,
+  scores: Float32Array,
+  mpp: number,
+  depth?: Float32Array,
+): Rtmw3dResult {
+  if (depth && adapterFlags.depthShrink) shrinkUncertainDepth(kpts, scores, depth)
+  if (adapterFlags.boneLengthGuard) enforceBoneLengths(kpts, scores, mpp, depth)
   const bodyVisible =
     (scores[COCO.left_hip] >= KPT_THR || scores[COCO.right_hip] >= KPT_THR) &&
     (scores[COCO.left_shoulder] >= KPT_THR || scores[COCO.right_shoulder] >= KPT_THR)

@@ -44,8 +44,34 @@ type Point = string | [string, string]
 
 interface BasisDef {
   kind: "basis"
-  name: "上半身" | "下半身" | "頭"
+  name: "上半身" | "下半身"
   parent: string | null
+}
+
+/**
+ * 首 and 頭, solved together from one measurement: the head's world orientation.
+ *
+ * The neck used to be a direction bone — shoulder centre → ear centre, against a
+ * rest reference. Two things were wrong with that, and they compounded. The
+ * reference came from the model's EYE bones while the runtime measured EARS, a
+ * constant ~11° of pitch on this rig before any pose; and the vector was
+ * measured from the shoulder centre while 首 actually pivots at the neck base,
+ * so the head undershot its target by the ratio of the two levers (measured:
+ * 2.13u vs 1.3u). Together they put the head 28–44° wrong on every frame of a
+ * real clip — including stills, with no filtering in the loop.
+ *
+ * Orientation has neither problem. The head basis (ears + eyes) already
+ * measures it exactly — 0.0° error against the landmarks on every frame tested
+ * — and it is the most robust head measurement available, being a fit over
+ * several points rather than a difference of two noisy depths across a 20cm
+ * baseline. So: take the head's rotation relative to the chest, give the neck a
+ * share of it, and let the head wear the remainder. Which is what a cervical
+ * spine does, and what an MMD animator poses.
+ */
+interface HeadDef {
+  kind: "head"
+  name: "首" | "頭"
+  parent: string
 }
 
 interface BendLimit {
@@ -118,7 +144,7 @@ interface FingerRatioDef {
   ratio: number
 }
 
-type BoneDef = BasisDef | DirectionDef | TwistDef | FingerRatioDef
+type BoneDef = BasisDef | HeadDef | DirectionDef | TwistDef | FingerRatioDef
 
 const fingerCurl = (side: "左" | "右", finger: string, axis: Vec3, ratios: [number, number]): FingerRatioDef[] => [
   { kind: "fingerRatio", name: `${side}${finger}２`, base: `${side}${finger}１`, bendAxis: axis, ratio: ratios[0] },
@@ -149,15 +175,8 @@ const fingerBase = (side: "左" | "右", source: LandmarkSource, finger: string,
 
 const BONE_DEFS: BoneDef[] = [
   { kind: "basis", name: "上半身", parent: null },
-  {
-    kind: "direction",
-    name: "首",
-    parent: "上半身",
-    source: "pose",
-    from: ["left_shoulder", "right_shoulder"],
-    to: ["left_ear", "right_ear"],
-  },
-  { kind: "basis", name: "頭", parent: "首" },
+  { kind: "head", name: "首", parent: "上半身" },
+  { kind: "head", name: "頭", parent: "首" },
   { kind: "basis", name: "下半身", parent: null },
 
   { kind: "direction", name: "左足", parent: "下半身", source: "pose", from: "left_hip", to: "left_knee", witness: "左ひざ", rollFallback: "左足首" },
@@ -228,8 +247,20 @@ const _clearTo = new Vec3(0, 0, 0)
 const BASIS_LANDMARKS: Record<string, string[]> = {
   上半身: ["left_shoulder", "right_shoulder"],
   下半身: ["left_hip", "right_hip", "left_shoulder", "right_shoulder"],
-  頭: ["left_ear", "right_ear", "left_eye", "right_eye"],
 }
+
+/** The head basis reads these — and 首 is derived from it, so both bones gate on
+ *  the same four points. They used to gate differently, which is how the
+ *  adapter's "this face is hallucinated" veto ended up holding the head while
+ *  the neck happily followed the hallucination (measured: 62.5° of neck on a
+ *  frame whose every head landmark had been marked untrustworthy). */
+const HEAD_LANDMARKS = ["left_ear", "right_ear", "left_eye", "right_eye"]
+
+/** Share of the head's chest-relative rotation carried by 首, the rest going to
+ *  頭. Anatomy puts roughly a third of head movement in the cervical spine; a
+ *  neck that takes none of it reads as a bobblehead, and one that takes it all
+ *  snaps. */
+const NECK_SHARE = 0.35
 
 // Below this average visibility the measurement is noise (limb off-frame or
 // occluded) — hold the last solved rotation instead of chasing garbage.
@@ -316,7 +347,6 @@ const DEFAULT_REFS: Record<string, Vec3> = {
   右ひざ: new Vec3(0.01333724, -0.98954425, 0.14361163).normalize(),
   左足首: new Vec3(0.00000064, -0.80765191, -0.58965955).normalize(),
   右足首: new Vec3(0.00000054, -0.80765185, -0.58965964).normalize(),
-  首: new Vec3(0.00000258, 0.97346054, -0.22885491).normalize(),
   左手首: new Vec3(0.81635913, -0.57754444, -0.00043314).normalize(),
   右手首: new Vec3(-0.81635927, -0.57754425, -0.00043491).normalize(),
   左親指１: new Vec3(0.62716533, -0.72577692, -0.28268623).normalize(),
@@ -361,12 +391,19 @@ const sHeld = Quat.identity()
 const sRoll = Quat.identity()
 const sRollA = Quat.identity()
 const sPrevDir = Vec3.zeros()
+// The head's world orientation, and scratch for splitting it across 首/頭.
+const sHeadWorld = Quat.identity()
+const sHeadA = Quat.identity()
+const sHeadB = Quat.identity()
 
 export class Solver {
   private pose: Landmark[] | null = null
   private leftHand: Landmark[] | null = null
   private rightHand: Landmark[] | null = null
 
+  /** Whether this frame's head orientation could be measured. 首 sets it, 頭
+   *  reads it — so a refused measurement holds the whole head, not half of it. */
+  private headValid = false
   /** Unfiltered parent-local rotation per bone; doubles as the held value on dropout. */
   private locals: Record<string, Quat> = {}
   /** Accumulated world rotation per bone (parent chain product), rebuilt each frame. */
@@ -458,6 +495,7 @@ export class Solver {
 
   reset(): void {
     this.heldDy = 0
+    this.headValid = false
     for (const key of Object.keys(this.rollFilters)) this.rollFilters[key].reset()
     this.rollPrev = {}
     for (const key of Object.keys(this.filters)) this.filters[key].reset()
@@ -877,24 +915,6 @@ export class Solver {
     set("左足首", dir("左足首", "左つま先"))
     set("右足首", dir("右足首", "右つま先"))
 
-    // Neck: bone-direct (首→頭) doesn't match the pose runtime measurement
-    // (ear_center − shoulder_center), so even at rest the rotation isn't identity.
-    // Use eye/shoulder bone proxies — eye height ≈ ear height, shoulder bone ≈
-    // shoulder landmark. Falls through to 首→頭 if any of the four bones is missing.
-    set("首", dir("首", "頭"))
-    const ls = restWorldPos["左肩"]
-    const rs = restWorldPos["右肩"]
-    const le = restWorldPos["左目"]
-    const re = restWorldPos["右目"]
-    if (ls && rs && le && re) {
-      const v = new Vec3(
-        (le.x + re.x - ls.x - rs.x) / 2,
-        (le.y + re.y - ls.y - rs.y) / 2,
-        (le.z + re.z - ls.z - rs.z) / 2,
-      )
-      if (v.length() > 1e-6) this.refs["首"] = v.normalizeInPlace()
-    }
-
     // Wrists — middle finger root is the natural "forward" axis of the hand
     set("左手首", dir("左手首", "左中指１"))
     set("右手首", dir("右手首", "右中指１"))
@@ -951,6 +971,9 @@ export class Solver {
       switch (def.kind) {
         case "basis":
           this.solveBasis(def, local)
+          break
+        case "head":
+          this.solveHead(def, local)
           break
         case "direction":
           this.solveDirection(def, local)
@@ -1090,18 +1113,29 @@ export class Solver {
     return this.pose?.[PoseLandmarksTable[wristName]]?.visibility ?? 1
   }
 
+  /**
+   * Confidence in a bone's measurement: the WEAKEST landmark it reads.
+   *
+   * This used to be the average, which quietly rescued dead landmarks with live
+   * ones. A direction is only as good as both of its endpoints — an elbow known
+   * to a certainty next to a wrist that is a guess is not "half confident", it
+   * is a guess — and the failure was worse than merely soft: the adapter's veto
+   * for a hallucinated face marks every head landmark untrustworthy, but 首 read
+   * two shoulders as well, so the mean came out at 0.6 and sailed through the
+   * gate. The head held while the neck chased the hallucination (measured: 62.5°
+   * of neck on a frame with no trustworthy head landmark on it).
+   */
   private visibility(source: LandmarkSource, points: Point[]): number {
     if (source !== "pose") return this.handConfidence(source)
     if (!this.pose) return 1
-    let sum = 0
-    let n = 0
+    let min = 1
     for (const p of points) {
       for (const name of typeof p === "string" ? [p] : p) {
-        sum += this.pose[PoseLandmarksTable[name]]?.visibility ?? 1
-        n++
+        const v = this.pose[PoseLandmarksTable[name]]?.visibility ?? 1
+        if (v < min) min = v
       }
     }
-    return n > 0 ? sum / n : 1
+    return min
   }
 
   private solveDirection(def: DirectionDef, out: Quat): void {
@@ -1360,6 +1394,62 @@ export class Solver {
     return 2 * Math.atan2(axisComponent, quat.w) * (180 / Math.PI)
   }
 
+  /**
+   * 首 then 頭, from the one head orientation (see `HeadDef`).
+   *
+   * 首 comes first in the table, so it does the measuring and banks the result;
+   * by the time 頭 is reached the generic loop has composed 首's world, and the
+   * head simply wears whatever is left over — which keeps its ORIENTATION exact
+   * no matter what share the neck took, or whether the neck moved at all.
+   */
+  private solveHead(def: HeadDef, out: Quat): void {
+    const parentWorld = this.worlds[def.parent]
+    if (def.name === "頭") {
+      // Held along with the neck when the measurement was refused.
+      if (!this.headValid) return
+      Quat.conjugateInto(parentWorld, sHeadA)
+      Quat.multiplyInto(sHeadA, sHeadWorld, out)
+      return
+    }
+
+    this.headValid = false
+    if (!this.pose) return
+    if (this.visibility("pose", HEAD_LANDMARKS) < MIN_VISIBILITY) return
+    if (!this.point("pose", "left_ear", sA) || !this.point("pose", "right_ear", sB)) return
+    if (!this.point("pose", "left_eye", sFrom) || !this.point("pose", "right_eye", sTo)) return
+
+    // World basis: X = ear axis, Z = back (ear centre − eye centre; eyes sit
+    // forward of ears), Y = Z × X. At rest these are the model's own axes, so
+    // the basis IS the head's world rotation — no reference direction, nothing
+    // to calibrate, nothing to drift.
+    Vec3.subtractInto(sA, sB, sC).normalizeInPlace()
+    sDir
+      .setXYZ(
+        (sA.x + sB.x - sFrom.x - sTo.x) / 2,
+        (sA.y + sB.y - sFrom.y - sTo.y) / 2,
+        (sA.z + sB.z - sFrom.z - sTo.z) / 2,
+      )
+      .normalizeInPlace()
+    if (sDir.length() < 1e-6 || sC.length() < 1e-6) return
+    // Gram-Schmidt earX ⊥ back, then Y = back × X
+    const d = sC.dot(sDir)
+    sC.setXYZ(sC.x - sDir.x * d, sC.y - sDir.y * d, sC.z - sDir.z * d)
+    if (sC.length() < 1e-3) return
+    sC.normalizeInPlace()
+    Vec3.crossInto(sDir, sC, sA)
+    Quat.fromBasisInto(sC, sA, sDir, sHeadWorld)
+    this.headValid = true
+
+    // The neck's share of head-relative-to-chest. Slerp from identity, on the
+    // near hemisphere so a head turned past a half-turn does not take the neck
+    // the long way round.
+    Quat.conjugateInto(parentWorld, sHeadA)
+    Quat.multiplyInto(sHeadA, sHeadWorld, sHeadB)
+    if (sHeadB.w < 0) sHeadB.setXYZW(-sHeadB.x, -sHeadB.y, -sHeadB.z, -sHeadB.w)
+    sHeadA.setIdentity()
+    Quat.slerpInto(sHeadA, sHeadB, NECK_SHARE, out)
+  }
+
   private solveBasis(def: BasisDef, out: Quat): void {
     if (!this.pose) return
     if (this.visibility("pose", BASIS_LANDMARKS[def.name]) < MIN_VISIBILITY) return
@@ -1384,27 +1474,6 @@ export class Solver {
         Vec3.subtractInto(sFrom, sTo, sDir).normalizeInPlace()
         Vec3.subtractInto(sA, sB, sC).normalizeInPlace()
         Solver.basisFromYAndX(sDir, sC, out)
-        return
-      }
-      case "頭": {
-        if (!this.point("pose", "left_ear", sA) || !this.point("pose", "right_ear", sB)) return
-        if (!this.point("pose", "left_eye", sFrom) || !this.point("pose", "right_eye", sTo)) return
-        const parentWorld = this.worlds[def.parent!]
-        // X = ear axis, Z = back (ear center − eye center; eyes sit forward of
-        // ears), Y = cross — one basis, one decomposition, no gimbal compounding.
-        Vec3.subtractInto(sA, sB, sC)
-        Quat.rotateVecInvInto(parentWorld, sC, sC).normalizeInPlace() // earX in parent frame
-        sDir.setXYZ(
-          (sA.x + sB.x - sFrom.x - sTo.x) / 2,
-          (sA.y + sB.y - sFrom.y - sTo.y) / 2,
-          (sA.z + sB.z - sFrom.z - sTo.z) / 2,
-        )
-        Quat.rotateVecInvInto(parentWorld, sDir, sDir).normalizeInPlace() // back in parent frame
-        // Gram-Schmidt earX ⊥ back, then Y = back × X
-        const d = sC.dot(sDir)
-        sC.setXYZ(sC.x - sDir.x * d, sC.y - sDir.y * d, sC.z - sDir.z * d).normalizeInPlace()
-        Vec3.crossInto(sDir, sC, sA)
-        Quat.fromBasisInto(sC, sA, sDir, out)
         return
       }
     }

@@ -378,7 +378,7 @@ async function detect(
     metersPerPixel = 1.7 / Math.max(1, bbox[3] - bbox[1])
   }
 
-  emitOrdered(seq, mediaTs, toWorkerResult(decoded.kpts, decoded.scores, metersPerPixel), echoSeq, {
+  emitOrdered(seq, mediaTs, toWorkerResult(decoded.kpts, decoded.scores, metersPerPixel, decoded.depth), echoSeq, {
     bbox: trackedBbox,
     mpp: metersPerPixel,
   })
