@@ -254,6 +254,8 @@ export const MotionCapture = ({
    * only ever touches video files.
    */
   const MEDIA_STEP_TARGET_MS = 55
+  /** Playback rates the auto-slowdown is allowed to pick, high to low. */
+  const PLAYBACK_STEPS = [1, 0.75, 0.5, 0.35, 0.25]
   const adaptPlayback = useCallback(() => {
     const video = videoRef.current
     const w = hzWindowRef.current
@@ -271,14 +273,27 @@ export const MotionCapture = ({
     setCaptureHz(hz)
     if (!video || inputModeRef.current !== "video" || convertingRef.current) return
     if (new URLSearchParams(window.location.search).get("realtime") === "1") return
-    const wanted = Math.min(1, Math.max(0.25, (MEDIA_STEP_TARGET_MS * hz) / 1000))
-    // Only move on a real change — nudging playbackRate every second is
-    // audible on the source audio and pointless.
-    if (Math.abs(wanted - playbackScaleRef.current) > 0.06) {
+    const ideal = Math.min(1, Math.max(0.25, (MEDIA_STEP_TARGET_MS * hz) / 1000))
+    // Snap to a few coarse steps. The measured rate wanders by a few percent
+    // every window, and a continuous target chases it — each nudge of
+    // playbackRate is an audible seam in the source audio, so a rate that keeps
+    // creeping sounds like a broken file even when the picture is fine.
+    let wanted = PLAYBACK_STEPS[PLAYBACK_STEPS.length - 1]
+    for (const step of PLAYBACK_STEPS) {
+      if (ideal >= step - 0.06) {
+        wanted = step
+        break
+      }
+    }
+    if (wanted !== playbackScaleRef.current) {
       playbackScaleRef.current = wanted
       setPlaybackScale(wanted)
       video.playbackRate = wanted
     }
+    // Slowed audio is collateral, never the point: the slowdown buys the
+    // detector more samples per second of MEDIA, and nobody wants to hear the
+    // track at 0.5×. Full speed keeps its sound.
+    video.muted = wanted < 1
   }, [])
   const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
     // Throttled React update — feeds only the debug skeleton preview.
@@ -581,6 +596,7 @@ export const MotionCapture = ({
         // A new clip re-measures its own pace.
         videoRef.current.playbackRate = 1
         playbackScaleRef.current = 1
+        videoRef.current.muted = false
         setPlaybackScale(1)
         hzWindowRef.current = { count: 0, since: 0 }
       }

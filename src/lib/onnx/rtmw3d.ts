@@ -205,6 +205,19 @@ export function decodeSimCC3D(
         zLoc = j
       }
     }
+    if (decodeFlags.softZ && zMax > 0) {
+      const floor = zMax * decodeTuning.softZFloor
+      let num = 0
+      let den = 0
+      for (let j = 0; j < wz; j++) {
+        const w = simccZ[i * wz + j] - floor
+        if (w > 0) {
+          num += w * j
+          den += w
+        }
+      }
+      if (den > 0) zLoc = num / den
+    }
     const cropX = xLoc / SIMCC_RATIO
     const cropY = yLoc / SIMCC_RATIO
     kpts[i * 3] = (cropX - warp.tx) / warp.k
@@ -226,6 +239,33 @@ export const KPT_THR = 0.3
  *  measure what each one costs in smoothness (same purpose as the solver's
  *  `witnessEnabled` / `bendClampEnabled`). */
 export const adapterFlags = { boneLengthGuard: true, headVeto: true, depthShrink: false }
+
+/**
+ * Decode the depth bin by EXPECTATION over the distribution rather than by its
+ * argmax.
+ *
+ * argmax is discontinuous, and this model's depth is routinely bimodal — two
+ * rival modes half a metre apart, the runner-up at 0.6–0.99 of the peak. A
+ * whisker of noise moves the winner and the joint teleports. That is survivable
+ * on a limb; on the SHOULDER and HIP lines it is fatal, because the body's yaw
+ * is the depth DIFFERENCE across a 15–25cm baseline, so a mode flip at one end
+ * swings the whole torso 70–100° between consecutive frames.
+ *
+ * An expectation cannot jump: when the two modes trade places the mean barely
+ * moves. Taken over the bins above a fraction of the peak, so the noise floor
+ * across a 4.3m range does not drag every joint toward the camera.
+ */
+export const decodeFlags = { softZ: true }
+/** Bins below this fraction of the peak are noise floor, not a rival mode, and
+ *  including them drags every depth toward the middle of a 4.3m range.
+ *  Swept on a 20-frame sequence (per-frame local rotation change / RMS bone
+ *  length error vs anatomy): argmax 31.4°/18.3%, 0.65 → 25.7°/—, 0.50 →
+ *  25.5°/—, 0.35 → 21.7°/15.5%, 0.25 → 20.9°/15.2%, 0.15 → 19.8°/15.0%. Lower
+ *  is smoother and no less accurate, but it also costs depth RANGE (body spread
+ *  33cm at argmax, 30cm at 0.35, 22-31cm at 0.15) — and a flattened torso is
+ *  the failure this project has fought before. 0.25 takes nearly all of the
+ *  gain and stays clear of the floor. */
+export const decodeTuning = { softZFloor: 0.25 }
 
 /**
  * Next frame's crop box from this frame's keypoints — the single-person
