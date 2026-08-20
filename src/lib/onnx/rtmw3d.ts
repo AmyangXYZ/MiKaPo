@@ -417,7 +417,7 @@ const HEAD_SYNTH = {
  * proper rotation, no reflection risk). Returns null when too little of the
  * face is confident to constrain a fit.
  */
-function fitHead(
+export function fitHead(
   kpts: Float32Array,
   scores: Float32Array,
   mpp: number,
@@ -604,12 +604,33 @@ const TORSO_PAIRS: [number, number, number][] = [
  * The running value lives on the main thread and is handed in each frame, like
  * the crop box and the scale — two engines each keeping their own would flip
  * against each other, which is worse than either flipping alone.
+ *
+ * And the shoulders do not get to decide alone, because in profile they are the
+ * worst possible witness: their whole vote IS the depth, and front/back is
+ * precisely what a monocular view cannot see. The FEET can. Heel-to-toe in the
+ * IMAGE PLANE is where the body points, measured on the axes this model gets
+ * right, and it is at its most emphatic exactly where the shoulders collapse.
+ * The two are complementary: square-on, the feet point at the camera and say
+ * nothing while the shoulders are unambiguous; in profile it is the other way
+ * round. (Measured on a profile still the model had facing BACKWARDS — trunk
+ * turned 94° the wrong way while the face, correctly fitted, stared out of it.)
  */
 /** How much of the facing evidence survives each frame (≈3-frame memory at
  *  10Hz — long enough to outlast a bad frame, short enough to follow a turn). */
 const FACING_MEMORY = 0.7
 /** How square-on the shoulders must be before a facing flip is believable. */
 const FACING_FLIP_MIN = 0.7
+/** Heel→toe spans, whose image-plane direction is the body's facing. */
+const FOOT_SPANS: [number, number][] = [
+  [COCO.left_heel, COCO.left_big_toe],
+  [COCO.right_heel, COCO.right_big_toe],
+]
+/** Weight on the foot vote against the shoulders'. Above 1 because a foot is
+ *  shorter than a shoulder span but measured on an axis that works. */
+const FOOT_FACING_TRUST = 1.5
+/** How upright the trunk must be for its ground-plane facing to mean anything
+ *  (cos of the lean; 0.5 ≈ within 60° of vertical). */
+const TRUNK_UPRIGHT_MIN = 0.5
 let facingEvidence = 0
 /** Seed from the shared tracker before decoding a frame. */
 export function setTorsoFacing(v: number): void {
@@ -619,10 +640,17 @@ export function getTorsoFacing(): number {
   return facingEvidence
 }
 export function snapTorsoDepth(kpts: Float32Array, scores: Float32Array, mpp: number): void {
+  // The facing evidence is a signed quantity: how far the body's forward points
+  // along +x. For a shoulder span that is its depth difference; for a foot it
+  // is heel-to-toe in the image, no depth involved.
   let vote = 0
   for (const [a, b] of TORSO_PAIRS) {
     if (scores[a] < KPT_THR || scores[b] < KPT_THR) continue
     vote += kpts[a * 3 + 2] - kpts[b * 3 + 2]
+  }
+  for (const [heel, toe] of FOOT_SPANS) {
+    if (scores[heel] < KPT_THR || scores[toe] < KPT_THR) continue
+    vote += (kpts[toe * 3] - kpts[heel * 3]) * mpp * FOOT_FACING_TRUST
   }
   // How square-on the shoulders are: 1 when the span lies across the image
   // (facing the camera or away from it), 0 in profile.
@@ -830,7 +858,19 @@ export function toWorkerResult(
     // Trunk forward = shoulder line × down, in the ground (xz) plane.
     const fx = sz
     const fz = -sx
-    if (fit && Math.hypot(fx, fz) > 1e-3) {
+    // ...which only means anything while the trunk is somewhere near upright.
+    // Bent over, the chest faces the FLOOR and its ground-plane shadow is
+    // noise, so the veto starts rejecting perfectly good head fits — measured
+    // on a standing-splits still, a 130° "disagreement" between a head looking
+    // at the camera and a torso that was pointing straight down.
+    const uy = (kpts[COCO.left_shoulder * 3 + 1] + kpts[COCO.right_shoulder * 3 + 1]
+      - kpts[COCO.left_hip * 3 + 1] - kpts[COCO.right_hip * 3 + 1]) / 2 * mpp
+    const ux = (kpts[COCO.left_shoulder * 3] + kpts[COCO.right_shoulder * 3]
+      - kpts[COCO.left_hip * 3] - kpts[COCO.right_hip * 3]) / 2 * mpp
+    const uz = (kpts[COCO.left_shoulder * 3 + 2] + kpts[COCO.right_shoulder * 3 + 2]
+      - kpts[COCO.left_hip * 3 + 2] - kpts[COCO.right_hip * 3 + 2]) / 2
+    const upright = Math.abs(uy) / (Math.hypot(ux, uy, uz) + 1e-9)
+    if (fit && upright > TRUNK_UPRIGHT_MIN && Math.hypot(fx, fz) > 1e-3) {
       const hx = -fit.r[2]
       const hz = -fit.r[8]
       const cosRel = (fx * hx + fz * hz) / (Math.hypot(fx, fz) * Math.hypot(hx, hz) + 1e-9)
