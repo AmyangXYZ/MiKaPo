@@ -3,28 +3,11 @@
     "allow": [
       "Bash(npx tsc *)",
       "Bash(npx next *)",
-      "Bash(node -e \"console.log\\(typeof HTMLVideoElement\\)\")",
-      "Bash(git -C /Users/amyang/Projects/MiKaPo log --oneline -3)",
-      "Bash(git -C /Users/amyang/Projects/MiKaPo status --short)",
-      "Bash(npx tsx *)",
-      "Bash(npx esbuild *)",
-      "Bash(node /private/tmp/claude-501/-Users-amyang-Projects-MiKaPo/b069e722-dc24-435c-b949-dfcd07aa1805/scratchpad/bench.mjs)",
-      "Bash(npm run *)",
-      "Bash(git stash *)",
-      "Skill(claude-in-chrome)",
-      "Bash(lsof -i :4000 -sTCP:LISTEN)",
-      "Bash(ps -p 66985 -o command=)",
-      "Bash(curl -s localhost:4000 -o /dev/null -w \"%{http_code}\\\\n\")",
-      "Bash(curl -s -o /dev/null -w \"%{http_code} %{size_download} bytes %{time_total}s\\\\n\" localhost:4000/flash.mp4 -r 0-1000000)",
-      "Bash(node /private/tmp/claude-501/-Users-amyang-Projects-MiKaPo/b069e722-dc24-435c-b949-dfcd07aa1805/scratchpad/clamp-test.mjs)",
-      "Bash(npm pkg *)",
-      "Bash(git add *)",
-      "Bash(git commit -m ' *)",
-      "Bash(git tag *)",
-      "Bash(git push *)",
-      "Bash(gh release *)",
-      "Bash(git ls-remote *)",
-      "Bash(gh repo *)"
+      "Bash(ls *)",
+      "Bash(node *)",
+      "Bash(gh repo *)",
+      "Bash(git ls-tree *)",
+      "Bash(git checkout *)"
     ]
   }
 }
