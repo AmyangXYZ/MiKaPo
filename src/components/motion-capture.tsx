@@ -4,6 +4,7 @@ import { BoneState, Solver, type BodyCollider } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
 import { buildClip, clipSummary, RecordedFrame } from "@/lib/vmd"
 import { smoothTakeZeroPhase } from "@/lib/filters"
+import { ASSETS } from "@/lib/assets"
 import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -61,7 +62,7 @@ export const MotionCapture = ({
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
   const [currentImage, setCurrentImage] = useState<string>("/4.png")
-  const [videoSrc, setVideoSrc] = useState<string>("/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4")
+  const [videoSrc, setVideoSrc] = useState<string>(`${ASSETS}/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4`)
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
   const solverRef = useRef<Solver>(new Solver())
   const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver>(new FaceBlendshapeSolver())

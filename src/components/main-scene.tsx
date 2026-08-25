@@ -25,6 +25,7 @@ import Loading from "./loading"
 const EXPORT_CLIP_NAME = "mikapo-capture"
 import { BoneState, SOLVER_REST_BONES, type BodyCollider } from "@/lib/solver"
 import { FaceSolverResult } from "@/lib/face-blendshape-solver"
+import { ASSETS } from "@/lib/assets"
 
 /** Stable engine key for the bundled default PMX — folder uploads swap via removeModel + new id. */
 const DEFAULT_MODEL_KEY = "mikapo"
@@ -182,7 +183,7 @@ export default function MainScene() {
 
         const genBeforeDefault = loadGenerationRef.current
         try {
-          const model = await engine.loadModel(DEFAULT_MODEL_KEY, "/models/塞尔凯特/塞尔凯特.pmx")
+          const model = await engine.loadModel(DEFAULT_MODEL_KEY, `${ASSETS}/models/塞尔凯特/塞尔凯特.pmx`)
           if (genBeforeDefault !== loadGenerationRef.current) {
             try {
               engine.removeModel(DEFAULT_MODEL_KEY)
