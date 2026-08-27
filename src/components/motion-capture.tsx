@@ -258,9 +258,6 @@ export const MotionCapture = ({
   /** Playback cursor on the media timeline (see the display loop below). */
   const displayClockRef = useRef(0)
   const lastMediaTsRef = useRef(-1)
-  /** Set by the capture loop when the grabbed frame came from a PAUSED video
-   *  (fresh upload, scrub): its result is solved as a still. */
-  const stillGrabRef = useRef(false)
   const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
     // Throttled React update — feeds only the debug skeleton preview.
     const now = performance.now()
@@ -271,25 +268,17 @@ export const MotionCapture = ({
 
     if (!modelLoadedRef.current) return
 
-    // A paused video's frame is a still: one unfiltered solve completes the
-    // pose (crossfades snap rather than creep), and a single engine tween
-    // eases the model there — instead of re-solving on a timer, which walked
-    // the pose in visible 250ms steps.
     const isImage = inputModeRef.current === "image"
-    const isStill = isImage || stillGrabRef.current
-    const pose = solverRef.current.solve(result, timestampMs, isStill)
+    const pose = solverRef.current.solve(result, timestampMs, isImage)
     currentBoneStatesRef.current = pose
 
     let faceTweenMs = 0
-    if (isStill) {
-      // Shown directly; the interpolation loop idles until playback returns.
+    if (isImage) {
+      // A still is shown as-is; the interpolation loop idles until video returns.
       displayPrevRef.current = null
       displayCurrRef.current = null
       lastMediaTsRef.current = -1
-      // An image snaps — the model was just reset, there is nothing to ease
-      // from. A paused frame eases in from wherever the model stands.
-      faceTweenMs = isImage ? 0 : 250
-      applyPoseRef.current(pose, faceTweenMs)
+      applyPoseRef.current(pose, 0)
     } else {
       // Media-time spacing, not arrival spacing: arrivals jitter with worker
       // load while the frames themselves are evenly spaced. Seeks and stalls
@@ -403,21 +392,7 @@ export const MotionCapture = ({
       worker.postMessage(msg, transfer ?? [])
 
     let lastVideoTime = -1
-    let lastVideoSrc = ""
     let lastImgSrc = ""
-    let stillRetryAt = 0
-
-    // A PAUSED video has no next frame to try: if its one grab comes back
-    // with no detection — the person genuinely absent, or the frame raced
-    // the landmarker rebuild that a fresh upload triggers — the time-gate is
-    // already consumed and the model would wait for play. Re-arm the gate
-    // and retry the same frame shortly; playback retries naturally.
-    const retryPausedStill = () => {
-      const video = videoRef.current
-      if (!video || video.paused === false || convertingRef.current) return
-      lastVideoTime = -1
-      stillRetryAt = performance.now() + 300
-    }
 
     worker.onmessage = (e: MessageEvent<PoseWorkerResponse>) => {
       const msg = e.data
@@ -435,8 +410,6 @@ export const MotionCapture = ({
           awaiting(msg.result)
         } else if (msg.result.poseWorldLandmarks[0]) {
           handleResultRef.current(msg.result, msg.mediaTs)
-        } else {
-          retryPausedStill()
         }
       } else if (msg.type === "error") {
         pending = false
@@ -444,8 +417,6 @@ export const MotionCapture = ({
         if (awaiting) {
           awaitingRef.current = null
           awaiting(null)
-        } else {
-          retryPausedStill()
         }
         console.error("Pose worker error:", msg.message)
       }
@@ -465,32 +436,11 @@ export const MotionCapture = ({
         else return
       }
       const video = videoRef.current
-      // A new source must be captured even if it sits at the same media time
-      // as the old one — a fresh upload starts at 0, and so did the last.
-      if (video && video.currentSrc !== lastVideoSrc) {
-        lastVideoSrc = video.currentSrc
-        lastVideoTime = -1
-      }
-      // readyState gates the FIRST frame: before HAVE_CURRENT_DATA the grab
-      // below fails, and the time-gate would already be marked consumed — a
-      // paused upload then showed nothing until play moved the clock. The
-      // retry throttle only ever binds while paused (see retryPausedStill).
-      if (
-        video &&
-        video.videoWidth > 0 &&
-        video.readyState >= 2 &&
-        video.currentTime !== lastVideoTime &&
-        (!video.paused || now >= stillRetryAt)
-      ) {
+      if (video && video.videoWidth > 0 && video.currentTime !== lastVideoTime) {
         // Pacing: the in-flight guard above (one frame in the worker at a time)
         // plus the new-frame gate (source fps) — no artificial rate floor, so
         // result cadence stays as steady as the worker can deliver.
         lastVideoTime = video.currentTime
-        // A frame grabbed while paused (fresh upload, scrub) is a STILL —
-        // handleResult solves it unfiltered and eases the model there in one
-        // tween. Read at grab time; the in-flight guard keeps it paired with
-        // its result.
-        stillGrabRef.current = video.paused
         // Media time drives the solver's smoothing filters so pause/seek
         // reset them correctly; detectForVideo gets wall time because it
         // requires a monotonically increasing clock.
@@ -557,9 +507,9 @@ export const MotionCapture = ({
       userPickedMediaRef.current = true
       void saveVideoUpload(file)
       const url = URL.createObjectURL(file)
-      // No model reset: the new video's first frame arrives as a still within
-      // a few hundred ms and the model eases straight from its current pose —
-      // a bind-pose snap in between is exactly the jarring cut this avoids.
+      // No model reset: the model holds its pose until the user plays the new
+      // video, then transitions to its motion — a bind-pose snap in between
+      // is exactly the jarring cut this avoids.
       solverRef.current.reset()
       faceBlendshapeSolverRef.current.reset()
       if (lastMedia === "IMAGE") {
@@ -567,8 +517,7 @@ export const MotionCapture = ({
         setCurrentImage("")
       }
       // The landmarker's tracker still carries the previous video; the new
-      // one's first frame — solved immediately, while paused — deserves a
-      // clean slate.
+      // one deserves a clean slate when playback starts.
       workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
       setVideoSrc(url)
       setInputMode("video")
