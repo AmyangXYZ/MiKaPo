@@ -462,18 +462,18 @@ export default function MainScene() {
       {/* Chrome floats over a full-bleed viewport; nothing ever shrinks the
           thing being made. One spacing (0.75rem) repeated is the whole grid. */}
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start gap-2">
-        <div className={cn(PILL, "pointer-events-auto flex h-10 shrink-0 items-center gap-2 pl-3 pr-1.5")}>
-          <span className="text-sm font-semibold tracking-tight text-foreground">MiKaPo</span>
+        {/* The family wordmark: bare over the viewport, wide-tracked and lit —
+            the same title Reze Engine and Reze Rig wear. */}
+        <div className="pointer-events-auto flex h-10 shrink-0 items-baseline gap-2 pl-1">
+          <h1
+            className="text-xl font-light uppercase tracking-[0.2em] text-white md:text-2xl md:tracking-[0.3em]"
+            style={{ textShadow: "0 0 20px rgba(255, 255, 255, 0.3), 0 2px 10px rgba(0, 0, 0, 0.5)" }}
+          >
+            Reze MiPo
+          </h1>
           <span className="shrink-0 rounded-full bg-blue-400/15 px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none text-blue-400">
             v{APP_VERSION}
           </span>
-          <span className="hidden text-xs text-muted-foreground lg:inline">Real-time MMD motion capture</span>
-          <div className="h-4 w-px shrink-0 bg-line-strong" />
-          <Button variant="ghost" size="icon" asChild className={ICON_BUTTON}>
-            <Link href="https://github.com/AmyangXYZ/MiKaPo" target="_blank" aria-label="GitHub">
-              <Github className="size-4" strokeWidth={1.75} />
-            </Link>
-          </Button>
         </div>
 
         <div className="ml-auto flex items-start gap-2">
@@ -503,6 +503,11 @@ export default function MainScene() {
           </div>
 
           <div className={cn(PILL, "pointer-events-auto flex h-10 items-center gap-1 px-1.5")}>
+            <Button variant="ghost" size="icon" asChild className={ICON_BUTTON}>
+              <Link href="https://github.com/AmyangXYZ/MiKaPo" target="_blank" aria-label="GitHub">
+                <Github className="size-4" strokeWidth={1.75} />
+              </Link>
+            </Button>
             {hasUploads && (
               <Tooltip>
                 <TooltipTrigger asChild>

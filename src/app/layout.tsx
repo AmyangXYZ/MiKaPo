@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "MiKaPo - MMD Motion Capture",
+  title: "Reze MiPo - MMD Motion Capture",
   description: "Real-time motion capture for MMD models.",
   keywords: ["MMD", "MikuMikuDance", "motion capture", "mediapipe", "landmarks", "pose estimation"],
   // Machine translators rewrite text nodes React still holds a handle on,
