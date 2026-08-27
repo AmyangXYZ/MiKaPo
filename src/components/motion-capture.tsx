@@ -533,7 +533,9 @@ export const MotionCapture = ({
       userPickedMediaRef.current = true
       void saveVideoUpload(file)
       const url = URL.createObjectURL(file)
-      resetModel?.()
+      // No model reset: the new video's first frame arrives as a still within
+      // a few hundred ms and the model eases straight from its current pose —
+      // a bind-pose snap in between is exactly the jarring cut this avoids.
       solverRef.current.reset()
       faceBlendshapeSolverRef.current.reset()
       if (lastMedia === "IMAGE") {
