@@ -1,4 +1,4 @@
-# reze-momo: Real-time MMD Motion Capture
+# reze-mipo: Real-time MMD Motion Capture
 
 *(previously MiKaPo)*
 
@@ -11,7 +11,7 @@ One piece of the **Reze MMD family**, covering the whole MMD workflow on the web
 | [reze-engine](https://github.com/AmyangXYZ/reze-engine)   | The WebGPU foundation — anime-character rendering and physics, dependency-free |
 | [reze-design](https://github.com/AmyangXYZ/reze-design)   | Scene design, rendering and sharing platform                                   |
 | [reze-studio](https://github.com/AmyangXYZ/reze-studio)   | Animation editing on a professional timeline and curve editor                  |
-| **reze-momo**                                             | This repo — real-time motion capture in the browser, exporting straight to VMD |
+| **reze-mipo**                                             | This repo — real-time motion capture in the browser, exporting straight to VMD |
 | [reze-rig](https://github.com/AmyangXYZ/reze-rig)         | Retarget FBX animations to MMD VMD format, Mixamo and Unity tested             |
 
 [Try it](https://mikapo.reze.one) · Demo model: 深空之眼 - 裁暗之锋·塞尔凯特
@@ -69,7 +69,7 @@ The parts that took measurement rather than reasoning:
 
 ---
 
-**reze-momo 5.0** — the solver rewritten against the best browser MMD mocap that exists, one technique at a time, each webcam-tested before the next.
+**reze-mipo 5.0** — the solver rewritten against the best browser MMD mocap that exists, one technique at a time, each webcam-tested before the next.
 
 - **Z-channel policy, in-place capture, FK-only legs** — see [The tricks](#the-tricks). Root travel and leg IK both left the default path: the first because it drifts, the second because two authorities per knee fight each other and an artist wants FK rotations to re-key
 - **Per-bone dropout crossfades with hand hysteresis** — no more frozen limbs, no more re-acquisition pops
