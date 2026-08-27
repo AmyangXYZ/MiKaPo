@@ -5,6 +5,7 @@ import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/
 import { buildClip, clipSummary, RecordedFrame } from "@/lib/vmd"
 import { smoothTakeZeroPhase } from "@/lib/filters"
 import { ASSETS } from "@/lib/assets"
+import { Vec3 } from "reze-engine"
 import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -25,6 +26,25 @@ type InputMode = "image" | "video" | "camera" | null
 /** Debug skeleton preview refresh (React re-render); the model itself is driven
  * directly from the detection callback and doesn't wait for React. */
 const DEBUG_PREVIEW_INTERVAL_MS = 66
+
+/** Copy a solver pose into a reusable buffer. The solver mutates its output
+ * array in place every frame, so the display pair must keep its own copies. */
+const snapshotPose = (pose: BoneState[], into: BoneState[] | null): BoneState[] => {
+  if (!into || into.length !== pose.length) {
+    return pose.map((bs) => ({
+      name: bs.name,
+      rotation: bs.rotation.clone(),
+      ...(bs.translation ? { translation: new Vec3(bs.translation.x, bs.translation.y, bs.translation.z) } : {}),
+    }))
+  }
+  for (let i = 0; i < pose.length; i++) {
+    into[i].rotation.set(pose[i].rotation)
+    const t = pose[i].translation
+    const d = into[i].translation
+    if (t && d) d.setXYZ(t.x, t.y, t.z)
+  }
+  return into
+}
 
 export const MotionCapture = ({
   applyPose,
@@ -201,12 +221,22 @@ export const MotionCapture = ({
   }, [inputMode])
 
   const lastDebugUpdateRef = useRef(0)
-  // Detection results arrive at ~25-35 Hz while the renderer runs at 60 —
-  // tween each pose over the measured inter-result interval (EMA, slight
-  // overlap) so the model is always mid-motion between results instead of
-  // reaching its target early and stepping.
-  const lastResultAtRef = useRef(0)
-  const resultIntervalEmaRef = useRef(33)
+  // Display interpolation. Results arrive at ~30 Hz while the renderer runs at
+  // 60: the model shows prev→curr interpolated on the render clock — exact
+  // playback, one detection interval behind the newest result. The previous
+  // approach tweened from wherever the display currently was toward each new
+  // result, which is an exponential chase: measured on a synthetic 45° swing
+  // at dance speed it costs ~10ms MORE latency than this and shaves ~7% off
+  // the amplitude, because a chase never arrives before its target moves again.
+  const displayPrevRef = useRef<BoneState[] | null>(null)
+  const displayCurrRef = useRef<BoneState[] | null>(null)
+  const displayBufRef = useRef<BoneState[] | null>(null)
+  const displayIntervalRef = useRef(33)
+  const displayPrevTsRef = useRef(0)
+  const displayCurrTsRef = useRef(0)
+  /** Playback cursor on the media timeline (see the display loop below). */
+  const displayClockRef = useRef(0)
+  const lastMediaTsRef = useRef(-1)
   const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
     // Throttled React update — feeds only the debug skeleton preview.
     const now = performance.now()
@@ -215,28 +245,109 @@ export const MotionCapture = ({
       setLandmarks(result)
     }
 
-    if (lastResultAtRef.current > 0) {
-      const dt = now - lastResultAtRef.current
-      if (dt < 500) resultIntervalEmaRef.current = resultIntervalEmaRef.current * 0.8 + dt * 0.2
-    }
-    lastResultAtRef.current = now
-    // 0.9×: finish the tween just before the average next result — chasing with
-    // a longer duration compounds into extra latency and shaved motion peaks.
-    const tweenMs = Math.min(100, resultIntervalEmaRef.current * 0.9)
-
     if (!modelLoadedRef.current) return
 
-    const pose = solverRef.current.solve(result, timestampMs, inputModeRef.current === "image")
+    const isImage = inputModeRef.current === "image"
+    const pose = solverRef.current.solve(result, timestampMs, isImage)
     currentBoneStatesRef.current = pose
-    // A still has nothing to tween FROM — easing into it just replays the
-    // previous upload on the way to this one.
-    applyPoseRef.current(pose, inputModeRef.current === "image" ? 0 : tweenMs)
+
+    let faceTweenMs = 0
+    if (isImage) {
+      // A still is shown as-is; the interpolation loop idles until video returns.
+      displayPrevRef.current = null
+      displayCurrRef.current = null
+      lastMediaTsRef.current = -1
+      applyPoseRef.current(pose, 0)
+    } else {
+      // Media-time spacing, not arrival spacing: arrivals jitter with worker
+      // load while the frames themselves are evenly spaced. Seeks and stalls
+      // fall back to a nominal frame.
+      const delta = timestampMs - lastMediaTsRef.current
+      lastMediaTsRef.current = timestampMs
+      displayIntervalRef.current = delta > 5 && delta < 500 ? delta : 33
+      faceTweenMs = displayIntervalRef.current
+      const recycled = displayPrevRef.current
+      displayPrevRef.current = displayCurrRef.current
+      displayPrevTsRef.current = displayCurrTsRef.current
+      displayCurrRef.current = snapshotPose(pose, recycled)
+      displayCurrTsRef.current = timestampMs
+    }
 
     if (faceEnabledRef.current && result.faceLandmarks?.[0]) {
       const faceResult = faceBlendshapeSolverRef.current.solve(result.faceLandmarks[0], timestampMs)
       currentMorphWeightsRef.current = faceResult.morphWeights
-      applyFaceRef.current(faceResult, tweenMs)
+      applyFaceRef.current(faceResult, faceTweenMs)
     }
+  }, [])
+
+  // Drive the model every render frame from the display pair, interpolated by
+  // a playback cursor that advances along the MEDIA timeline by wall time.
+  // Starting each segment on result ARRIVAL instead makes every early arrival
+  // a small forward jump — arrival times jitter with worker load, media
+  // stamps don't, and that jitter is visible as micro-stutter. The cursor
+  // never modulates with arrival timing: it plays, at most one result behind.
+  // nlerp per bone (hemisphere-aligned) — over one detection interval the arc
+  // is a few degrees, where nlerp and slerp are indistinguishable.
+  useEffect(() => {
+    let raf = 0
+    let lastWall = 0
+    const step = () => {
+      raf = requestAnimationFrame(step)
+      const wall = performance.now()
+      const wallDt = lastWall > 0 ? Math.min(100, wall - lastWall) : 0
+      lastWall = wall
+      // A conversion drives the model itself, stepping through the take.
+      if (convertingRef.current || !modelLoadedRef.current) return
+      const curr = displayCurrRef.current
+      if (!curr) return
+      const prev = displayPrevRef.current
+      const span = displayCurrTsRef.current - displayPrevTsRef.current
+      if (!prev || prev.length !== curr.length || span <= 0 || span > 500) {
+        // First result, or a seek/stall: restart playback at the new segment.
+        displayClockRef.current = displayCurrTsRef.current
+        applyPoseRef.current(curr, 0)
+        return
+      }
+      // Aim the cursor a margin BEHIND the newest result and steer its rate
+      // (±15%) toward that point. Riding right at the newest result means
+      // every late arrival stalls the cursor at the ceiling for a frame — a
+      // visible hiccup, several times a second under real worker-load jitter.
+      // The margin absorbs lateness; the rate steer repays it over hundreds
+      // of ms, far below what the eye can see as a speed change.
+      const target = displayCurrTsRef.current - span * 0.4
+      let clock = displayClockRef.current
+      const err = clock + wallDt - target
+      const rate = 1 - Math.max(-0.15, Math.min(0.15, err / 250))
+      clock += wallDt * rate
+      // Never extrapolate past the newest result; after a real stall, skip
+      // forward rather than replay the backlog.
+      if (clock > displayCurrTsRef.current) clock = displayCurrTsRef.current
+      if (clock < displayPrevTsRef.current) clock = displayPrevTsRef.current
+      displayClockRef.current = clock
+      const t = (clock - displayPrevTsRef.current) / span
+      let buf = displayBufRef.current
+      if (!buf || buf.length !== curr.length) buf = displayBufRef.current = snapshotPose(curr, null)
+      for (let i = 0; i < curr.length; i++) {
+        const a = prev[i].rotation
+        const b = curr[i].rotation
+        const o = buf[i].rotation
+        const s = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w < 0 ? -1 : 1
+        o.setXYZW(
+          a.x + (b.x * s - a.x) * t,
+          a.y + (b.y * s - a.y) * t,
+          a.z + (b.z * s - a.z) * t,
+          a.w + (b.w * s - a.w) * t,
+        )
+        o.normalize()
+        const ta = prev[i].translation
+        const tb = curr[i].translation
+        const to = buf[i].translation
+        if (ta && tb && to) to.setXYZ(ta.x + (tb.x - ta.x) * t, ta.y + (tb.y - ta.y) * t, ta.z + (tb.z - ta.z) * t)
+      }
+      applyPoseRef.current(buf, 0)
+    }
+    step()
+    return () => cancelAnimationFrame(raf)
   }, [])
   const handleResultRef = useRef(handleResult)
   handleResultRef.current = handleResult
@@ -557,6 +668,11 @@ export const MotionCapture = ({
       convertingRef.current = false
       setConverting(false)
       setProgress(0)
+      // The take's last frame stays on screen; without this the display loop
+      // would snap back to the pair it held before the conversion started.
+      displayPrevRef.current = null
+      displayCurrRef.current = null
+      lastMediaTsRef.current = -1
     }
 
     if (frames.length === 0) return

@@ -105,13 +105,18 @@ export default function MainScene() {
 
   // Build a rest-pose dict from the model's bone world positions. Solver uses
   // these to derive per-bone reference directions instead of the static defaults.
-  /** Frame the character the way reze-design does: the orbit centre rides
-   *  センター with a small lift, eased rather than bolted on. It matters more
-   *  here than there — grounding moves センター now, so a crouch would otherwise
-   *  drop out of frame. */
-  const followModel = useCallback(
+  /** Static orbit centre at the character's rest センター plus a small lift.
+   *  センター carries the performance now — height from grounding, distance
+   *  from the depth rebuild — and a camera that follows it subtracts that
+   *  motion right back out of the frame. */
+  const frameModel = useCallback(
     (model: Model) => {
-      engineRef.current?.setCameraFollow(model, "センター", new Vec3(0, 3, 0), 0.15)
+      try {
+        const c = model.getBoneWorldPosition("センター")
+        if (c) engineRef.current?.setCameraTarget(new Vec3(c.x, c.y + 3, c.z))
+      } catch {
+        // bone missing — keep the engine's default framing
+      }
     },
     [engineRef],
   )
@@ -201,7 +206,7 @@ export default function MainScene() {
           setModelLoaded(true)
           await new Promise((r) => requestAnimationFrame(r))
           buildRestPose(model)
-          followModel(model)
+          frameModel(model)
           engine.addGround({ diffuseColor: new Vec3(0.9, 0.1, 0.9) })
           setEngineError(null)
         } catch (loadErr) {
@@ -214,7 +219,7 @@ export default function MainScene() {
         setEngineError(error instanceof Error ? error.message : "Unknown error")
       }
     }
-  }, [buildRestPose, followModel])
+  }, [buildRestPose, frameModel])
 
   useEffect(() => {
     void (async () => {
@@ -253,14 +258,14 @@ export default function MainScene() {
         await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
         setModelLoaded(true)
         buildRestPose(model)
-        followModel(model)
+        frameModel(model)
         setEngineError(null)
       } catch (e) {
         console.error("[pmx-upload] loadModel failed:", e)
         window.alert(e instanceof Error ? e.message : String(e))
       }
     },
-    [buildRestPose, followModel],
+    [buildRestPose, frameModel],
   )
 
   const onPickPmxFolder = useCallback(

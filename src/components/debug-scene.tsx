@@ -29,7 +29,12 @@ const HAND_CONNECTIONS: [number, number][] = [
   [0, 17],
 ]
 
-type LmSet = PoseWorkerResult
+// The inset draws only the world landmarks; the worker result carries more
+// (2D landmarks, frame aspect) that interpolation has no business inventing.
+type LmSet = Pick<
+  PoseWorkerResult,
+  "poseWorldLandmarks" | "leftHandWorldLandmarks" | "rightHandWorldLandmarks" | "faceLandmarks"
+>
 
 /** Lerp every landmark between two results; t clamps at 1 (hold). */
 function lerpResults(a: LmSet, b: LmSet, t: number): LmSet {
@@ -95,7 +100,7 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
     drawRef.current = () => {
       const curr = currRef.current
       const prev = prevRef.current
-      let lms = curr
+      let lms: LmSet | null = curr
       if (curr && prev) {
         const t = Math.min(1, (performance.now() - currAtRef.current) / Math.max(16, intervalRef.current))
         lms = lerpResults(prev, curr, t)

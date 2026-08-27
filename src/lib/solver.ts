@@ -1,6 +1,6 @@
-import { Landmark } from "@mediapipe/tasks-vision"
+import { Landmark, NormalizedLandmark } from "@mediapipe/tasks-vision"
 import { Quat, Vec3 } from "reze-engine"
-import { QuaternionOneEuroFilter, Vec3OneEuroFilter } from "./filters"
+import { OneEuroFilter, QuaternionOneEuroFilter, Vec3OneEuroFilter } from "./filters"
 import { HandIndexTable, PoseLandmarksTable } from "./landmarks"
 
 /** One of the model's rigid bodies, flattened for the solver's clearance pass. */
@@ -16,9 +16,9 @@ export interface BodyCollider {
 export interface BoneState {
   name: string
   rotation: Quat
-  /** Only bones that MOVE carry this: センター (the body's height over the
-   *  ground) and the leg IK bones (where each foot actually is). Everything
-   *  else keeps its rest translation, as MMD expects. */
+  /** Only センター carries this — the body's height over the ground (and its
+   *  camera distance when depth travel is on). Everything else keeps its rest
+   *  translation, as MMD expects. */
   translation?: Vec3
 }
 
@@ -28,6 +28,12 @@ export interface SolverInput {
   poseWorldLandmarks: Landmark[][]
   leftHandWorldLandmarks: Landmark[][]
   rightHandWorldLandmarks: Landmark[][]
+  /** Image-space landmarks: the projective depth rebuild reads the 2D spine.
+   * Optional — without them センター keeps its depth. */
+  poseLandmarks?: NormalizedLandmark[][]
+  /** Frame width/height. 2D landmark x is width-normalized, so a length
+   * measured across both axes needs this to be comparable. */
+  imageAspect?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +50,7 @@ type Point = string | [string, string]
 
 interface BasisDef {
   kind: "basis"
-  name: "上半身" | "下半身" | "頭"
+  name: "上半身" | "上半身2" | "下半身" | "頭"
   parent: string | null
 }
 
@@ -149,10 +155,15 @@ const fingerBase = (side: "左" | "右", source: LandmarkSource, finger: string,
 
 const BONE_DEFS: BoneDef[] = [
   { kind: "basis", name: "上半身", parent: null },
+  // The measured chest rotation is split evenly across 上半身∘上半身2, so the
+  // spine curves instead of hinging at one joint. Everything that sits under
+  // 上半身2 in a PMX (neck, clavicles, arms) is parented to it here too, so
+  // the solver's chain math matches the model's.
+  { kind: "basis", name: "上半身2", parent: "上半身" },
   {
     kind: "direction",
     name: "首",
-    parent: "上半身",
+    parent: "上半身2",
     source: "pose",
     from: ["left_shoulder", "right_shoulder"],
     to: ["left_ear", "right_ear"],
@@ -169,8 +180,8 @@ const BONE_DEFS: BoneDef[] = [
   { kind: "direction", name: "左足首", parent: "左ひざ", source: "pose", from: "left_ankle", to: "left_foot_index" },
   { kind: "direction", name: "右足首", parent: "右ひざ", source: "pose", from: "right_ankle", to: "right_foot_index" },
 
-  { kind: "direction", name: "左腕", parent: "上半身", source: "pose", from: "left_shoulder", to: "left_elbow", witness: "左ひじ" },
-  { kind: "direction", name: "右腕", parent: "上半身", source: "pose", from: "right_shoulder", to: "right_elbow", witness: "右ひじ" },
+  { kind: "direction", name: "左腕", parent: "上半身2", source: "pose", from: "left_shoulder", to: "left_elbow", witness: "左ひじ" },
+  { kind: "direction", name: "右腕", parent: "上半身2", source: "pose", from: "right_shoulder", to: "right_elbow", witness: "右ひじ" },
   { kind: "direction", name: "左ひじ", parent: "左腕", source: "pose", from: "left_elbow", to: "left_wrist" },
   { kind: "direction", name: "右ひじ", parent: "右腕", source: "pose", from: "right_elbow", to: "right_wrist" },
 
@@ -208,8 +219,9 @@ const BONE_DEFS: BoneDef[] = [
 
 const DEF_BY_NAME: Record<string, BoneDef> = Object.fromEntries(BONE_DEFS.map((d) => [d.name, d]))
 
-/** Solved geometrically rather than from landmark directions. */
-const GROUNDING_BONES = ["センター", "左足ＩＫ", "右足ＩＫ"] as const
+/** Solved geometrically rather than from landmark directions. The legs are
+ *  pure FK — no IK targets, matching how the exported VMD plays back. */
+const GROUNDING_BONES = ["センター"] as const
 /** Derived from the arm rather than from landmarks: MediaPipe's shoulder point
  *  is the joint itself, which says nothing about clavicle elevation. */
 const SHOULDER_BONES = ["左肩", "右肩"] as const
@@ -227,6 +239,7 @@ const _clearTo = new Vec3(0, 0, 0)
 /** Pose landmarks each basis bone reads, for visibility gating. */
 const BASIS_LANDMARKS: Record<string, string[]> = {
   上半身: ["left_shoulder", "right_shoulder"],
+  上半身2: ["left_shoulder", "right_shoulder"],
   下半身: ["left_hip", "right_hip", "left_shoulder", "right_shoulder"],
   頭: ["left_ear", "right_ear", "left_eye", "right_eye"],
 }
@@ -234,6 +247,81 @@ const BASIS_LANDMARKS: Record<string, string[]> = {
 // Below this average visibility the measurement is noise (limb off-frame or
 // occluded) — hold the last solved rotation instead of chasing garbage.
 const MIN_VISIBILITY = 0.35
+
+// ---------------------------------------------------------------------------
+// Z-depth policy (docs/solver-improvements.md #1)
+//
+// MediaPipe's x/y come off the image and arrive already smoothed; its z is an
+// inference, and by far the noisiest channel — front-back torso wobble is z
+// noise on the shoulder/hip lines, nothing else. So z gets its own low-pass
+// per landmark, and x/y pass through untouched.
+// ---------------------------------------------------------------------------
+
+const Z_SMOOTHING = { minCutoff: 1.0, beta: 1.0, dCutoff: 2.0 }
+
+/** Focal length in image-height units (vertical FOV ≈ 43°, a typical webcam).
+ *  Only scales the amplitude of toward/away motion — the direction and the
+ *  proportions survive a wrong guess. */
+const DEPTH_FOCAL = 1.25
+/** Valid measurements averaged before the standing distance freezes (~2 s):
+ *  センター depth is reported relative to where the subject started. */
+const DEPTH_BASE_FRAMES = 60
+/** |cos(torso pitch)| below this, the projected spine is too foreshortened to
+ *  carry distance — a deep bow toward the camera holds the last depth. */
+const DEPTH_MIN_COS = 0.35
+
+// ---------------------------------------------------------------------------
+// Dropout crossfades (docs/solver-improvements.md #2)
+//
+// A bone whose landmarks disappear used to hold its last rotation forever —
+// right for one dropped frame, wrong for two seconds: limbs froze mid-air.
+// Instead each bone crossfades: into tracking over 250ms, out to REST over
+// 500ms, cosine-eased. A single missed frame costs ~7% of the blend and
+// recovers in two, so brief dropouts still behave like a hold.
+//
+// Hands get hysteresis on top. MediaPipe hands flicker in and out, and a
+// three-frame hand is usually garbage — so hand-sourced bones engage only
+// after the hand has been continuously present for ~1s, and disengage after
+// it has been gone 400ms. Within the grace window a flicker costs nothing.
+// ---------------------------------------------------------------------------
+
+const FADE_IN_MS = 250
+const FADE_OUT_MS = 500
+const HAND_WARMUP_MS = 1000
+const HAND_GRACE_MS = 400
+
+// Gate hysteresis: a bone that is already tracking stays in until visibility
+// drops WELL below the entry threshold. Without the gap, a landmark hovering
+// at the threshold makes the crossfade oscillate — a visible breathing.
+const VISIBILITY_EXIT = 0.25
+
+// Roll stabilizing. Roll — rotation about the bone's own axis — is the
+// noisiest channel the witness solve produces: near a straight limb the
+// perpendicular lever is short, so centimetre landmark noise becomes several
+// degrees of spin, and no bone DIRECTION changes — the debug skeleton looks
+// clean while the model's flesh visibly shimmers. Roll is also slow in real
+// motion, so its twist component tolerates a much lower cutoff than swing.
+// These scale the main smoothing settings for the roll-only filter.
+const ROLL_STABILIZED = new Set(["左腕", "右腕", "左足", "右足"])
+const ROLL_CUTOFF_SCALE = 0.3
+const ROLL_BETA_SCALE = 0.25
+
+// ---------------------------------------------------------------------------
+// Trunk decomposition (docs/solver-improvements.md #3)
+// ---------------------------------------------------------------------------
+
+/** Share of thigh pitch fed into 下半身 as posterior pelvic tilt, so sitting
+ *  and crouching read as the pelvis tucking rather than a hinge at the hip. */
+const PELVIS_THIGH_SHARE = 0.25
+/** Share of the measured shoulder-line tilt carried by each 肩 bone. The
+ *  trunk basis orthogonalizes the tilt away entirely, so without this a shrug
+ *  or a one-shoulder-up move never reaches the model. */
+const SHOULDER_TILT_SHARE = 0.5
+const SHOULDER_TILT_MAX = 15 * DEG
+/** Arm elevation over which the tilt share fades out — a raised arm's
+ *  clavicle is already rotated by the rhythm; stacking the tilt on top would
+ *  double-count it. */
+const SHOULDER_TILT_DAMP_ANGLE = 90 * DEG
 
 // Witness blend: sine of the child-joint bend angle below which roll is
 // unobservable (straight limb) and we fall back to shortest-arc.
@@ -261,7 +349,7 @@ export const SOLVER_REST_BONES: readonly string[] = [
   "左つま先", "右つま先",
   "首", "頭", "左肩", "右肩", "左目", "右目",
   "上半身", "上半身2", "下半身",
-  "センター", "左足ＩＫ", "右足ＩＫ",
+  "センター",
   "左腕", "右腕", "左ひじ", "右ひじ", "左手首", "右手首",
   "左中指１", "右中指１",
   "左親指１", "左親指２", "右親指１", "右親指２",
@@ -324,14 +412,88 @@ const sQ2 = Quat.identity()
 // first is still waiting to be blended.
 const sQ3 = Quat.identity()
 const sQ4 = Quat.identity()
+// Scratch for the current frame's measurement, before the dropout crossfade
+// decides how much of it reaches the bone.
+const sMeas = Quat.identity()
+
+const landmarkBuf = (n: number): Landmark[] =>
+  Array.from({ length: n }, () => ({ x: 0, y: 0, z: 0, visibility: 0 }))
+const zBank = (n: number): OneEuroFilter[] =>
+  Array.from({ length: n }, () => new OneEuroFilter(Z_SMOOTHING.minCutoff, Z_SMOOTHING.beta, Z_SMOOTHING.dCutoff))
 
 export class Solver {
   private pose: Landmark[] | null = null
   private leftHand: Landmark[] | null = null
   private rightHand: Landmark[] | null = null
+  private pose2d: NormalizedLandmark[] | null = null
+  private imageAspect = 16 / 9
 
-  /** Unfiltered parent-local rotation per bone; doubles as the held value on dropout. */
+  // Landmarks are copied here with z filtered, so the caller's arrays (which
+  // also feed the debug preview) keep showing what MediaPipe actually said.
+  private poseBuf = landmarkBuf(33)
+  private leftHandBuf = landmarkBuf(21)
+  private rightHandBuf = landmarkBuf(21)
+  private zFilters: Record<LandmarkSource, OneEuroFilter[]> = {
+    pose: zBank(33),
+    leftHand: zBank(21),
+    rightHand: zBank(21),
+  }
+  /** Whether each bank carries state — a source that dropped out re-seeds its
+   *  filters on return instead of easing z across the gap. */
+  private zActive: Record<LandmarkSource, boolean> = { pose: false, leftHand: false, rightHand: false }
+  /** Per-landmark z low-pass; disable to hand the solver MediaPipe's raw z. */
+  zFilterEnabled = true
+  /** Projective センター depth. Off — mocap is in-place: the 2D spine estimate
+   *  drifts over a session and slowly walks the model off its mark, so the
+   *  rebuild is opt-in for whoever wants toward/away travel despite that. */
+  depthEnabled = false
+  /** Lateral センター travel from the 2D hip midpoint. Off — mocap is fully
+   *  in-place: センター moves only vertically (squats, crouches, via
+   *  grounding). Captures are an editing base for artists, and root travel
+   *  that wanders is worse to clean up than root travel that is absent. */
+  swayEnabled = false
+  /** Model spine length (shoulder-line centre to hip-line centre), the known
+   *  length the projective depth rebuild scales against. From calibrate(). */
+  private spineLen = 0
+  /** Running means over the first valid measurements — the "standing spot"
+   *  both axes are reported relative to. */
+  private depthBase = 0
+  private depthBaseX = 0
+  private depthBaseFrames = 0
+  /** Last committed depth/lateral offsets, held through unmeasurable frames
+   *  (deep bows, off-frame torso). Model units, before groundingGain. */
+  private heldDz = 0
+  private heldDx = 0
+  /** This frame's センター displacement, written by measureRootShift(). */
+  private rootDx = 0
+  private rootDz = 0
+
+  /** Unfiltered parent-local rotation per bone, after the dropout crossfade. */
   private locals: Record<string, Quat> = {}
+  /** Last MEASURED local per bone (hemisphere w≥0) — what the crossfade blends
+   *  between rest and, held through dropouts while the fade runs out. */
+  private heldMeasured: Record<string, Quat> = {}
+  /** Tracking blend per bone: 0 = at rest, 1 = fully on the measurement. */
+  private fades: Record<string, number> = {}
+  private fadePrevTs: number | null = null
+  /** Hand hysteresis state (see HAND_WARMUP_MS / HAND_GRACE_MS). */
+  private handEngagement = {
+    leftHand: { seen: 0, gone: 0, engaged: false },
+    rightHand: { seen: 0, gone: 0, engaged: false },
+  }
+  /** Full measured chest rotation and its half, staged by the 上半身 solve for
+   *  the 上半身2 def that runs right after it. */
+  private chestHalf = Quat.identity()
+  private chestMeasuredFrame = false
+  /** Whether the calibrated model has an 上半身2 to take its half; without one
+   *  the whole chest rotation stays on 上半身. */
+  private hasUpperBody2 = true
+  /** Shoulder-line tilt (radians, + = left shoulder up), for the 肩 share. */
+  private shoulderTilt = 0
+  /** Extra-calm scalar filters on the roll channel (see ROLL_STABILIZED). */
+  private rollFilters: Record<string, OneEuroFilter> = {}
+  /** Last filtered roll angle per bone, for ±π unwrapping. */
+  private prevRoll: Record<string, number> = {}
   /** Accumulated world rotation per bone (parent chain product), rebuilt each frame. */
   private worlds: Record<string, Quat> = {}
   /** World rotations recomposed from the FILTERED locals — what grounding reads. */
@@ -351,6 +513,9 @@ export class Solver {
   // three is filtered at its RESTING cutoff throughout and lands short. 4 Hz
   // gets there in roughly two frames, inside the action rather than after it.
   // This is the single parameter behind 动作没做到位.
+  //
+  // beta 1.5: a trial at 3 measured ~8ms less filter lag but read as jitter by
+  // eye — and the eye is the instrument this number was tuned on.
   private smoothing = { minCutoff: 1.5, beta: 1.5, dCutoff: 4.0 }
 
   /**
@@ -364,6 +529,8 @@ export class Solver {
     // Position filters carry the same cutoffs and must be rebuilt too, or the
     // IK targets keep smoothing at the old settings while the rotations change.
     this.moveFilters = {}
+    // Roll filters scale off the same settings.
+    this.rollFilters = {}
   }
 
   /** The live smoothing settings, so an offline pass can match them. */
@@ -386,6 +553,8 @@ export class Solver {
       const state: BoneState = { name: def.name, rotation: Quat.identity() }
       this.outputByName[def.name] = state
       this.locals[def.name] = Quat.identity()
+      this.heldMeasured[def.name] = Quat.identity()
+      this.fades[def.name] = 0
       this.worlds[def.name] = Quat.identity()
       this.filteredWorlds[def.name] = Quat.identity()
       return state
@@ -412,6 +581,30 @@ export class Solver {
 
   reset(): void {
     this.heldDy = 0
+    this.heldDz = 0
+    this.heldDx = 0
+    this.depthBase = 0
+    this.depthBaseX = 0
+    this.depthBaseFrames = 0
+    this.fadePrevTs = null
+    this.chestMeasuredFrame = false
+    this.shoulderTilt = 0
+    for (const key of Object.keys(this.rollFilters)) this.rollFilters[key].reset()
+    this.prevRoll = {}
+    for (const key of Object.keys(this.fades)) {
+      this.fades[key] = 0
+      this.heldMeasured[key].setIdentity()
+    }
+    for (const side of ["leftHand", "rightHand"] as const) {
+      const h = this.handEngagement[side]
+      h.seen = 0
+      h.gone = 0
+      h.engaged = false
+    }
+    for (const source of ["pose", "leftHand", "rightHand"] as const) {
+      for (const f of this.zFilters[source]) f.reset()
+      this.zActive[source] = false
+    }
     for (const key of Object.keys(this.filters)) this.filters[key].reset()
     // Position filters too, or a second still eases out of the first one's
     // body placement instead of simply being that pose.
@@ -615,7 +808,10 @@ export class Solver {
    * no frame conversions, nothing to drift.
    */
   private applyShoulderRhythm(): void {
-    if (this.shoulderRatio <= 0) return
+    // Shoulder-line tilt share: the trunk basis orthogonalizes the tilt away,
+    // so the clavicles are the only place a shrug can live. Faded with the
+    // chest's own tracking blend.
+    const tilt = this.shoulderTilt * (this.fades["上半身"] ?? 0)
     for (const side of ["左", "右"] as const) {
       const armLocal = this.locals[side + "腕"]
       const shoulderLocal = this.locals[side + "肩"]
@@ -623,26 +819,36 @@ export class Solver {
 
       const w = Math.min(1, Math.abs(armLocal.w))
       const angle = 2 * Math.acos(w)
-      if (angle <= this.shoulderStart) {
-        shoulderLocal.setIdentity()
-        continue
-      }
-      const sin = Math.sqrt(Math.max(0, 1 - w * w))
-      if (sin < 1e-6) {
-        shoulderLocal.setIdentity()
-        continue
-      }
-      // armLocal's sign convention follows w; keep the axis on the same side.
-      const flip = armLocal.w < 0 ? -1 : 1
-      const ax = (armLocal.x * flip) / sin
-      const ay = (armLocal.y * flip) / sin
-      const az = (armLocal.z * flip) / sin
 
-      // Ramp in over the first 30° past the threshold rather than stepping.
-      const ramp = Math.min(1, (angle - this.shoulderStart) / this.shoulderRamp)
-      let take = (angle - this.shoulderStart) * this.shoulderRatio * ramp
-      if (take > this.shoulderMax) take = this.shoulderMax
-      Quat.fromAxisAngleInto(ax, ay, az, take, shoulderLocal)
+      // Elevation share (scapulohumeral rhythm), ramped past the threshold.
+      shoulderLocal.setIdentity()
+      if (this.shoulderRatio > 0 && angle > this.shoulderStart) {
+        const sin = Math.sqrt(Math.max(0, 1 - w * w))
+        if (sin >= 1e-6) {
+          // armLocal's sign convention follows w; keep the axis on the same side.
+          const flip = armLocal.w < 0 ? -1 : 1
+          const ax = (armLocal.x * flip) / sin
+          const ay = (armLocal.y * flip) / sin
+          const az = (armLocal.z * flip) / sin
+          const ramp = Math.min(1, (angle - this.shoulderStart) / this.shoulderRamp)
+          let take = (angle - this.shoulderStart) * this.shoulderRatio * ramp
+          if (take > this.shoulderMax) take = this.shoulderMax
+          Quat.fromAxisAngleInto(ax, ay, az, take, shoulderLocal)
+        }
+      }
+
+      // Tilt share, damped as the arm rises — a raised arm's clavicle is
+      // already rotated by the elevation share above.
+      let tiltSide = tilt * SHOULDER_TILT_SHARE * Math.max(0, 1 - angle / SHOULDER_TILT_DAMP_ANGLE)
+      if (tiltSide > SHOULDER_TILT_MAX) tiltSide = SHOULDER_TILT_MAX
+      else if (tiltSide < -SHOULDER_TILT_MAX) tiltSide = -SHOULDER_TILT_MAX
+      if (Math.abs(tiltSide) > 1e-4) {
+        Quat.fromAxisAngleInto(0, 0, 1, tiltSide, _clearC)
+        Quat.multiplyInto(_clearC, shoulderLocal, _clearA)
+        shoulderLocal.set(_clearA)
+      }
+
+      if (shoulderLocal.w > 1 - 1e-9) continue
       // Remove exactly what the shoulder took, so the arm still points where the
       // landmarks say it does.
       Quat.conjugateInto(shoulderLocal, _clearA)
@@ -652,7 +858,7 @@ export class Solver {
   }
 
   /**
-   * Place the body in space: how high the hips ride, and where each foot lands.
+   * Place the body in space: how high the hips ride.
    *
    * MediaPipe's world landmarks are hip-centred, so the hip's own height is not
    * in them — but the distance from hip down to the LOWER foot is, and that is
@@ -664,11 +870,10 @@ export class Solver {
    * Scale comes from leg length — the model's hip→knee→ankle against the
    * landmarks' — so no calibration pose is needed.
    *
-   * Then the leg chain is walked forward from the placed hip to find each ankle,
-   * which becomes that leg's IK target. Feet land on the floor by construction:
-   * if the hips sit exactly one bent-leg's height above it, the bent leg reaches
-   * it. What this cannot do is leave the ground — both feet airborne is
-   * indistinguishable from standing, in hip-centred coordinates.
+   * The legs themselves stay pure FK: the chain walk below only asks where the
+   * solved rotations put each ankle, so the body can be dropped until the lower
+   * one rests on the floor. What this cannot do is leave the ground — both feet
+   * airborne is indistinguishable from standing, in hip-centred coordinates.
    */
   private solveGrounding(timestampMs: number, unfiltered = false): void {
     const center = this.outputByName["センター"]
@@ -686,7 +891,6 @@ export class Solver {
     // formulation cannot drift: the supporting foot is on the floor because the
     // body was placed to put it there.
     const ankleY: Record<string, number> = {}
-    const ankleWorld: Record<string, { x: number; y: number; z: number }> = {}
     // 足 hangs off 下半身, which the solver rotates every frame — a leaning or
     // twisting lower body carries the hip joints with it. Starting the chain at
     // 足's REST position ignores that and leaves the body floating (or sunk) by
@@ -710,9 +914,7 @@ export class Solver {
       Quat.rotateVecInto(thighWorld, _gA, _gA)
       _gB.setXYZ(ankle.x - knee.x, ankle.y - knee.y, ankle.z - knee.z)
       Quat.rotateVecInto(shinWorld, _gB, _gB)
-      const p = { x: hip.x + _gA.x + _gB.x, y: hip.y + _gA.y + _gB.y, z: hip.z + _gA.z + _gB.z }
-      ankleWorld[side] = p
-      ankleY[side] = p.y
+      ankleY[side] = hip.y + _gA.y + _gB.y
     }
     const ys = Object.values(ankleY)
     if (ys.length === 0 || !ys.every(Number.isFinite)) return
@@ -755,6 +957,10 @@ export class Solver {
     }
     this.heldDy = rawDy
 
+    this.measureRootShift()
+    const rawDx = this.rootDx * this.groundingGain
+    const rawDz = this.rootDz * this.groundingGain
+
     let mf = this.moveFilters["センター"]
     if (!mf) {
       mf = new Vec3OneEuroFilter(this.smoothing.minCutoff, this.smoothing.beta, this.smoothing.dCutoff)
@@ -762,33 +968,9 @@ export class Solver {
     }
     if (unfiltered) {
       mf.reset()
-      center.translation.setXYZ(0, rawDy, 0)
+      center.translation.setXYZ(rawDx, rawDy, rawDz)
     } else {
-      mf.filterInto(0, rawDy, 0, timestampMs, center.translation)
-    }
-    const dy = center.translation.y
-
-    // Each ankle, lifted by the same offset, is that leg's IK target.
-    for (const side of ["左", "右"] as const) {
-      const ikOut = this.outputByName[side + "足ＩＫ"]
-      const ikRest = rest[side + "足ＩＫ"] ?? rest[side + "足首"]
-      const p = ankleWorld[side]
-      if (!ikOut?.translation || !ikRest || !p) continue
-      let f = this.moveFilters[side + "足ＩＫ"]
-      if (!f) {
-        f = new Vec3OneEuroFilter(this.smoothing.minCutoff, this.smoothing.beta, this.smoothing.dCutoff)
-        this.moveFilters[side + "足ＩＫ"] = f
-      }
-      if (unfiltered) {
-        f.reset()
-        ikOut.translation.setXYZ(p.x - ikRest.x, p.y + dy - ikRest.y, p.z - ikRest.z)
-      } else {
-        f.filterInto(p.x - ikRest.x, p.y + dy - ikRest.y, p.z - ikRest.z, timestampMs, ikOut.translation)
-      }
-      // With IK driving the chain the foot takes its orientation from the IK
-      // bone, so hand it the ankle's (filtered) world rotation.
-      const footWorld = this.filteredWorlds[side + "足首"]
-      if (footWorld) ikOut.rotation.set(footWorld)
+      mf.filterInto(rawDx, rawDy, rawDz, timestampMs, center.translation)
     }
   }
 
@@ -824,6 +1006,22 @@ export class Solver {
     set("右ひざ", dir("右ひざ", "右足首"))
 
     this.restPos = restWorldPos
+    this.hasUpperBody2 = !!restWorldPos["上半身2"]
+
+    // Spine length for the projective depth rebuild: shoulder-line centre to
+    // hip-line centre, the same segment the 2D measurement spans (the arm and
+    // leg roots sit at the joints MediaPipe's landmarks mark).
+    const la = restWorldPos["左腕"]
+    const ra = restWorldPos["右腕"]
+    const ll = restWorldPos["左足"]
+    const rl = restWorldPos["右足"]
+    if (la && ra && ll && rl) {
+      this.spineLen = Math.hypot(
+        (la.x + ra.x - ll.x - rl.x) / 2,
+        (la.y + ra.y - ll.y - rl.y) / 2,
+        (la.z + ra.z - ll.z - rl.z) / 2,
+      )
+    }
 
     // Ankle: pose runtime uses ankle→foot_index, so calibrate the same shape.
     set("左足首", dir("左足首", "左つま先"))
@@ -883,43 +1081,104 @@ export class Solver {
    * filters are reseeded so switching back to video starts clean.
    */
   solve(landmarks: SolverInput, timestampMs: number = performance.now(), unfiltered = false): BoneState[] {
-    this.pose =
+    const filterZ = this.zFilterEnabled && !unfiltered
+    this.pose = this.intake(
       landmarks.poseWorldLandmarks.length > 0 && landmarks.poseWorldLandmarks[0].length === 33
         ? landmarks.poseWorldLandmarks[0]
-        : null
-    this.leftHand =
+        : null,
+      "pose", this.poseBuf, timestampMs, filterZ,
+    )
+    this.leftHand = this.intake(
       landmarks.leftHandWorldLandmarks.length > 0 && landmarks.leftHandWorldLandmarks[0].length === 21
         ? landmarks.leftHandWorldLandmarks[0]
-        : null
-    this.rightHand =
+        : null,
+      "leftHand", this.leftHandBuf, timestampMs, filterZ,
+    )
+    this.rightHand = this.intake(
       landmarks.rightHandWorldLandmarks.length > 0 && landmarks.rightHandWorldLandmarks[0].length === 21
         ? landmarks.rightHandWorldLandmarks[0]
+        : null,
+      "rightHand", this.rightHandBuf, timestampMs, filterZ,
+    )
+    this.pose2d =
+      landmarks.poseLandmarks && landmarks.poseLandmarks.length > 0 && landmarks.poseLandmarks[0].length === 33
+        ? landmarks.poseLandmarks[0]
         : null
+    if (landmarks.imageAspect) this.imageAspect = landmarks.imageAspect
 
+    // Crossfade clock (media time, so conversions pace identically to live).
+    let fadeDt = 33.3
+    if (this.fadePrevTs !== null) {
+      const d = timestampMs - this.fadePrevTs
+      if (d > 0 && d < 500) fadeDt = d
+    }
+    this.fadePrevTs = timestampMs
+    for (const side of ["leftHand", "rightHand"] as const) {
+      const h = this.handEngagement[side]
+      if (this.handConfidence(side) >= MIN_VISIBILITY) {
+        h.seen += fadeDt
+        h.gone = 0
+        if (h.seen >= HAND_WARMUP_MS) h.engaged = true
+      } else {
+        h.gone += fadeDt
+        if (h.gone >= HAND_GRACE_MS) {
+          h.engaged = false
+          h.seen = 0
+        }
+      }
+    }
+
+    this.chestMeasuredFrame = false
     for (const def of BONE_DEFS) {
       const local = this.locals[def.name]
-      // Each solve writes into `local`, or leaves it untouched (hold) when its
-      // landmarks are missing or below the visibility gate.
+      if (def.kind === "fingerRatio") {
+        // Derived joints read their base's already-faded local, so they follow
+        // its crossfade for free.
+        this.solveFingerRatio(def, local)
+        continue
+      }
+      let measured: boolean
       switch (def.kind) {
         case "basis":
-          this.solveBasis(def, local)
+          measured = this.solveBasis(def, sMeas)
           break
         case "direction":
-          this.solveDirection(def, local)
+          measured = this.solveDirection(def, sMeas)
           break
-        case "twist":
-          this.solveTwist(def, local)
-          break
-        case "fingerRatio":
-          this.solveFingerRatio(def, local)
+        default:
+          measured = this.solveTwist(def, sMeas)
           break
       }
-      if (def.kind !== "fingerRatio") {
-        const world = this.worlds[def.name]
-        const parent = def.parent ? this.worlds[def.parent] : null
-        if (parent) Quat.multiplyInto(parent, local, world)
-        else world.set(local)
+      // A present-but-unengaged hand is treated as absent (see hysteresis note).
+      if (measured && def.kind !== "basis" && def.source !== "pose" && !this.handEngagement[def.source].engaged) {
+        measured = false
       }
+      const held = this.heldMeasured[def.name]
+      if (measured) {
+        if (sMeas.w < 0) sMeas.setXYZW(-sMeas.x, -sMeas.y, -sMeas.z, -sMeas.w)
+        held.set(sMeas)
+      }
+      let fade = this.fades[def.name]
+      const graceHold =
+        !measured && def.kind !== "basis" && def.source !== "pose" && this.handEngagement[def.source].engaged
+      if (unfiltered) fade = measured ? 1 : 0
+      else if (measured) fade = Math.min(1, fade + fadeDt / FADE_IN_MS)
+      // An engaged hand inside its grace window holds — a flicker costs nothing.
+      else if (!graceHold) fade = Math.max(0, fade - fadeDt / FADE_OUT_MS)
+      this.fades[def.name] = fade
+      const w = 0.5 - 0.5 * Math.cos(Math.PI * fade)
+      if (w >= 1) local.set(held)
+      else if (w <= 0) local.setIdentity()
+      else {
+        // nlerp(identity, held, w); held is hemisphere-aligned to identity.
+        local.setXYZW(held.x * w, held.y * w, held.z * w, held.w * w + (1 - w))
+        local.normalize()
+      }
+      if (ROLL_STABILIZED.has(def.name)) this.stabilizeRoll(def.name, local, timestampMs, unfiltered)
+      const world = this.worlds[def.name]
+      const parent = def.parent ? this.worlds[def.parent] : null
+      if (parent) Quat.multiplyInto(parent, local, world)
+      else world.set(local)
     }
 
     // Shoulder rhythm rewrites 肩 and 腕 locals, so the world chain is rebuilt
@@ -984,8 +1243,154 @@ export class Solver {
 
   // -------------------------------------------------------------------------
 
+  /** Copy a landmark array into its buffer with the z channel low-passed. */
+  private intake(
+    src: Landmark[] | null,
+    source: LandmarkSource,
+    buf: Landmark[],
+    ts: number,
+    filterZ: boolean,
+  ): Landmark[] | null {
+    const bank = this.zFilters[source]
+    const active = filterZ && src !== null
+    if (!active && this.zActive[source]) for (const f of bank) f.reset()
+    this.zActive[source] = active
+    if (!src) return null
+    for (let i = 0; i < buf.length; i++) {
+      const s = src[i]
+      const d = buf[i]
+      d.x = s.x
+      d.y = s.y
+      d.visibility = s.visibility
+      d.z = active ? bank[i].filter(s.z, ts) : s.z
+    }
+    return buf
+  }
+
+  /**
+   * センター displacement, rebuilt from 2D projective geometry.
+   *
+   * MediaPipe's world landmarks are hip-centred: the pelvis is the ORIGIN, so
+   * pelvis translation — hip sway, a side-step, walking toward the camera — is
+   * exactly the signal that coordinate system deletes. The 2D projection still
+   * carries all of it.
+   *
+   * Lateral: the hip midpoint's position in the frame, converted to model
+   * units by spineLen / projected-spine — the focal length cancels, so
+   * side-to-side motion needs no camera guess and doesn't drift.
+   *
+   * Depth: the projected spine shrinks as the subject steps back, by the
+   * pinhole ratio; dividing by |cos(torso pitch)| first undoes foreshortening
+   * so a bow doesn't read as walking away. (Off by default — the length
+   * estimate drifts over a session.)
+   *
+   * Both are offsets from the standing baseline (running mean of the first
+   * ~2s), in model units, written to rootDx / rootDz. Negative z is toward
+   * the viewer.
+   */
+  private measureRootShift(): void {
+    this.rootDx = this.swayEnabled ? this.heldDx : 0
+    this.rootDz = this.depthEnabled ? this.heldDz : 0
+    if ((!this.swayEnabled && !this.depthEnabled) || this.spineLen <= 0) return
+    const lm = this.pose2d
+    const pose = this.pose
+    if (!lm || !pose) return
+    const ls = lm[PoseLandmarksTable.left_shoulder]
+    const rs = lm[PoseLandmarksTable.right_shoulder]
+    const lh = lm[PoseLandmarksTable.left_hip]
+    const rh = lm[PoseLandmarksTable.right_hip]
+    if (!ls || !rs || !lh || !rh) return
+    if (Math.min(ls.visibility ?? 1, rs.visibility ?? 1, lh.visibility ?? 1, rh.visibility ?? 1) < MIN_VISIBILITY)
+      return
+
+    // Projected spine, in image-height units (x is width-normalized).
+    const px = ((ls.x + rs.x - lh.x - rh.x) / 2) * this.imageAspect
+    const py = (ls.y + rs.y - lh.y - rh.y) / 2
+    const len2d = Math.hypot(px, py)
+    if (len2d < 1e-4) return
+
+    // Torso pitch out of the image plane, from the world landmarks (their z
+    // has already been through the z low-pass, so this is a calm signal).
+    const wls = pose[PoseLandmarksTable.left_shoulder]
+    const wrs = pose[PoseLandmarksTable.right_shoulder]
+    const wlh = pose[PoseLandmarksTable.left_hip]
+    const wrh = pose[PoseLandmarksTable.right_hip]
+    if (!wls || !wrs || !wlh || !wrh) return
+    const sx = (wls.x + wrs.x - wlh.x - wrh.x) / 2
+    const sy = (wls.y + wrs.y - wlh.y - wrh.y) / 2
+    const sz = (wls.z + wrs.z - wlh.z - wrh.z) / 2
+    const s3d = Math.hypot(sx, sy, sz)
+    if (s3d < 1e-6) return
+    const cos = Math.sqrt(Math.max(0, 1 - (sz / s3d) ** 2))
+    if (cos < DEPTH_MIN_COS) return
+
+    // Model units per image-height unit at the subject's distance (= D/f).
+    const scale = (this.spineLen * cos) / len2d
+    const hipX = (((lh.x + rh.x) / 2) * this.imageAspect) * scale
+    const dist = scale * DEPTH_FOCAL
+    if (this.depthBaseFrames < DEPTH_BASE_FRAMES) {
+      this.depthBaseFrames++
+      this.depthBase += (dist - this.depthBase) / this.depthBaseFrames
+      this.depthBaseX += (hipX - this.depthBaseX) / this.depthBaseFrames
+    }
+    // One bad 2D frame must not send the model across the stage.
+    const lim = this.spineLen * 3
+    const clamp = (v: number) => (v > lim ? lim : v < -lim ? -lim : v)
+    this.heldDx = clamp(hipX - this.depthBaseX)
+    this.heldDz = clamp(dist - this.depthBase)
+    this.rootDx = this.swayEnabled ? this.heldDx : 0
+    this.rootDz = this.depthEnabled ? this.heldDz : 0
+  }
+
   private getRef(key: string): Vec3 {
     return this.refs[key] ?? DEFAULT_REFS[key]
+  }
+
+  /** Tracking-gate threshold with hysteresis: a bone already tracking stays
+   *  in down to VISIBILITY_EXIT, so a landmark hovering at the entry
+   *  threshold cannot make the crossfade oscillate. */
+  private visGate(name: string): number {
+    return (this.fades[name] ?? 0) >= 0.5 ? VISIBILITY_EXIT : MIN_VISIBILITY
+  }
+
+  /**
+   * Swing-twist decompose the local about the bone's own rest axis, pass the
+   * twist angle through its extra-calm scalar filter, and recompose on the
+   * right — the swing (bone direction) is untouched, only the spin about the
+   * axis is steadied.
+   */
+  private stabilizeRoll(name: string, local: Quat, ts: number, unfiltered: boolean): void {
+    const axis = this.getRef(name)
+    Quat.twistAroundAxisInto(local, axis, sQ)
+    const k = sQ.x * axis.x + sQ.y * axis.y + sQ.z * axis.z
+    let angle = 2 * Math.atan2(k, sQ.w)
+    if (angle > Math.PI) angle -= 2 * Math.PI
+    else if (angle < -Math.PI) angle += 2 * Math.PI
+    // Unwrap against the last output so a roll crossing ±π doesn't feed the
+    // filter a fake 2π step.
+    const prev = this.prevRoll[name]
+    if (prev !== undefined) {
+      while (angle - prev > Math.PI) angle -= 2 * Math.PI
+      while (angle - prev < -Math.PI) angle += 2 * Math.PI
+    }
+    let f = this.rollFilters[name]
+    if (!f) {
+      f = new OneEuroFilter(
+        this.smoothing.minCutoff * ROLL_CUTOFF_SCALE,
+        this.smoothing.beta * ROLL_BETA_SCALE,
+        this.smoothing.dCutoff,
+      )
+      this.rollFilters[name] = f
+    }
+    let filtered = angle
+    if (unfiltered) f.reset()
+    else filtered = f.filter(angle, ts)
+    this.prevRoll[name] = filtered
+    // swing = local ∘ twist⁻¹, then recompose with the steadied twist.
+    sQ.conjugate()
+    Quat.multiplyInto(local, sQ, sQ2)
+    Quat.fromAxisAngleInto(axis.x, axis.y, axis.z, filtered, sQ)
+    Quat.multiplyInto(sQ2, sQ, local)
   }
 
   private sourceLandmarks(source: LandmarkSource): Landmark[] | null {
@@ -1050,22 +1455,24 @@ export class Solver {
     return n > 0 ? sum / n : 1
   }
 
-  private solveDirection(def: DirectionDef, out: Quat): void {
+  /** Returns whether a measurement was written into `out`. */
+  private solveDirection(def: DirectionDef, out: Quat): boolean {
     const from = this.point(def.source, def.from, sFrom)
     const to = this.point(def.source, def.to, sTo)
-    if (!from || !to) return
-    if (this.visibility(def.source, [def.from, def.to]) < MIN_VISIBILITY) return
+    if (!from || !to) return false
+    if (this.visibility(def.source, [def.from, def.to]) < this.visGate(def.name)) return false
 
     Vec3.subtractInto(to, from, sDir)
     const parentWorld = def.parent ? this.worlds[def.parent] : null
     if (parentWorld) Quat.rotateVecInvInto(parentWorld, sDir, sDir)
-    if (sDir.length() < 1e-6) return
+    if (sDir.length() < 1e-6) return false
     sDir.normalizeInPlace()
 
     Quat.fromUnitVectorsInto(this.getRef(def.name), sDir, out)
 
     if (def.witness && this.witnessEnabled) this.applyWitness(def, parentWorld, out)
     if (def.bend && this.bendClampEnabled) Solver.clampBend(def.bend, out)
+    return true
   }
 
   /**
@@ -1189,20 +1596,23 @@ export class Solver {
     return perpLen
   }
 
-  private solveTwist(def: TwistDef, out: Quat): void {
+  /** Returns whether a measurement was written into `out`. */
+  private solveTwist(def: TwistDef, out: Quat): boolean {
     const from = this.point(def.source, def.from, sFrom)
     const to = this.point(def.source, def.to, sTo)
-    if (!from || !to) return
+    if (!from || !to) return false
+    if (this.visibility(def.source, [def.from, def.to]) < this.visGate(def.name)) return false
 
     Vec3.subtractInto(to, from, sDir)
     Quat.rotateVecInvInto(this.worlds[def.parent], sDir, sDir)
-    if (sDir.length() < 1e-6) return
+    if (sDir.length() < 1e-6) return false
     sDir.normalizeInPlace()
 
     // Total rotation aligning the rest hand axis to the live one includes the
     // wrist swing; project onto the forearm axis to keep only the twist.
     Quat.fromUnitVectorsInto(this.getRef(def.name), sDir, sQ)
     Quat.twistAroundAxisInto(sQ, this.getRef(def.axisRef), out)
+    return true
   }
 
   private solveFingerRatio(def: FingerRatioDef, out: Quat): void {
@@ -1222,23 +1632,42 @@ export class Solver {
     return 2 * Math.atan2(axisComponent, quat.w) * (180 / Math.PI)
   }
 
-  private solveBasis(def: BasisDef, out: Quat): void {
-    if (!this.pose) return
-    if (this.visibility("pose", BASIS_LANDMARKS[def.name]) < MIN_VISIBILITY) return
+  /** Returns whether a measurement was written into `out`. */
+  private solveBasis(def: BasisDef, out: Quat): boolean {
+    if (!this.pose) return false
+    if (this.visibility("pose", BASIS_LANDMARKS[def.name]) < this.visGate(def.name)) return false
 
     switch (def.name) {
       case "上半身": {
-        if (!this.point("pose", "left_shoulder", sA) || !this.point("pose", "right_shoulder", sB)) return
+        if (!this.point("pose", "left_shoulder", sA) || !this.point("pose", "right_shoulder", sB)) return false
         // spineY = shoulder center (pose world origin is the hip center)
         sDir.setXYZ((sA.x + sB.x) / 2, (sA.y + sB.y) / 2, (sA.z + sB.z) / 2).normalizeInPlace()
         Vec3.subtractInto(sA, sB, sC).normalizeInPlace()
+        // Shoulder-line tilt, read BEFORE the basis orthogonalizes it away —
+        // the clavicles carry it (applyShoulderRhythm), the trunk cannot.
+        const lean = sC.dot(sDir)
+        this.shoulderTilt = Math.asin(Math.max(-1, Math.min(1, lean)))
         Solver.basisFromYAndX(sDir, sC, out)
-        return
+        if (out.w < 0) out.setXYZW(-out.x, -out.y, -out.z, -out.w)
+        this.chestMeasuredFrame = true
+        if (this.hasUpperBody2) {
+          // Split the chest rotation evenly across 上半身∘上半身2 so the spine
+          // curves. normalize(I + R) is exactly R^½, and R^½∘R^½ = R.
+          this.chestHalf.setXYZW(out.x, out.y, out.z, out.w + 1)
+          this.chestHalf.normalize()
+          out.set(this.chestHalf)
+        }
+        return true
+      }
+      case "上半身2": {
+        if (!this.hasUpperBody2 || !this.chestMeasuredFrame) return false
+        out.set(this.chestHalf)
+        return true
       }
       case "下半身": {
-        if (!this.point("pose", "left_shoulder", sA) || !this.point("pose", "right_shoulder", sB)) return
+        if (!this.point("pose", "left_shoulder", sA) || !this.point("pose", "right_shoulder", sB)) return false
         sFrom.setXYZ((sA.x + sB.x) / 2, (sA.y + sB.y) / 2, (sA.z + sB.z) / 2)
-        if (!this.point("pose", "left_hip", sA) || !this.point("pose", "right_hip", sB)) return
+        if (!this.point("pose", "left_hip", sA) || !this.point("pose", "right_hip", sB)) return false
         sTo.setXYZ((sA.x + sB.x) / 2, (sA.y + sB.y) / 2, (sA.z + sB.z) / 2)
         // Pelvis basis shares the trunk Y with 上半身 (no separate pelvis-tilt
         // landmark exists); lower/upper differ in X (hip vs shoulder line),
@@ -1246,11 +1675,12 @@ export class Solver {
         Vec3.subtractInto(sFrom, sTo, sDir).normalizeInPlace()
         Vec3.subtractInto(sA, sB, sC).normalizeInPlace()
         Solver.basisFromYAndX(sDir, sC, out)
-        return
+        this.applyPelvisTuck(out)
+        return true
       }
       case "頭": {
-        if (!this.point("pose", "left_ear", sA) || !this.point("pose", "right_ear", sB)) return
-        if (!this.point("pose", "left_eye", sFrom) || !this.point("pose", "right_eye", sTo)) return
+        if (!this.point("pose", "left_ear", sA) || !this.point("pose", "right_ear", sB)) return false
+        if (!this.point("pose", "left_eye", sFrom) || !this.point("pose", "right_eye", sTo)) return false
         const parentWorld = this.worlds[def.parent!]
         // X = ear axis, Z = back (ear center − eye center; eyes sit forward of
         // ears), Y = cross — one basis, one decomposition, no gimbal compounding.
@@ -1267,9 +1697,44 @@ export class Solver {
         sC.setXYZ(sC.x - sDir.x * d, sC.y - sDir.y * d, sC.z - sDir.z * d).normalizeInPlace()
         Vec3.crossInto(sDir, sC, sA)
         Quat.fromBasisInto(sC, sA, sDir, out)
-        return
+        return true
       }
     }
+    return false
+  }
+
+  /**
+   * Sitting and crouching read as the pelvis tucking under, not a 90° hinge
+   * at the hip: feed a share of the mean thigh pitch into 下半身 as posterior
+   * tilt. Measured in the pelvis' own frame, so a body lying flat (thighs in
+   * line with the trunk) adds nothing.
+   */
+  private applyPelvisTuck(out: Quat): void {
+    let sum = 0
+    let n = 0
+    for (const side of ["left", "right"] as const) {
+      if (this.visibility("pose", [`${side}_hip`, `${side}_knee`]) < MIN_VISIBILITY) continue
+      const hip = this.point("pose", `${side}_hip`, sFrom)
+      if (!hip) continue
+      const knee = this.point("pose", `${side}_knee`, sTo)
+      if (!knee) continue
+      Vec3.subtractInto(sTo, sFrom, sWit)
+      Quat.rotateVecInvInto(out, sWit, sWit)
+      if (sWit.length() < 1e-6) continue
+      sWit.normalizeInPlace()
+      // 0 = thigh straight down, +π/2 = thigh forward (model −Z).
+      sum += Math.atan2(-sWit.z, -sWit.y)
+      n++
+    }
+    if (n === 0) return
+    let extra = (sum / n) * PELVIS_THIGH_SHARE
+    if (extra > 30 * DEG) extra = 30 * DEG
+    else if (extra < -10 * DEG) extra = -10 * DEG
+    if (Math.abs(extra) < 1e-4) return
+    // Post-multiply = rotation about the pelvis' own X: posterior tilt.
+    Quat.fromAxisAngleInto(1, 0, 0, extra, sQ)
+    Quat.multiplyInto(out, sQ, sQ2)
+    out.set(sQ2)
   }
 
   /** Basis from a trunk Y axis and a raw (non-orthogonal) X axis: X ⊥ Y, Z = X×Y. */

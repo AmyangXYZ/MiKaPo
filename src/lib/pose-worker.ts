@@ -22,6 +22,11 @@ export interface PoseWorkerResult {
   leftHandWorldLandmarks: HolisticLandmarkerResult["leftHandWorldLandmarks"]
   rightHandWorldLandmarks: HolisticLandmarkerResult["rightHandWorldLandmarks"]
   faceLandmarks: HolisticLandmarkerResult["faceLandmarks"]
+  /** Image-space pose landmarks: the solver's projective depth rebuild reads
+   * the 2D spine length, which the hip-centred world landmarks cannot carry. */
+  poseLandmarks: HolisticLandmarkerResult["poseLandmarks"]
+  /** Frame width/height — 2D landmark x is width-normalized. */
+  imageAspect: number
 }
 
 export type PoseWorkerResponse =
@@ -34,7 +39,7 @@ let runningMode: "VIDEO" | "IMAGE" = "VIDEO"
 
 const post = (msg: PoseWorkerResponse) => (self as unknown as Worker).postMessage(msg)
 
-const emit = (result: HolisticLandmarkerResult, mediaTs: number) => {
+const emit = (result: HolisticLandmarkerResult, mediaTs: number, imageAspect: number) => {
   post({
     type: "result",
     mediaTs,
@@ -43,6 +48,8 @@ const emit = (result: HolisticLandmarkerResult, mediaTs: number) => {
       leftHandWorldLandmarks: result.leftHandWorldLandmarks,
       rightHandWorldLandmarks: result.rightHandWorldLandmarks,
       faceLandmarks: result.faceLandmarks,
+      poseLandmarks: result.poseLandmarks,
+      imageAspect,
     },
   })
 }
@@ -115,18 +122,23 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
         // is the documented way to clear it without rebuilding the model.
         if (landmarker) await landmarker.setOptions({ runningMode })
         break
-      case "video":
+      case "video": {
         if (landmarker && runningMode === "VIDEO") {
-          landmarker.detectForVideo(msg.bitmap, msg.ts, (result) => emit(result, msg.mediaTs))
+          // Read before close — the result callback outlives the bitmap.
+          const aspect = msg.bitmap.width / Math.max(1, msg.bitmap.height)
+          landmarker.detectForVideo(msg.bitmap, msg.ts, (result) => emit(result, msg.mediaTs, aspect))
         }
         msg.bitmap.close()
         break
-      case "image":
+      }
+      case "image": {
         if (landmarker && runningMode === "IMAGE") {
-          landmarker.detect(msg.bitmap, (result) => emit(result, msg.mediaTs))
+          const aspect = msg.bitmap.width / Math.max(1, msg.bitmap.height)
+          landmarker.detect(msg.bitmap, (result) => emit(result, msg.mediaTs, aspect))
         }
         msg.bitmap.close()
         break
+      }
     }
   } catch (err) {
     post({ type: "error", message: err instanceof Error ? err.message : String(err) })
