@@ -914,12 +914,7 @@ export const MotionCapture = ({
                 <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-2 py-1.5">
                   <button
                     type="button"
-                    // Blur immediately: a focused button swallows the Space
-                    // shortcut (the global handler defers to focused controls).
-                    onClick={(e) => {
-                      e.currentTarget.blur()
-                      toggleVideoPlay()
-                    }}
+                    onClick={toggleVideoPlay}
                     disabled={converting}
                     className="flex size-6 shrink-0 items-center justify-center rounded text-white/90 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
                     aria-label={videoPlaying ? "Pause" : "Play"}
