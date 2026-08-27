@@ -258,6 +258,9 @@ export const MotionCapture = ({
   /** Playback cursor on the media timeline (see the display loop below). */
   const displayClockRef = useRef(0)
   const lastMediaTsRef = useRef(-1)
+  /** Set by the capture loop when the grabbed frame came from a PAUSED video
+   *  (fresh upload, scrub): its result is solved as a still. */
+  const stillGrabRef = useRef(false)
   const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
     // Throttled React update — feeds only the debug skeleton preview.
     const now = performance.now()
@@ -268,17 +271,25 @@ export const MotionCapture = ({
 
     if (!modelLoadedRef.current) return
 
+    // A paused video's frame is a still: one unfiltered solve completes the
+    // pose (crossfades snap rather than creep), and a single engine tween
+    // eases the model there — instead of re-solving on a timer, which walked
+    // the pose in visible 250ms steps.
     const isImage = inputModeRef.current === "image"
-    const pose = solverRef.current.solve(result, timestampMs, isImage)
+    const isStill = isImage || stillGrabRef.current
+    const pose = solverRef.current.solve(result, timestampMs, isStill)
     currentBoneStatesRef.current = pose
 
     let faceTweenMs = 0
-    if (isImage) {
-      // A still is shown as-is; the interpolation loop idles until video returns.
+    if (isStill) {
+      // Shown directly; the interpolation loop idles until playback returns.
       displayPrevRef.current = null
       displayCurrRef.current = null
       lastMediaTsRef.current = -1
-      applyPoseRef.current(pose, 0)
+      // An image snaps — the model was just reset, there is nothing to ease
+      // from. A paused frame eases in from wherever the model stands.
+      faceTweenMs = isImage ? 0 : 250
+      applyPoseRef.current(pose, faceTweenMs)
     } else {
       // Media-time spacing, not arrival spacing: arrivals jitter with worker
       // load while the frames themselves are evenly spaced. Seeks and stalls
@@ -423,7 +434,6 @@ export const MotionCapture = ({
 
     let lastVideoTime = -1
     let lastVideoSrc = ""
-    let lastPausedGrab = 0
     let lastImgSrc = ""
 
     const detect = () => {
@@ -446,22 +456,17 @@ export const MotionCapture = ({
       }
       // readyState gates the FIRST frame: before HAVE_CURRENT_DATA the grab
       // below fails, and the time-gate would already be marked consumed — a
-      // paused upload then showed nothing until play moved the clock. While
-      // paused, keep re-solving the standing frame at a low cadence: a single
-      // solve leaves the crossfades barely begun, and this lets the pose
-      // settle to fully applied (also covers scrubbing while paused).
-      const pausedRefresh = video ? video.paused && now - lastPausedGrab > 250 : false
-      if (
-        video &&
-        video.videoWidth > 0 &&
-        video.readyState >= 2 &&
-        (video.currentTime !== lastVideoTime || pausedRefresh)
-      ) {
+      // paused upload then showed nothing until play moved the clock.
+      if (video && video.videoWidth > 0 && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
         // Pacing: the in-flight guard above (one frame in the worker at a time)
         // plus the new-frame gate (source fps) — no artificial rate floor, so
         // result cadence stays as steady as the worker can deliver.
         lastVideoTime = video.currentTime
-        lastPausedGrab = now
+        // A frame grabbed while paused (fresh upload, scrub) is a STILL —
+        // handleResult solves it unfiltered and eases the model there in one
+        // tween. Read at grab time; the in-flight guard keeps it paired with
+        // its result.
+        stillGrabRef.current = video.paused
         // Media time drives the solver's smoothing filters so pause/seek
         // reset them correctly; detectForVideo gets wall time because it
         // requires a monotonically increasing clock.
