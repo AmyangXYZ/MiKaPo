@@ -3,6 +3,7 @@
 // the main thread that blocked the WebGPU render loop and capped the app at
 // ~20 FPS. Here it shares nothing with rendering — frames arrive as transferred
 // ImageBitmaps, results go back as plain landmark arrays.
+import { ASSETS } from "@/lib/assets"
 import { FilesetResolver, HolisticLandmarker, HolisticLandmarkerResult } from "@mediapipe/tasks-vision"
 
 export type PoseWorkerRequest =
@@ -53,8 +54,9 @@ async function init(): Promise<void> {
 
   const createOptions = {
     baseOptions: {
-      modelAssetPath:
-        "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task",
+      // Self-hosted snapshot of Google's float16 holistic_landmarker — their
+      // /latest/ URL can change bytes under us; this one cannot.
+      modelAssetPath: `${ASSETS}/holistic_landmarker.task`,
       delegate: "GPU" as const,
     },
     minPosePresenceConfidence: 0.7,
