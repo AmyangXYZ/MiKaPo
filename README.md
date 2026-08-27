@@ -1,4 +1,6 @@
-# MiKaPo: Real-time MMD Motion Capture
+# reze-momo: Real-time MMD Motion Capture
+
+*(previously MiKaPo)*
 
 A web-based tool that drives MikuMikuDance (MMD) models — **full body, both hands, and face** — from a webcam, video, or photo in real time. One shot, no offline preprocessing, no multi-pass.
 
@@ -9,19 +11,75 @@ One piece of the **Reze MMD family**, covering the whole MMD workflow on the web
 | [reze-engine](https://github.com/AmyangXYZ/reze-engine)   | The WebGPU foundation — anime-character rendering and physics, dependency-free |
 | [reze-design](https://github.com/AmyangXYZ/reze-design)   | Scene design, rendering and sharing platform                                   |
 | [reze-studio](https://github.com/AmyangXYZ/reze-studio)   | Animation editing on a professional timeline and curve editor                  |
-| **MiKaPo**                                                | This repo — real-time motion capture in the browser, exporting straight to VMD |
+| **reze-momo**                                             | This repo — real-time motion capture in the browser, exporting straight to VMD |
 | [reze-rig](https://github.com/AmyangXYZ/reze-rig)         | Retarget FBX animations to MMD VMD format, Mixamo and Unity tested             |
 
-## Overview
+[Try it](https://mikapo.reze.one) · Demo model: 深空之眼 - 裁暗之锋·塞尔凯特
 
-[MiKaPo](https://mikapo.reze.one) covers all three motion modalities in one pipeline:
+## The idea
 
-- **Body and hands** are driven by MMD **bone rotations** — 3D landmarks from MediaPipe are mapped to per-bone quaternions in each bone's parent-local frame. The root and the leg IK bones also carry **translation**, so the body has a height over the ground and each foot has a place to be.
-- **Face is driven by MMD morphs**, not bone retargeting — face blendshapes from MediaPipe are converted directly into MMD morph weights (`まばたき`, `あ`, `ワ`, `ウィンク`, `ウィンク右`), which is how MMD models are natively rigged for facial expression. Eye direction is the one face channel that does drive bones (`左目` / `右目`).
+**Detection is a solved problem you can download. The transformation is the product.**
 
-The hard part isn't detection — it's the transformation. MediaPipe and MMD use different coordinate systems, every MMD model has its own rest-pose reference directions, and the bone hierarchy means each rotation has to be computed in its parent chain's local space.
+MediaPipe hands you 33 body points, 21 per hand, and a face mesh, as 3D positions in a world whose origin is the subject's hip. MMD wants something categorically different: a **quaternion per bone, expressed in that bone's parent's local frame**, on a skeleton whose rest pose belongs to whoever modelled the character. Nothing in the landmark stream tells you what a shoulder's rotation is; it only tells you where an elbow ended up.
 
-**MiKaPo 4.0** — the point where a capture becomes motion worth keeping.
+Everything interesting lives in that gap. The three facts that shape the whole solver:
+
+1. **A direction is not a rotation.** A landmark pair gives you where a bone points, and a bone that points somewhere can still be spun about its own axis — roll is unobservable from a segment, and shortest-arc solving silently invents it.
+2. **Depth is a guess, and the hips are the origin.** MediaPipe measures x/y from the image and infers z; the z channel is the noisy one, and because the coordinates are hip-centred, the pelvis's own translation is the one quantity that has been subtracted out entirely.
+3. **The model is not the person.** Every MMD character has its own rest directions, its own proportions, and its own idea of where the floor is. A rotation that is correct for a person is wrong for the model unless it is measured against that model's own bind pose.
+
+So the solver is one generic pipeline over a **bone-definition table** — each row naming a bone, its parent, and the two landmarks whose difference points it — with per-model calibration in front of it and physical plausibility behind it. That table is the entire configuration: there are no hand-written per-bone functions to keep in sync.
+
+```typescript
+// One row of the table drives the generic solver:
+{ kind: "direction", name: "左ひじ", parent: "左腕", source: "pose",
+  from: "left_elbow", to: "left_wrist" }
+
+function solveDirection(def, out: Quat): boolean {
+  const dir = landmarkDelta(def.source, def.from, def.to)     // world-space segment
+  rotateVecInv(worlds[def.parent], dir, dir)                  // → parent-local (conjugate, no matrix)
+  quatFromUnitVectors(getRef(def.name), dir.normalize(), out) // rest ref → live direction
+  // then: optional roll witness (arms/legs), anatomical clamp (fingers)
+}
+```
+
+**Calibration is what makes it model-agnostic.** At rest, every parent chain is identity — so the world-space `parent → child` direction *is* the parent-local reference direction. Read those once when a model loads and the same table drives any PMX, with no config file and no T-pose ceremony from the user.
+
+**The parent chain is computed once.** Bones are solved in hierarchy order, each one composing its world rotation from its parent's, so a chain product is never recomputed and rotating into parent-local space is a quaternion conjugation rather than a matrix inverse. The per-frame solve allocates nothing.
+
+## The tricks
+
+The parts that took measurement rather than reasoning:
+
+- **Roll needs a witness.** The elbow tells you where the upper arm *points*; only the forearm's direction tells you how the arm is *twisted*. Each arm and thigh names a child segment as its roll witness, and the solve builds full rest and live orthonormal bases from it — but only to the extent the roll is actually observable, faded by the sine of the child joint's bend angle. A straight limb reports no roll, so the fade returns to shortest-arc rather than to noise. Thighs get a second witness, the foot: with the knee extended the shin cannot twist independently, so where the toes point is where the femur is rotated.
+- **Roll is also the noisiest channel, and invisible in a landmark preview.** Near a straight limb the witness's perpendicular lever is short, so a centimetre of landmark noise becomes degrees of spin — and because roll changes no bone *direction*, a debug skeleton looks perfectly clean while the character's flesh shimmers. Arms and thighs decompose into swing and twist about their rest axis, and the twist alone runs through a much calmer filter before being recomposed.
+- **Distrust z as policy.** Every landmark's z channel gets its own low-pass before solving, while x and y pass through untouched. Front-back torso wobble is almost entirely z noise on the shoulder and hip lines: filtering that one channel took the measured wobble from 6.7°/frame to 0.3°.
+- **Capture is in-place, on purpose.** The pelvis translation MediaPipe deletes can be rebuilt from 2D projective geometry — the image-space spine length against the model's known spine length recovers camera distance; the hip midpoint's position recovers lateral travel. Both are implemented and verified, and both are **off by default**: the estimates drift over a session, and a capture that artists will re-edit is better with no root motion than with root motion that wanders. `センター` moves vertically only, which is what makes squats and crouches read.
+- **The body is placed by its lowest part, not by its feet.** Both legs are walked forward from the hips, and the body is dropped until the *lower* foot rests at the height it rests at in the model's own bind pose — so a standing split measures against the standing foot, with no floor assumption and no contact detection to misfire. A hip-clearance candidate joins the same max(), so a body rolling on the floor rests on its hips instead of being hauled around by legs waving in the air.
+- **Dropouts crossfade; they don't freeze.** A bone that loses its landmarks eases to rest over 500ms and eases back in over 250ms, cosine-shaped — holding forever is right for one dropped frame and wrong for two seconds. Hands add hysteresis on top (engage after ~1s of continuous tracking, 400ms of grace before letting go), because MediaPipe hands flicker and a three-frame hand is usually garbage. The per-tick fade step is capped, so a whiffed frame after a stall can't spend the whole fade at once.
+- **A collapsed hand still has 21 valid points.** MediaPipe's hand landmarks carry no visibility field, and when tracking degrades they don't disappear — they collapse toward the origin, structurally perfect and completely wrong. Two honest signals gate them: the hand's own span (a palm is never a point) and the pose model's wrist visibility, the same joint tracked by a different model.
+- **The trunk is three joints, not one.** The measured chest rotation splits evenly across `上半身` and `上半身2` (`normalize(I + R)` is exactly R^½), so the spine curves instead of hinging. `下半身` takes a quarter of the mean thigh pitch as posterior pelvic tilt, which is what makes sitting read as sitting. And the shoulder-line tilt — which the trunk basis orthogonalizes away entirely, so a shrug was previously *invisible to the solver* — is read before that happens and handed to the `肩` bones.
+- **The clavicle carries its share.** Hanging `腕` straight off the chest means the humerus performs every raise alone, which is anatomically impossible past ~30° and looks it. Anatomy splits elevation roughly 2:1, so the shoulder takes a fraction of the arm's own rotation and the arm gives back exactly that much — the arm still points where the landmarks put it; only the joint that bends changes.
+- **穿模 is answered with the model's own rigid bodies.** An MMD model already ships its author's approximation of the character as physics capsules. MMD never tests those against each other — they're bone-following statics, so the broadphase drops the pairs — which is precisely how a hand ends up inside a chest. The solver reads them as clearance volume and swings the shoulder just past contact, rotation only, so the pose keeps its shape.
+- **Filter on true angular velocity, and refuse the impossible.** One-Euro driven by per-component quaternion derivatives adapts to a quantity that isn't a rate of anything physical, so fast poses arrive softened; measuring the actual rotation between frames gives one honest speed. On top of that sits an *acceleration* limit rather than a speed limit — a real limb ramps up over several frames while a detection glitch arrives at full speed from nothing, which is the only thing that tells them apart on the first frame.
+- **Display interpolation is a playback clock, not a chase.** Results arrive ~30 Hz and the renderer runs at 60. Tweening from wherever the model currently is toward each new result is an exponential chase that never arrives; worse, restarting each segment on *arrival* lets detection jitter modulate playback speed, which reads as micro-stutter. A cursor advances along the **media** timeline by wall time, interpolating whichever pair of results brackets it, with a small latency margin and gentle rate steering. Measured against the chase: ~10ms less latency and ~7 percentage points more amplitude on fast motion.
+- **Exports read the future.** Live capture must filter causally and pays lag for it; a finished take has no such excuse. A Savitzky-Golay pass fits a local polynomial rather than averaging, so shake goes without flattening a kick — 59% less jitter, 99% of peak amplitude, zero phase shift.
+
+**Where the ceiling is now.** The solver adds roughly 7–17ms of filter latency on top of MediaPipe's ~30 Hz cadence, keeps 100% of a snap's amplitude, and filters jitter to near the landmark-noise floor. For the body, the remaining quality limit is the detector's landmarks, not the transformation. Fingers at full-body framing distance are the one place with real headroom left, and the fix is known: crop around the wrists and run a dedicated hand pass.
+
+---
+
+**reze-momo 5.0** — the solver rewritten against the best browser MMD mocap that exists, one technique at a time, each webcam-tested before the next.
+
+- **Z-channel policy, in-place capture, FK-only legs** — see [The tricks](#the-tricks). Root travel and leg IK both left the default path: the first because it drifts, the second because two authorities per knee fight each other and an artist wants FK rotations to re-key
+- **Per-bone dropout crossfades with hand hysteresis** — no more frozen limbs, no more re-acquisition pops
+- **Trunk decomposition** — `上半身2` takes half the chest rotation, `下半身` tucks with thigh pitch, shrugs reach the clavicles at last
+- **Roll stabilizer** — the shimmer that never showed up in the landmark preview
+- **Media-timeline playback** — the display stopped chasing and started playing
+- **Uploads survive a refresh** — the PMX folder and the capture video are kept in IndexedDB, one record each, restored at boot
+- **Product-level UI** — a draggable, resizable capture panel, floating chrome and the design language shared with reze.design and reze.studio
+
+**MiKaPo 4.0 *(as it was then named)*** — the point where a capture becomes motion worth keeping.
 
 Up to 3.x this was proof that MMD mocap could run in a browser at all: a pose followed a person, live, and the file it wrote was rotations. 4.0 is about the capture being *right* — the body stands on the ground, joints bend the way joints bend, the model's own geometry keeps limbs out of itself, and a bad frame of detection is refused rather than displayed.
 
@@ -87,7 +145,7 @@ Demo model: 深空之眼 - 裁暗之锋·塞尔凯特
 
 - **Detection** — [MediaPipe HolisticLandmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/holistic_landmarker), running in a Web Worker
 - **Renderer** — [Reze Engine](https://github.com/AmyangXYZ/reze-engine) (custom WebGPU MMD)
-- **Framework** — [Next.js 15](https://nextjs.org/)
+- **Framework** — [Next.js 16](https://nextjs.org/)
 - **UI** — Tailwind v4 + shadcn/ui
 
 ## Run locally
@@ -99,28 +157,15 @@ npm run dev
 
 Then open [http://localhost:4000](http://localhost:4000).
 
-## How the solver works
+## How the solver works, step by step
 
-MediaPipe gives world-space 3D landmark positions per frame. MMD bones rotate in their parent's local frame, with each model defining its own rest orientation. The solver bridges these:
+See [The idea](#the-idea) for why each step exists.
 
 1. **Calibrate (once, on model load)** — read each rest-pose bone world position from the loaded MMD. Since the bone chain is identity at rest, world-space `parent → child` direction equals the parent-local reference direction.
 2. **Solve (per frame, per bone)** — each bone is one row in a definition table (parent, landmark pair, optional roll witness / anatomical clamp). World rotations accumulate down the hierarchy in solve order, so every parent chain is computed exactly once; rotating into parent-local space is a quaternion conjugation, no matrices involved.
 3. **Smooth** — pass each output through a [One-Euro filter](https://gery.casiez.net/1euro/) (on media time) driven by true angular velocity, bounded by what a limb could physically have done since the last frame, then tween to display rate. Exports get a second, non-causal pass: Savitzky-Golay over the finished take, which reads future frames the live path cannot and so removes shake at zero phase shift while a polynomial fit keeps fast transients at their real amplitude.
 4. **Clear the body** — the model's own rigid bodies define where an arm may not go. Depth is MediaPipe's weakest axis and its error peaks exactly when a limb crosses the torso in frame, so the solved arm is checked against those capsules and swung out at the shoulder when it is inside.
-5. **Place it on the ground** — walk both legs forward from the hips, then drop the body until the lower foot rests where it rests in the model's bind pose. The ankle each leg reaches becomes its IK target, which is what the VMD keyframes.
-
-```typescript
-// One row of the bone table drives the generic solver:
-{ kind: "direction", name: "左ひじ", parent: "左腕", source: "pose",
-  from: "left_elbow", to: "left_wrist" }
-
-function solveDirection(def, out: Quat): void {
-  const dir = landmarkDelta(def.source, def.from, def.to)     // world-space segment
-  rotateVecInv(worlds[def.parent], dir, dir)                  // → parent-local (conjugate, no matrix)
-  quatFromUnitVectors(getRef(def.name), dir.normalize(), out) // rest ref → live direction
-  // then: optional roll witness (arms/legs), anatomical clamp (fingers)
-}
-```
+5. **Place it on the ground** — walk both legs forward from the hips, then drop the body until the lower foot rests where it rests in the model's bind pose. The legs stay FK: the walk only asks where the ankles land, so the body can be dropped onto the lower one.
 
 ### Notable cases
 

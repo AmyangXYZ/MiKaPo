@@ -2,8 +2,11 @@
 
 import { useRef, useEffect, useCallback, useState, type ChangeEvent, type InputHTMLAttributes } from "react"
 import Link from "next/link"
-import { FolderOpen, Github, X } from "lucide-react"
+import { FolderOpen, Github, RotateCcw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
+import { PILL, ICON_BUTTON, APP_VERSION } from "@/lib/chrome"
 
 import {
   Engine,
@@ -24,7 +27,7 @@ import Loading from "./loading"
  *  exporting cannot disturb the pose the user is driving live. */
 const EXPORT_CLIP_NAME = "mikapo-capture"
 import { BoneState, SOLVER_REST_BONES, type BodyCollider } from "@/lib/solver"
-import { loadModelUpload, saveModelUpload } from "@/lib/asset-store"
+import { clearUploads, hasStoredUploads, loadModelUpload, saveModelUpload } from "@/lib/asset-store"
 import { FaceSolverResult } from "@/lib/face-blendshape-solver"
 import { ASSETS } from "@/lib/assets"
 
@@ -103,6 +106,21 @@ export default function MainScene() {
   const [pmxPickFiles, setPmxPickFiles] = useState<File[] | null>(null)
   const [pmxPickPaths, setPmxPickPaths] = useState<string[]>([])
   const [pmxPickSelected, setPmxPickSelected] = useState("")
+  /** Whether anything the user uploaded is being remembered — the only case
+   *  where "back to the demo" is an action rather than a no-op. */
+  const [hasUploads, setHasUploads] = useState(false)
+  useEffect(() => {
+    void hasStoredUploads().then(setHasUploads)
+  }, [])
+
+  /** Forget both uploads and boot clean. A reload is the honest way to do it:
+   *  the engine, the solver and the capture pipeline all read their assets
+   *  once at start, and unwinding that by hand would be three chances to
+   *  leave something stale. */
+  const resetToDemo = useCallback(async () => {
+    await clearUploads()
+    window.location.reload()
+  }, [])
 
   // Build a rest-pose dict from the model's bone world positions. Solver uses
   // these to derive per-bone reference directions instead of the static defaults.
@@ -192,7 +210,10 @@ export default function MainScene() {
         buildRestPose(model)
         frameModel(model)
         setEngineError(null)
-        if (opts?.persist !== false) void saveModelUpload(files, pmxFile, stem)
+        if (opts?.persist !== false) {
+          void saveModelUpload(files, pmxFile, stem)
+          setHasUploads(true)
+        }
         return true
       } catch (e) {
         console.error("[pmx-upload] loadModel failed:", e)
@@ -428,7 +449,7 @@ export default function MainScene() {
   )
 
   return (
-    <div className="w-full h-full">
+    <main className="relative h-dvh w-full overflow-hidden bg-black">
       <input
         ref={pmxFolderInputRef}
         type="file"
@@ -438,103 +459,94 @@ export default function MainScene() {
         onChange={onPickPmxFolder}
       />
 
-      <header className="absolute inset-x-0 top-0 z-20 flex h-12 items-center justify-between gap-3 px-4">
-        {/* Left brand — desktop only. Hidden on mobile (takes no width via `hidden`),
-            so `justify-between` snaps the right cluster to the corner. */}
-        <div className="hidden items-baseline gap-2 md:flex">
-          <span className="text-sm font-semibold tracking-tight text-white">MiKaPo</span>
-          <span className="hidden text-xs text-white/50 lg:inline">Real-time MMD motion capture</span>
-        </div>
-
-        <div className="ml-auto flex items-center gap-1.5">
-          {/* Desktop-only cluster */}
-          <div className="hidden items-center gap-1.5 md:flex">
-            {stats && (
-              <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-mono text-[11px] tabular-nums text-white/70">
-                {stats.fps} FPS
-              </span>
-            )}
-
-            <div className="h-4 w-px bg-white/10" />
-
-            <div className="flex items-center">
-              <Button
-                variant="ghost"
-                size="sm"
-                asChild
-                className="h-8 px-2.5 text-xs font-normal text-white/70 hover:bg-white/10 hover:text-white"
-              >
-                <Link href="https://reze.one" target="_blank">
-                  Engine
-                </Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                asChild
-                className="h-8 px-2.5 text-xs font-normal text-white/70 hover:bg-white/10 hover:text-white"
-              >
-                <Link href="https://reze.studio" target="_blank">
-                  Animation
-                </Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                asChild
-                className="h-8 px-2.5 text-xs font-normal text-white/70 hover:bg-white/10 hover:text-white"
-              >
-                <Link href="https://reze.design" target="_blank">
-                  Design
-                </Link>
-              </Button>
-            </div>
-
-            <div className="h-4 w-px bg-white/10" />
-
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={!engineInited}
-              className="h-8 gap-1 border border-white/10 bg-white/10 px-2 text-xs font-normal text-white hover:bg-white/15 disabled:opacity-50 has-[>svg]:px-2"
-              onClick={() => pmxFolderInputRef.current?.click()}
-            >
-              <FolderOpen className="size-3.5" />
-              Use Your Model
-            </Button>
-          </div>
-
-          {/* Mobile-only brand — sits next to GitHub icon */}
-          <span className="text-sm font-semibold tracking-tight text-white md:hidden">MiKaPo</span>
-
-          {/* GitHub — always visible (mobile + desktop) */}
-          <Button
-            variant="ghost"
-            size="icon"
-            asChild
-            className="size-8 text-white/70 hover:bg-white/10 hover:text-white"
-          >
+      {/* Chrome floats over a full-bleed viewport; nothing ever shrinks the
+          thing being made. One spacing (0.75rem) repeated is the whole grid. */}
+      <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start gap-2">
+        <div className={cn(PILL, "pointer-events-auto flex h-10 shrink-0 items-center gap-2 pl-3 pr-1.5")}>
+          <span className="text-sm font-semibold tracking-tight text-foreground">MiKaPo</span>
+          <span className="shrink-0 rounded-full bg-blue-400/15 px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none text-blue-400">
+            v{APP_VERSION}
+          </span>
+          <span className="hidden text-xs text-muted-foreground lg:inline">Real-time MMD motion capture</span>
+          <div className="h-4 w-px shrink-0 bg-line-strong" />
+          <Button variant="ghost" size="icon" asChild className={ICON_BUTTON}>
             <Link href="https://github.com/AmyangXYZ/MiKaPo" target="_blank" aria-label="GitHub">
-              <Github className="size-4" />
+              <Github className="size-4" strokeWidth={1.75} />
             </Link>
           </Button>
         </div>
-      </header>
+
+        <div className="ml-auto flex items-start gap-2">
+          {/* Sibling apps — desktop only; on a phone the model needs the room. */}
+          <div className={cn(PILL, "pointer-events-auto hidden h-10 items-center gap-1 px-1.5 md:flex")}>
+            <span className="px-1.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+              {stats ? `${stats.fps} FPS` : "— FPS"}
+            </span>
+            <div className="h-4 w-px shrink-0 bg-line-strong" />
+            {[
+              { href: "https://reze.one", label: "Engine" },
+              { href: "https://reze.studio", label: "Animation" },
+              { href: "https://reze.design", label: "Design" },
+            ].map(({ href, label }) => (
+              <Button
+                key={href}
+                variant="ghost"
+                size="sm"
+                asChild
+                className="h-7 rounded-lg px-2 text-xs font-normal text-muted-foreground hover:bg-white/5 hover:text-foreground"
+              >
+                <Link href={href} target="_blank">
+                  {label}
+                </Link>
+              </Button>
+            ))}
+          </div>
+
+          <div className={cn(PILL, "pointer-events-auto flex h-10 items-center gap-1 px-1.5")}>
+            {hasUploads && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={ICON_BUTTON}
+                    onClick={() => void resetToDemo()}
+                    aria-label="Back to the demo model and video"
+                  >
+                    <RotateCcw className="size-4" strokeWidth={1.75} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Back to the demo model and video</TooltipContent>
+              </Tooltip>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              disabled={!engineInited}
+              className="h-7 gap-1.5 rounded-lg bg-blue-400 px-2 text-xs font-medium text-white hover:bg-blue-300 disabled:opacity-50 has-[>svg]:px-2"
+              onClick={() => pmxFolderInputRef.current?.click()}
+            >
+              <FolderOpen className="size-3.5" strokeWidth={1.75} />
+              <span className="hidden sm:inline">Your Model</span>
+            </Button>
+          </div>
+        </div>
+      </div>
 
       {pmxPickDialogOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button
             type="button"
             aria-label="Dismiss"
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-scrim backdrop-blur-xs"
             onClick={dismissPmxPickDialog}
           />
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="pmx-picker-title"
-            className="relative z-[1] w-full max-w-md rounded-xl border border-white/10 bg-zinc-950/85 p-5 text-white shadow-2xl shadow-black/50 backdrop-blur-xl"
+            className="relative z-[1] w-full max-w-md rounded-surface border border-line-strong bg-surface-raised p-5 text-foreground shadow-float backdrop-blur-xs"
           >
             <div className="mb-1 flex items-start justify-between gap-3">
               <h2 id="pmx-picker-title" className="text-sm font-semibold tracking-tight">
@@ -544,21 +556,21 @@ export default function MainScene() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="-mr-1 -mt-1 size-7 shrink-0 text-white/70 hover:bg-white/10 hover:text-white"
+                className="-mr-1 -mt-1 size-7 shrink-0 rounded-lg text-muted-foreground hover:bg-white/5 hover:text-foreground"
                 aria-label="Close"
                 onClick={dismissPmxPickDialog}
               >
                 <X className="size-4" />
               </Button>
             </div>
-            <p className="mb-4 text-xs text-white/60">Pick which model to load.</p>
+            <p className="mb-4 text-xs text-muted-foreground">Pick which model to load.</p>
             <select
-              className="mb-5 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-sm text-white outline-none focus-visible:border-white/30 focus-visible:ring-2 focus-visible:ring-white/20"
+              className="mb-5 w-full rounded-interior border border-line-strong bg-white/5 px-2.5 py-2 text-sm text-foreground outline-none transition-colors hover:bg-white/10 focus-visible:border-blue-400/50"
               value={pmxPickSelected}
               onChange={(ev) => setPmxPickSelected(ev.target.value)}
             >
               {pmxPickPaths.map((p) => (
-                <option key={p} value={p} className="bg-zinc-900 text-white">
+                <option key={p} value={p} className="bg-zinc-900 text-foreground">
                   {p}
                 </option>
               ))}
@@ -568,7 +580,7 @@ export default function MainScene() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 text-xs text-white/70 hover:bg-white/10 hover:text-white"
+                className="h-8 rounded-lg text-xs text-muted-foreground hover:bg-white/5 hover:text-foreground"
                 onClick={dismissPmxPickDialog}
               >
                 Cancel
@@ -576,7 +588,7 @@ export default function MainScene() {
               <Button
                 type="button"
                 size="sm"
-                className="h-8 bg-white text-xs text-black hover:bg-white/90"
+                className="h-8 rounded-lg bg-blue-400 text-xs font-medium text-white hover:bg-blue-300"
                 onClick={() => void onConfirmPmxPick()}
               >
                 Load selected
@@ -602,15 +614,15 @@ export default function MainScene() {
           loader kept counting dots underneath the error that explained why it
           never would finish — two centred overlays, both unreadable. */}
       {engineError ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-          <div className="max-w-md rounded-xl border border-red-400/20 bg-zinc-950/90 px-5 py-4 text-center text-sm leading-relaxed text-red-300 shadow-2xl shadow-black/40 backdrop-blur-md">
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center p-6">
+          <div className="max-w-md rounded-surface border border-red-400/30 bg-surface-raised px-5 py-4 text-center text-sm leading-relaxed text-red-400 shadow-float backdrop-blur-xs">
             {engineError}
           </div>
         </div>
       ) : (
         <Loading modelLoaded={modelLoaded} mediaPipeReady={mediaPipeReady} />
       )}
-      <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full z-1 outline-none" />
-    </div>
+      <canvas ref={canvasRef} className="absolute inset-0 z-0 h-full w-full touch-none outline-none" />
+    </main>
   )
 }

@@ -9,9 +9,13 @@ import { loadVideoUpload, saveVideoUpload } from "@/lib/asset-store"
 import { Vec3 } from "reze-engine"
 import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Camera, Image as ImageIcon, Video, Webcam, Pause, Play, Download, Square } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Camera, Image as ImageIcon, Video, Webcam, Pause, Play, Download, Square, GripVertical } from "lucide-react"
 import DebugScene from "./debug-scene"
+import { FloatingPanel, clampRect, type Rect } from "./floating-panel"
+import { useStoredRect } from "@/hooks/use-stored-rect"
+import { cn } from "@/lib/utils"
+import { SKIN, SEGMENT, SEGMENT_ON, SEGMENT_OFF, SEGMENT_TRACK } from "@/lib/chrome"
 
 /**
  * One tuning row: name, setting, slider — and for anything with a live signal, a
@@ -27,6 +31,31 @@ type InputMode = "image" | "video" | "camera" | null
 /** Debug skeleton preview refresh (React re-render); the model itself is driven
  * directly from the detection callback and doesn't wait for React. */
 const DEBUG_PREVIEW_INTERVAL_MS = 66
+
+const PANEL_RECT_KEY = "mikapo.capture-panel.1"
+const PANEL_MIN_W = 240
+const PANEL_MIN_H = 300
+
+/** Where the panel sits before anyone moves it: under the header, left edge,
+ *  tall enough for the picture, the skeleton and the status strip. */
+function initialPanelRect(): Rect {
+  if (typeof window === "undefined") return { x: 12, y: 60, w: 320, h: 470 }
+  return clampRect({ x: 12, y: 60, w: 320, h: 470 }, PANEL_MIN_W, PANEL_MIN_H)
+}
+
+/** Whether this device has a pointer that can drag a window. A phone gets a
+ *  docked panel instead — a draggable one is a toy you cannot aim. */
+function useFinePointer(): boolean {
+  const [fine, setFine] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: fine)")
+    const apply = () => setFine(mq.matches)
+    apply()
+    mq.addEventListener("change", apply)
+    return () => mq.removeEventListener("change", apply)
+  }, [])
+  return fine
+}
 
 /** Copy a solver pose into a reusable buffer. The solver mutates its output
  * array in place every frame, so the display pair must keep its own copies. */
@@ -79,6 +108,12 @@ export const MotionCapture = ({
   const workerRef = useRef<Worker | null>(null)
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
   const [landmarks, setLandmarks] = useState<PoseWorkerResult | null>(null)
+  /** Status strip: is a body being found, and how fast frames are arriving. */
+  const [tracking, setTracking] = useState(false)
+  const [captureHz, setCaptureHz] = useState(0)
+  const floating = useFinePointer()
+  /** Set when returning to an image the capture loop has already consumed. */
+  const redetectImageRef = useRef(false)
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
   // The ?cors suffix skips browser-cache entries saved before these loads went
@@ -112,23 +147,6 @@ export const MotionCapture = ({
   // defaults already handle.
   const faceEnabledRef = useRef(true)
 
-  // A previously uploaded video survives the refresh: restore it as the
-  // active source in place of the bundled demo. Absence (or eviction) simply
-  // leaves the demo — persistence is a convenience, never a precondition.
-  useEffect(() => {
-    let cancelled = false
-    void loadVideoUpload().then((file) => {
-      if (!file || cancelled || userPickedMediaRef.current) return
-      setVideoSrc(URL.createObjectURL(file))
-      setVideoTime(0)
-      setInputMode("video")
-      setLastMedia("VIDEO")
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   // Offline conversion state. Nothing is "recorded" as it plays — the video is
   // stepped frame by frame, so the result does not depend on how fast this
   // machine happens to be.
@@ -154,6 +172,23 @@ export const MotionCapture = ({
    *  seeking far past the end forces the demuxer to find the true end, and the
    *  durationchange that follows carries the answer. Guarded by a flag so the
    *  nudge happens once per file. */
+  // A previously uploaded video survives the refresh: restore it as the
+  // active source in place of the bundled demo. Absence (or eviction) simply
+  // leaves the demo — persistence is a convenience, never a precondition.
+  useEffect(() => {
+    let cancelled = false
+    void loadVideoUpload().then((file) => {
+      if (!file || cancelled || userPickedMediaRef.current) return
+      setVideoSrc(URL.createObjectURL(file))
+      setVideoTime(0)
+      setInputMode("video")
+      setLastMedia("VIDEO")
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const durationNudged = useRef(false)
   const resolveDuration = useCallback((video: HTMLVideoElement) => {
     const d = video.duration
@@ -264,6 +299,10 @@ export const MotionCapture = ({
     if (now - lastDebugUpdateRef.current >= DEBUG_PREVIEW_INTERVAL_MS) {
       lastDebugUpdateRef.current = now
       setLandmarks(result)
+      // The status strip rides the same throttle: a readout that re-rendered
+      // per detection would cost more than it reports.
+      setTracking(true)
+      setCaptureHz(Math.round(1000 / Math.max(1, displayIntervalRef.current)))
     }
 
     if (!modelLoadedRef.current) return
@@ -455,12 +494,13 @@ export const MotionCapture = ({
       } else if (
         imageRef.current &&
         imageRef.current.src.length > 0 &&
-        imageRef.current.src !== lastImgSrc &&
+        (imageRef.current.src !== lastImgSrc || redetectImageRef.current) &&
         imageRef.current.complete &&
         imageRef.current.naturalWidth > 0
       ) {
         const img = imageRef.current
         lastImgSrc = img.src
+        redetectImageRef.current = false
         pending = true
         pendingSince = now
         createImageBitmap(img)
@@ -722,219 +762,245 @@ export const MotionCapture = ({
     setExported(`${n}f · ${seconds.toFixed(1)}s`)
   }, [])
 
-  const statusPill =
-    inputMode === "camera" ? (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-red-300">
-        <span className="size-1.5 animate-pulse rounded-full bg-red-500" />
-        Live
-      </span>
-    ) : inputMode === "video" ? (
-      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/60">
-        Video
-      </span>
-    ) : inputMode === "image" ? (
-      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/60">
-        Image
-      </span>
-    ) : null
+  // Panel geometry, remembered across reloads and re-clamped into whatever
+  // window exists now.
+  const [rect, setRect] = useStoredRect(PANEL_RECT_KEY, initialPanelRect, PANEL_MIN_W, PANEL_MIN_H)
+
+  /** Switch the capture source. A source with nothing loaded opens its picker
+   *  instead — the segment is where you go for that input, either way. */
+  const selectSource = (mode: "camera" | "video" | "image") => {
+    if (mode === "camera") {
+      void toggleCamera()
+      return
+    }
+    if (isStreamActive) stopCurrentInput()
+    userPickedMediaRef.current = true
+    if (mode === "video") {
+      if (!videoSrc) {
+        videoInputRef.current?.click()
+        return
+      }
+      if (lastMedia === "IMAGE") workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
+      setLastMedia("VIDEO")
+      setInputMode("video")
+      return
+    }
+    if (!currentImage) {
+      imageInputRef.current?.click()
+      return
+    }
+    workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
+    workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
+    // The capture loop skips an image it has already seen; coming back to one
+    // has to re-solve it, or the model keeps whatever the video left behind.
+    redetectImageRef.current = true
+    setLastMedia("IMAGE")
+    setInputMode("image")
+  }
+
+  const SOURCES = [
+    { key: "camera", label: "Webcam", Icon: Webcam, active: inputMode === "camera" },
+    { key: "video", label: "Video", Icon: Video, active: inputMode === "video" },
+    { key: "image", label: "Image", Icon: ImageIcon, active: inputMode === "image" },
+  ] as const
+
+  const exportDisabled = (inputMode !== "video" && inputMode !== "image") || !mediaPipeReady
+
+  const panel = (
+    // The ground is translucent by design: the surface tint lets the character
+    // read through the panel while it is only being watched, and solidifies
+    // under the pointer, when the controls are what matters.
+    <div className={cn("flex h-full flex-col overflow-hidden rounded-surface transition-colors hover:bg-surface-raised", SKIN)}>
+      {/* Header — the whole strip drags the panel, except the controls in it. */}
+      <header
+        data-drag-handle
+        className={cn(
+          "flex shrink-0 items-center gap-1.5 border-b border-line px-1.5 py-1.5",
+          floating && "cursor-grab active:cursor-grabbing",
+        )}
+      >
+        {floating && (
+          <GripVertical
+            className="size-3.5 shrink-0 text-muted-foreground"
+            strokeWidth={1.75}
+            aria-hidden
+          />
+        )}
+        <div className={cn(SEGMENT_TRACK, "min-w-0 flex-1")}>
+          {SOURCES.map(({ key, label, Icon, active }) => (
+            <button
+              key={key}
+              type="button"
+              disabled={!mediaPipeReady}
+              onClick={() => selectSource(key)}
+              className={cn(SEGMENT, active ? SEGMENT_ON : SEGMENT_OFF, "min-w-0 px-1.5 disabled:opacity-40")}
+            >
+              <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />
+              <span className="truncate">{label}</span>
+            </button>
+          ))}
+        </div>
+
+        {inputMode === "camera" && (
+          <span className="flex shrink-0 items-center gap-1 rounded-chip border border-red-400/40 bg-red-400/15 px-1.5 py-0.5 text-[10px] font-medium text-red-400">
+            <span className="size-1.5 animate-pulse rounded-full bg-red-400" />
+            Live
+          </span>
+        )}
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={exportDisabled}
+              onClick={() =>
+                converting ? (cancelRef.current = true) : inputMode === "image" ? exportPoseVmd() : void convertVideoToVmd()
+              }
+              className={cn(
+                "size-7 shrink-0 rounded-lg",
+                converting
+                  ? "text-blue-400 hover:bg-blue-400/10 hover:text-blue-400"
+                  : "text-muted-foreground hover:bg-white/5 hover:text-foreground",
+              )}
+              aria-label={converting ? "Stop converting" : "Export VMD"}
+            >
+              {converting ? <Square className="size-3.5 fill-current" /> : <Download className="size-4" strokeWidth={1.75} />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {converting
+              ? "Stop converting"
+              : inputMode === "image"
+                ? "Save this pose as a VMD file"
+                : "Convert this video to a VMD file"}
+          </TooltipContent>
+        </Tooltip>
+      </header>
+
+      {/* The source picture. */}
+      <div className="relative min-h-0 flex-1 bg-black">
+        {inputMode === "image" && (
+          <div className="flex h-full w-full items-center justify-center">
+            <Image
+              src={currentImage}
+              alt="Motion capture input"
+              crossOrigin="anonymous"
+              ref={imageRef}
+              width={320}
+              height={320}
+              priority
+              className="max-h-full max-w-full object-contain"
+            />
+          </div>
+        )}
+
+        {(inputMode === "video" || inputMode === "camera") && (
+          <video
+            ref={videoRef}
+            // The demo video is served cross-origin from the assets bucket in
+            // production. Without CORS its frames are tainted: createImageBitmap
+            // still resolves, but transferring the bitmap to the pose worker
+            // throws DataCloneError — swallowed by the send .catch, so mocap
+            // silently never starts. Dev never sees this (assets come from
+            // public/, same-origin).
+            crossOrigin="anonymous"
+            className={cn("h-full w-full object-contain", inputMode === "camera" && "scale-x-[-1]")}
+            playsInline
+            autoPlay={inputMode === "camera"}
+            disablePictureInPicture
+            controlsList="nofullscreen noremoteplayback nodownload"
+            src={isStreamActive ? undefined : videoSrc}
+            onPlay={() => setVideoPlaying(true)}
+            onPause={() => setVideoPlaying(false)}
+            onTimeUpdate={(e) => setVideoTime(e.currentTarget.currentTime)}
+            onLoadedMetadata={(e) => resolveDuration(e.currentTarget)}
+            // Browsers report Infinity at loadedmetadata for WebM/streamed
+            // and variable-frame-rate files, then refine it later — so take
+            // the update too, not just the first announcement.
+            onDurationChange={(e) => resolveDuration(e.currentTarget)}
+          />
+        )}
+
+        {!inputMode && (
+          <div className="flex h-full w-full items-center justify-center">
+            <Camera className="size-8 text-muted-foreground" strokeWidth={1.5} />
+          </div>
+        )}
+
+        {converting && (
+          <div className="absolute inset-x-0 bottom-0 h-0.5 bg-white/10">
+            <div className="h-full bg-blue-400 transition-[width]" style={{ width: `${Math.round(progress * 100)}%` }} />
+          </div>
+        )}
+      </div>
+
+      {/* Transport — video only; a webcam has no timeline and a still has no time. */}
+      {inputMode === "video" && videoSrc && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-line px-2 py-1.5">
+          <button
+            type="button"
+            onClick={toggleVideoPlay}
+            disabled={converting}
+            className="flex size-5 shrink-0 items-center justify-center rounded-chip text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground disabled:opacity-40"
+            aria-label={videoPlaying ? "Pause" : "Play"}
+          >
+            {videoPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5 translate-x-px" />}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={videoDuration || 1}
+            step={0.01}
+            value={videoTime}
+            disabled={converting}
+            onChange={(e) => {
+              if (videoRef.current && !convertingRef.current) videoRef.current.currentTime = Number(e.target.value)
+            }}
+            onPointerUp={(e) => e.currentTarget.blur()}
+            className="h-1 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-white/10 accent-blue-400 outline-none disabled:cursor-not-allowed [&::-moz-range-thumb]:size-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-blue-400 [&::-webkit-slider-thumb]:size-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-400"
+          />
+          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+            {formatTime(videoTime)} / {formatTime(videoDuration)}
+          </span>
+        </div>
+      )}
+
+      {/* What the detector sees — the reason a bad pose is never a mystery. */}
+      <div className="h-[150px] shrink-0 border-t border-line bg-black/40">
+        <DebugScene landmarks={landmarks} />
+      </div>
+
+      {/* Status: tracking state on the left, what the solver is being fed on the right. */}
+      <footer
+        className="flex h-6 shrink-0 items-center gap-2 border-t border-line-strong px-2 text-[10px] text-muted-foreground"
+        role="status"
+        aria-live="polite"
+      >
+        <span className={cn("truncate", tracking ? "text-foreground" : undefined)}>
+          {converting ? `Converting ${Math.round(progress * 100)}%` : exported ? `Saved ${exported}` : tracking ? "Tracking" : "No pose"}
+        </span>
+        <span className="ml-auto shrink-0 tabular-nums">{captureHz > 0 ? `${captureHz} Hz` : "— Hz"}</span>
+      </footer>
+    </div>
+  )
 
   return (
-    <div className="absolute left-2 top-2 z-10 w-[148px] max-w-[calc(100vw-1rem)] md:left-3 md:top-12 md:w-[300px]">
-      <div className="overflow-hidden rounded-xl border border-white/10 bg-zinc-950/35 shadow-2xl shadow-black/40 backdrop-blur-md md:bg-zinc-950/60">
-        {/* Toolbar — mode buttons + status + record (status/record desktop-only). */}
-        <div className="flex items-center gap-0.5 border-b border-white/5 px-1.5 py-1.5 md:gap-1 md:px-3 md:py-2">
-          <TooltipProvider delayDuration={150}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={toggleCamera}
-                  variant="ghost"
-                  size="icon"
-                  className={`size-7 ${
-                    isStreamActive
-                      ? "bg-white/10 text-white hover:bg-white/15"
-                      : "text-white/70 hover:bg-white/10 hover:text-white"
-                  }`}
-                  disabled={!mediaPipeReady}
-                >
-                  {isStreamActive ? <Pause className="size-3.5" /> : <Webcam className="size-3.5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {!mediaPipeReady ? "Loading…" : isStreamActive ? "Stop webcam" : "Start webcam"}
-              </TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={() => imageInputRef.current?.click()}
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 text-white/70 hover:bg-white/10 hover:text-white"
-                  disabled={!mediaPipeReady}
-                >
-                  <ImageIcon className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{!mediaPipeReady ? "Loading…" : "Upload image"}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={() => videoInputRef.current?.click()}
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 text-white/70 hover:bg-white/10 hover:text-white"
-                  disabled={!mediaPipeReady}
-                >
-                  <Video className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{!mediaPipeReady ? "Loading…" : "Upload video"}</TooltipContent>
-            </Tooltip>
-
-            <div className="ml-auto hidden items-center gap-1.5 md:flex">
-              {converting ? (
-                <span className="font-mono text-[10px] tabular-nums text-blue-300/90">
-                  {Math.round(progress * 100)}%
-                </span>
-              ) : exported ? (
-                <span className="font-mono text-[10px] tabular-nums text-emerald-300/90">{exported} saved</span>
-              ) : (
-                statusPill
-              )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() =>
-                      converting
-                        ? (cancelRef.current = true)
-                        : inputMode === "image"
-                          ? exportPoseVmd()
-                          : void convertVideoToVmd()
-                    }
-                    variant="ghost"
-                    size="icon"
-                    className={`size-7 ${
-                      converting
-                        ? "bg-blue-500/10 text-blue-300 hover:bg-blue-500/15"
-                        : "text-white/70 hover:bg-white/10 hover:text-white"
-                    }`}
-                    // A webcam has no end, so there is nothing to convert. A
-                    // video is walked frame by frame; a still is written as it
-                    // stands.
-                    disabled={(inputMode !== "video" && inputMode !== "image") || !mediaPipeReady}
-                  >
-                    {converting ? <Square className="size-3.5 fill-current" /> : <Download className="size-3.5" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {converting
-                    ? "Stop converting"
-                    : inputMode === "image"
-                      ? "Save this pose as a VMD file"
-                      : "Convert this video to a VMD file"}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </TooltipProvider>
+    <>
+      <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageUpload} hidden />
+      <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoUpload} hidden />
+      {floating ? (
+        <FloatingPanel rect={rect} onRectChange={setRect} minW={PANEL_MIN_W} minH={PANEL_MIN_H}>
+          {panel}
+        </FloatingPanel>
+      ) : (
+        // No pointer to drag with: the panel is furniture, docked out of the
+        // model's way and sized to the phone rather than to a window.
+        <div className="absolute left-2 top-12 z-30 flex h-[46dvh] w-[45vw] min-w-[150px] max-w-[280px] flex-col">
+          {panel}
         </div>
-
-        <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageUpload} hidden />
-        <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoUpload} hidden />
-
-        {/* Media — mobile uses opacity-70 so the model bleeds through; tap/hover restores
-            full clarity. Desktop stays opaque. */}
-        <div className="group/media relative aspect-video bg-black/30 opacity-70 transition-opacity duration-200 hover:opacity-100 active:opacity-100 md:bg-black/50 md:opacity-100">
-          {inputMode === "image" && (
-            <div className="flex h-full w-full items-center justify-center">
-              <Image
-                src={currentImage}
-                alt="Motion capture input"
-                crossOrigin="anonymous"
-                ref={imageRef}
-                width={320}
-                height={320}
-                priority
-                className="max-h-full max-w-full object-contain"
-              />
-            </div>
-          )}
-
-          {(inputMode === "video" || inputMode === "camera") && (
-            <>
-              <video
-                ref={videoRef}
-                // The demo video is served cross-origin from the assets bucket in
-                // production. Without CORS its frames are tainted: createImageBitmap
-                // still resolves, but transferring the bitmap to the pose worker
-                // throws DataCloneError — swallowed by the send .catch, so mocap
-                // silently never starts. Dev never sees this (assets come from
-                // public/, same-origin).
-                crossOrigin="anonymous"
-                className={`h-full w-full object-contain ${inputMode === "camera" ? "scale-x-[-1]" : ""}`}
-                playsInline
-                autoPlay={inputMode === "camera"}
-                disablePictureInPicture
-                controlsList="nofullscreen noremoteplayback nodownload"
-                src={isStreamActive ? undefined : videoSrc}
-                onPlay={() => setVideoPlaying(true)}
-                onPause={() => setVideoPlaying(false)}
-                onTimeUpdate={(e) => setVideoTime(e.currentTarget.currentTime)}
-                onLoadedMetadata={(e) => resolveDuration(e.currentTarget)}
-                // Browsers report Infinity at loadedmetadata for WebM/streamed
-                // and variable-frame-rate files, then refine it later — so take
-                // the update too, not just the first announcement.
-                onDurationChange={(e) => resolveDuration(e.currentTarget)}
-              />
-
-              {inputMode === "video" && videoSrc && (
-                <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-2 py-1.5">
-                  <button
-                    type="button"
-                    onClick={toggleVideoPlay}
-                    disabled={converting}
-                    className="flex size-6 shrink-0 items-center justify-center rounded text-white/90 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
-                    aria-label={videoPlaying ? "Pause" : "Play"}
-                  >
-                    {videoPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5 translate-x-[1px]" />}
-                  </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={videoDuration || 1}
-                    step={0.01}
-                    value={videoTime}
-                    disabled={converting}
-                    onChange={(e) => {
-                      if (videoRef.current && !convertingRef.current) videoRef.current.currentTime = Number(e.target.value)
-                    }}
-                    // Release focus after a scrub for the same reason.
-                    onPointerUp={(e) => e.currentTarget.blur()}
-                    className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed accent-white outline-none [&::-moz-range-thumb]:size-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:size-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
-                  />
-                  <span className="hidden font-mono text-[10px] tabular-nums text-white/70 sm:block">
-                    {formatTime(videoTime)} / {formatTime(videoDuration)}
-                  </span>
-                </div>
-              )}
-            </>
-          )}
-
-          {!inputMode && (
-            <div className="flex h-full w-full items-center justify-center">
-              <Camera className="size-8 text-white/30" />
-            </div>
-          )}
-        </div>
-
-        {/* Skeleton preview — desktop only */}
-        <div className="hidden aspect-[16/10] border-t border-white/5 bg-black/50 md:block">
-          <DebugScene landmarks={landmarks} />
-        </div>
-      </div>
-    </div>
+      )}
+    </>
   )
 }

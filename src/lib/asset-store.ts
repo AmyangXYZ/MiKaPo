@@ -127,3 +127,37 @@ export async function loadVideoUpload(): Promise<File | null> {
   const rec = await get<StoredVideo>(VIDEO_STORE, key("uploaded-video"))
   return rec?.file ?? null
 }
+
+function del(store: string, k: string): Promise<void> {
+  return open().then((db) => {
+    if (!db) return
+    return new Promise<void>((resolve) => {
+      try {
+        const tx = db.transaction(store, "readwrite")
+        tx.objectStore(store).delete(k)
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => resolve()
+        tx.onabort = () => resolve()
+      } catch {
+        resolve()
+      } finally {
+        db.close()
+      }
+    })
+  })
+}
+
+/** Whether either upload is being remembered — what makes "back to the demo"
+ *  an action rather than a no-op. */
+export async function hasStoredUploads(): Promise<boolean> {
+  const [model, video] = await Promise.all([
+    get<StoredModel>(MODEL_STORE, key("uploaded-model")),
+    get<StoredVideo>(VIDEO_STORE, key("uploaded-video")),
+  ])
+  return Boolean(model || video)
+}
+
+/** Back to the bundled demo: forget both uploads. */
+export function clearUploads(): Promise<void> {
+  return Promise.all([del(MODEL_STORE, key("uploaded-model")), del(VIDEO_STORE, key("uploaded-video"))]).then(() => {})
+}

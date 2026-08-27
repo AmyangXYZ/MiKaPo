@@ -9,6 +9,8 @@
 import { memo, useEffect, useRef } from "react"
 import type { PoseWorkerResult } from "@/lib/pose-worker"
 
+/** Placeholder size until the element is measured — the observer replaces it
+ *  on the first frame. */
 const W = 300
 const H = 188
 
@@ -81,18 +83,31 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
   }, [landmarks])
 
   const drawRef = useRef<() => void>(() => {})
+  /** The canvas's CSS size, tracked so the drawing stays square-pixelled and
+   *  centred in a panel the user can resize to any shape. */
+  const sizeRef = useRef({ w: W, h: H })
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    canvas.width = W * dpr
-    canvas.height = H * dpr
     const ctx = canvas.getContext("2d")
     if (!ctx) return
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
 
-    // World landmarks are hip-centred meters; a standing body spans ~1.9m, so
-    // a fixed scale frames it without per-frame zoom jitter.
-    const scale = H / 2.4
+    // Backing store follows the element's real size. Sizing it once to a fixed
+    // 300×188 and letting CSS stretch it is what pushed the skeleton off
+    // centre the moment the panel stopped being exactly that shape.
+    const resize = () => {
+      const w = Math.max(1, Math.round(canvas.clientWidth))
+      const h = Math.max(1, Math.round(canvas.clientHeight))
+      if (sizeRef.current.w === w && sizeRef.current.h === h) return
+      sizeRef.current = { w, h }
+      canvas.width = Math.round(w * dpr)
+      canvas.height = Math.round(h * dpr)
+    }
+    resize()
+    const ro = new ResizeObserver(resize)
+    ro.observe(canvas)
+
     const PITCH = 0.26
     const cosP = Math.cos(PITCH)
     const sinP = Math.sin(PITCH)
@@ -109,14 +124,20 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
       const cos = Math.cos(yaw)
       const sin = Math.sin(yaw)
 
+      const { w: cw, h: ch } = sizeRef.current
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.clearRect(0, 0, W, H)
+      ctx.clearRect(0, 0, cw, ch)
+
+      // World landmarks are hip-centred metres and a standing body spans ~1.9m.
+      // Scale to whichever axis runs out first, so the figure fits a wide strip
+      // and a tall one alike without per-frame zoom jitter.
+      const scale = Math.min(ch / 2.4, cw / 1.6)
 
       // MediaPipe world: y down, z away — flip y.
       const project = (lm: { x: number; y: number; z: number }): [number, number] => {
         const rx = lm.x * cos - lm.z * sin
         const rz = lm.x * sin + lm.z * cos
-        return [W / 2 + rx * scale, H / 2 - (-lm.y * cosP - rz * sinP) * scale]
+        return [cw / 2 + rx * scale, ch / 2 - (-lm.y * cosP - rz * sinP) * scale]
       }
       const drawSet = (
         pts: { x: number; y: number; z: number; visibility?: number }[] | undefined,
@@ -158,13 +179,15 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
       drawRef.current()
     }
     loop()
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
   }, [])
 
   return (
     <canvas
       ref={canvasRef}
-      style={{ width: W, height: H }}
       className="block h-full w-full cursor-ew-resize touch-none"
       onPointerDown={(e) => {
         dragRef.current = { x: e.clientX, yaw: yawRef.current }

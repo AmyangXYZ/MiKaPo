@@ -1,5 +1,10 @@
 "use client"
 
+// The app's one loading indicator: a pill over the viewport, naming whichever
+// half is still missing. Two things load independently — the character and the
+// vision model — and saying which one is still out is the difference between
+// waiting and wondering.
+
 interface LoadingProps {
   modelLoaded: boolean
   mediaPipeReady: boolean
@@ -8,29 +13,18 @@ interface LoadingProps {
 export default function Loading({ modelLoaded, mediaPipeReady }: LoadingProps) {
   if (modelLoaded && mediaPipeReady) return null
 
+  const label = !modelLoaded && !mediaPipeReady
+    ? "Loading the character and the vision model"
+    : !modelLoaded
+      ? "Loading the character"
+      : "Loading the vision model"
+
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 p-6 text-white">
-      <div className="text-md font-medium flex items-baseline">
-        <span>Loading MediaPipe vision model and MMD character</span>
-        <Dot delay="0s" />
-        <Dot delay="0.2s" />
-        <Dot delay="0.4s" />
+    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+      <div className="flex max-w-[90vw] items-center gap-2.5 rounded-full border border-line-strong bg-surface-raised px-4 py-2 text-xs text-muted-foreground tabular-nums backdrop-blur-xs">
+        <span className="size-2 shrink-0 animate-pulse rounded-full bg-blue-400" />
+        <span className="truncate">{label}</span>
       </div>
     </div>
-  )
-}
-
-function Dot({ delay }: { delay: string }) {
-  return (
-    <span
-      className="inline-block"
-      style={{
-        animation: `loading-dot 1.4s ease-in-out infinite`,
-        animationDelay: delay,
-        willChange: "opacity",
-      }}
-    >
-      .
-    </span>
   )
 }

@@ -43,8 +43,37 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* The chrome language, shared with reze.design and reze.studio.
+   Text is two tiers — `foreground` and `muted-foreground`, never an opacity
+   modifier on either. Three accents, one meaning each: blue-400 selected or
+   active, amber-400 warning, red-400 destructive. */
+@theme inline {
+  /* Chrome ground: zinc-950/70 behind a backdrop blur, /95 for anything
+     stacked on top of it. The blur costs frames over a live WebGPU canvas and
+     is kept anyway, for one consistent surface across the three apps. */
+  --color-surface: oklch(0.141 0.005 285.823 / 0.7);
+  --color-surface-raised: oklch(0.141 0.005 285.823 / 0.95);
+  --color-scrim: oklch(0.12 0.008 260 / 0.55);
+
+  /* Two edges, not seven: `line` divides things inside one surface, `strong`
+     bounds the surface itself. */
+  --color-line: oklch(1 0 0 / 0.06);
+  --color-line-strong: oklch(1 0 0 / 0.12);
+
+  --radius-surface: 12px;
+  --radius-interior: 8px;
+  --radius-chip: 6px;
+}
+
+/* Every floating thing wears this one shadow. */
+@utility shadow-float {
+  box-shadow:
+    0 20px 50px -12px rgb(0 0 0 / 0.7),
+    0 8px 20px -8px rgb(0 0 0 / 0.55);
+}
+
 :root {
-  --radius: 0.625rem;
+  --radius: 0.45rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
@@ -119,6 +148,43 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Tailwind v4's preflight leaves buttons on the default arrow. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  /* Focus rings are for the keyboard. A pointer click leaves none. */
+  :focus:not(:focus-visible) {
+    outline: none;
+    box-shadow: none;
+  }
+}
+
+/* Scrollbars, themed to the chrome rather than the OS. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.37 0.01 260) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.37 0.01 260);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.45 0.01 260);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Composited indeterminate sweep — opacity/transform animations keep running
