@@ -401,6 +401,8 @@ export const MotionCapture = ({
     send({ type: "init" })
 
     let lastVideoTime = -1
+    let lastVideoSrc = ""
+    let lastPausedGrab = 0
     let lastImgSrc = ""
 
     const detect = () => {
@@ -415,11 +417,30 @@ export const MotionCapture = ({
         else return
       }
       const video = videoRef.current
-      if (video && video.videoWidth > 0 && video.currentTime !== lastVideoTime) {
+      // A new source must be captured even if it sits at the same media time
+      // as the old one — a fresh upload starts at 0, and so did the last.
+      if (video && video.currentSrc !== lastVideoSrc) {
+        lastVideoSrc = video.currentSrc
+        lastVideoTime = -1
+      }
+      // readyState gates the FIRST frame: before HAVE_CURRENT_DATA the grab
+      // below fails, and the time-gate would already be marked consumed — a
+      // paused upload then showed nothing until play moved the clock. While
+      // paused, keep re-solving the standing frame at a low cadence: a single
+      // solve leaves the crossfades barely begun, and this lets the pose
+      // settle to fully applied (also covers scrubbing while paused).
+      const pausedRefresh = video ? video.paused && now - lastPausedGrab > 250 : false
+      if (
+        video &&
+        video.videoWidth > 0 &&
+        video.readyState >= 2 &&
+        (video.currentTime !== lastVideoTime || pausedRefresh)
+      ) {
         // Pacing: the in-flight guard above (one frame in the worker at a time)
         // plus the new-frame gate (source fps) — no artificial rate floor, so
         // result cadence stays as steady as the worker can deliver.
         lastVideoTime = video.currentTime
+        lastPausedGrab = now
         // Media time drives the solver's smoothing filters so pause/seek
         // reset them correctly; detectForVideo gets wall time because it
         // requires a monotonically increasing clock.
@@ -490,11 +511,19 @@ export const MotionCapture = ({
         workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
         setCurrentImage("")
       }
+      // The landmarker's tracker still carries the previous video; the new
+      // one's first frame — solved immediately, while paused — deserves a
+      // clean slate.
+      workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
       setVideoSrc(url)
       setInputMode("video")
       if (videoRef.current) {
         videoRef.current.currentTime = 0
       }
+      // Player state reflects the new file at once — duration follows from
+      // loadedmetadata, the playhead must not wait for a timeupdate.
+      setVideoTime(0)
+      setVideoPlaying(false)
       setLastMedia("VIDEO")
     }
   }
@@ -860,7 +889,12 @@ export const MotionCapture = ({
                 <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-2 py-1.5">
                   <button
                     type="button"
-                    onClick={toggleVideoPlay}
+                    // Blur immediately: a focused button swallows the Space
+                    // shortcut (the global handler defers to focused controls).
+                    onClick={(e) => {
+                      e.currentTarget.blur()
+                      toggleVideoPlay()
+                    }}
                     disabled={converting}
                     className="flex size-6 shrink-0 items-center justify-center rounded text-white/90 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
                     aria-label={videoPlaying ? "Pause" : "Play"}
@@ -877,6 +911,8 @@ export const MotionCapture = ({
                     onChange={(e) => {
                       if (videoRef.current && !convertingRef.current) videoRef.current.currentTime = Number(e.target.value)
                     }}
+                    // Release focus after a scrub for the same reason.
+                    onPointerUp={(e) => e.currentTarget.blur()}
                     className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed accent-white outline-none [&::-moz-range-thumb]:size-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:size-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
                   />
                   <span className="hidden font-mono text-[10px] tabular-nums text-white/70 sm:block">
