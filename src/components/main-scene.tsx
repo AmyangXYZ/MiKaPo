@@ -24,6 +24,7 @@ import Loading from "./loading"
  *  exporting cannot disturb the pose the user is driving live. */
 const EXPORT_CLIP_NAME = "mikapo-capture"
 import { BoneState, SOLVER_REST_BONES, type BodyCollider } from "@/lib/solver"
+import { loadModelUpload, saveModelUpload } from "@/lib/asset-store"
 import { FaceSolverResult } from "@/lib/face-blendshape-solver"
 import { ASSETS } from "@/lib/assets"
 
@@ -158,6 +159,50 @@ export default function MainScene() {
     }
   }, [])
 
+  /**
+   * Load a PMX from picked (or restored) folder files. Returns whether the
+   * model is up. A live pick persists to IndexedDB so it survives a refresh;
+   * the restore path passes `persist: false` (the bytes are already there)
+   * and `quiet: true` (an evicted or stale store must not alert — the app
+   * just boots the default).
+   */
+  const loadPmxFromFolder = useCallback(
+    async (files: File[], pmxFile: File, opts?: { persist?: boolean; quiet?: boolean }): Promise<boolean> => {
+      const engine = engineRef.current
+      if (!engine) {
+        if (!opts?.quiet) window.alert("Viewport is not ready yet. Wait for initialization, then try again.")
+        return false
+      }
+      loadGenerationRef.current += 1
+      const stem = fileStem(pmxFile.name)
+      const instanceKey = `u_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`
+      try {
+        try {
+          engine.removeModel(loadedModelNameRef.current)
+        } catch {
+          /* removeModel no-op if name stale */
+        }
+        const model = await engine.loadModel(instanceKey, { files, pmxFile })
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        model.setName(stem)
+        modelRef.current = model
+        loadedModelNameRef.current = instanceKey
+        await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
+        setModelLoaded(true)
+        buildRestPose(model)
+        frameModel(model)
+        setEngineError(null)
+        if (opts?.persist !== false) void saveModelUpload(files, pmxFile, stem)
+        return true
+      } catch (e) {
+        console.error("[pmx-upload] loadModel failed:", e)
+        if (!opts?.quiet) window.alert(e instanceof Error ? e.message : String(e))
+        return false
+      }
+    },
+    [buildRestPose, frameModel],
+  )
+
   const initEngine = useCallback(async () => {
     if (canvasRef.current) {
       try {
@@ -178,6 +223,15 @@ export default function MainScene() {
         engine.runRenderLoop(() => {
           setStats(engine.getStats())
         })
+
+        // A previously uploaded model survives the refresh — it wins over
+        // both the bundled default and the empty boot. Eviction or a failed
+        // load falls through to the defaults below.
+        const stored = await loadModelUpload()
+        if (stored && (await loadPmxFromFolder(stored.files, stored.pmxFile, { persist: false, quiet: true }))) {
+          engine.addGround({ diffuseColor: new Vec3(0.9, 0.1, 0.9) })
+          return
+        }
 
         if (!USE_DEFAULT_ASSETS) {
           // No bundled model: the scene boots empty (ground only) and the user
@@ -219,7 +273,7 @@ export default function MainScene() {
         setEngineError(error instanceof Error ? error.message : "Unknown error")
       }
     }
-  }, [buildRestPose, frameModel])
+  }, [buildRestPose, frameModel, loadPmxFromFolder])
 
   useEffect(() => {
     void (async () => {
@@ -233,40 +287,6 @@ export default function MainScene() {
       }
     }
   }, [initEngine])
-
-  const loadPmxFromFolder = useCallback(
-    async (files: File[], pmxFile: File) => {
-      const engine = engineRef.current
-      if (!engine) {
-        window.alert("Viewport is not ready yet. Wait for initialization, then try again.")
-        return
-      }
-      loadGenerationRef.current += 1
-      const stem = fileStem(pmxFile.name)
-      const instanceKey = `u_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`
-      try {
-        try {
-          engine.removeModel(loadedModelNameRef.current)
-        } catch {
-          /* removeModel no-op if name stale */
-        }
-        const model = await engine.loadModel(instanceKey, { files, pmxFile })
-        await new Promise((resolve) => requestAnimationFrame(resolve))
-        model.setName(stem)
-        modelRef.current = model
-        loadedModelNameRef.current = instanceKey
-        await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
-        setModelLoaded(true)
-        buildRestPose(model)
-        frameModel(model)
-        setEngineError(null)
-      } catch (e) {
-        console.error("[pmx-upload] loadModel failed:", e)
-        window.alert(e instanceof Error ? e.message : String(e))
-      }
-    },
-    [buildRestPose, frameModel],
-  )
 
   const onPickPmxFolder = useCallback(
     async (e: ChangeEvent<HTMLInputElement>) => {

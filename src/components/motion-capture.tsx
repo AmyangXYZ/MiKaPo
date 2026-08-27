@@ -5,6 +5,7 @@ import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/
 import { buildClip, clipSummary, RecordedFrame } from "@/lib/vmd"
 import { smoothTakeZeroPhase } from "@/lib/filters"
 import { ASSETS } from "@/lib/assets"
+import { loadVideoUpload, saveVideoUpload } from "@/lib/asset-store"
 import { Vec3 } from "reze-engine"
 import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
 import { Button } from "@/components/ui/button"
@@ -87,6 +88,9 @@ export const MotionCapture = ({
   const [currentImage, setCurrentImage] = useState<string>(`${ASSETS}/4.png?cors`)
   const [videoSrc, setVideoSrc] = useState<string>(`${ASSETS}/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4?cors`)
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
+  // Set the moment the user picks any input this session — a slow IndexedDB
+  // restore must never clobber a fresher choice.
+  const userPickedMediaRef = useRef(false)
   const solverRef = useRef<Solver>(new Solver())
   const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver>(new FaceBlendshapeSolver())
   const onMediaPipeReadyChangeRef = useRef(onMediaPipeReadyChange)
@@ -107,6 +111,23 @@ export const MotionCapture = ({
   // business — surfacing them as unlabelled dials asked people to tune what the
   // defaults already handle.
   const faceEnabledRef = useRef(true)
+
+  // A previously uploaded video survives the refresh: restore it as the
+  // active source in place of the bundled demo. Absence (or eviction) simply
+  // leaves the demo — persistence is a convenience, never a precondition.
+  useEffect(() => {
+    let cancelled = false
+    void loadVideoUpload().then((file) => {
+      if (!file || cancelled || userPickedMediaRef.current) return
+      setVideoSrc(URL.createObjectURL(file))
+      setVideoTime(0)
+      setInputMode("video")
+      setLastMedia("VIDEO")
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Offline conversion state. Nothing is "recorded" as it plays — the video is
   // stepped frame by frame, so the result does not depend on how fast this
@@ -483,6 +504,7 @@ export const MotionCapture = ({
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file && file.type.includes("image")) {
+      userPickedMediaRef.current = true
       const url = URL.createObjectURL(file)
       resetModel?.()
       solverRef.current.reset()
@@ -503,6 +525,8 @@ export const MotionCapture = ({
   const handleVideoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file && file.type.includes("video")) {
+      userPickedMediaRef.current = true
+      void saveVideoUpload(file)
       const url = URL.createObjectURL(file)
       resetModel?.()
       solverRef.current.reset()
@@ -546,6 +570,7 @@ export const MotionCapture = ({
 
   // Camera functions
   const toggleCamera = async () => {
+    userPickedMediaRef.current = true
     if (isStreamActive) {
       stopCurrentInput()
     } else {
