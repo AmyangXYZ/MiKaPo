@@ -402,6 +402,23 @@ export const MotionCapture = ({
     const send = (msg: PoseWorkerRequest, transfer?: Transferable[]) =>
       worker.postMessage(msg, transfer ?? [])
 
+    let lastVideoTime = -1
+    let lastVideoSrc = ""
+    let lastImgSrc = ""
+    let stillRetryAt = 0
+
+    // A PAUSED video has no next frame to try: if its one grab comes back
+    // with no detection — the person genuinely absent, or the frame raced
+    // the landmarker rebuild that a fresh upload triggers — the time-gate is
+    // already consumed and the model would wait for play. Re-arm the gate
+    // and retry the same frame shortly; playback retries naturally.
+    const retryPausedStill = () => {
+      const video = videoRef.current
+      if (!video || video.paused === false || convertingRef.current) return
+      lastVideoTime = -1
+      stillRetryAt = performance.now() + 300
+    }
+
     worker.onmessage = (e: MessageEvent<PoseWorkerResponse>) => {
       const msg = e.data
       if (msg.type === "ready") {
@@ -418,6 +435,8 @@ export const MotionCapture = ({
           awaiting(msg.result)
         } else if (msg.result.poseWorldLandmarks[0]) {
           handleResultRef.current(msg.result, msg.mediaTs)
+        } else {
+          retryPausedStill()
         }
       } else if (msg.type === "error") {
         pending = false
@@ -425,16 +444,14 @@ export const MotionCapture = ({
         if (awaiting) {
           awaitingRef.current = null
           awaiting(null)
+        } else {
+          retryPausedStill()
         }
         console.error("Pose worker error:", msg.message)
       }
     }
     worker.onerror = (e) => console.error("Failed to initialize pose worker:", e.message)
     send({ type: "init" })
-
-    let lastVideoTime = -1
-    let lastVideoSrc = ""
-    let lastImgSrc = ""
 
     const detect = () => {
       rafId = requestAnimationFrame(detect)
@@ -456,8 +473,15 @@ export const MotionCapture = ({
       }
       // readyState gates the FIRST frame: before HAVE_CURRENT_DATA the grab
       // below fails, and the time-gate would already be marked consumed — a
-      // paused upload then showed nothing until play moved the clock.
-      if (video && video.videoWidth > 0 && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+      // paused upload then showed nothing until play moved the clock. The
+      // retry throttle only ever binds while paused (see retryPausedStill).
+      if (
+        video &&
+        video.videoWidth > 0 &&
+        video.readyState >= 2 &&
+        video.currentTime !== lastVideoTime &&
+        (!video.paused || now >= stillRetryAt)
+      ) {
         // Pacing: the in-flight guard above (one frame in the worker at a time)
         // plus the new-frame gate (source fps) — no artificial rate floor, so
         // result cadence stays as steady as the worker can deliver.
