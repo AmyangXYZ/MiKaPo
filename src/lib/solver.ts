@@ -1107,10 +1107,14 @@ export class Solver {
     if (landmarks.imageAspect) this.imageAspect = landmarks.imageAspect
 
     // Crossfade clock (media time, so conversions pace identically to live).
+    // Capped per tick: a detection stall must not hand one frame a huge step —
+    // MediaPipe often whiffs its first frame after a gap, and an uncapped step
+    // let that single miss slam a tracked limb to near-rest before the very
+    // next frame pulled it back (the "snaps to bind for an instant" bug).
     let fadeDt = 33.3
     if (this.fadePrevTs !== null) {
       const d = timestampMs - this.fadePrevTs
-      if (d > 0 && d < 500) fadeDt = d
+      if (d > 0) fadeDt = Math.min(d, 100)
     }
     this.fadePrevTs = timestampMs
     for (const side of ["leftHand", "rightHand"] as const) {
