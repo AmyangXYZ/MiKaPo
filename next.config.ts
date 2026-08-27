@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
   // outputFileTracingRoot: join(__dirname, ".."),
   reactStrictMode: false,
   devIndicators: false,
+  images: {
+    remotePatterns: [{ protocol: "https", hostname: "assets.reze.one" }],
+  },
 }
 
 module.exports = nextConfig

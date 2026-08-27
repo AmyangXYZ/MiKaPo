@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, type ComponentType } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import Image from "next/image"
 import { BoneState, Solver, type BodyCollider } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
@@ -9,8 +9,7 @@ import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Camera, Image as ImageIcon, Video, Webcam, Pause, Play, Download, Square } from "lucide-react"
-
-type DebugSceneProps = { landmarks: PoseWorkerResult | null }
+import DebugScene from "./debug-scene"
 
 /**
  * One tuning row: name, setting, slider — and for anything with a live signal, a
@@ -61,8 +60,12 @@ export const MotionCapture = ({
   const [landmarks, setLandmarks] = useState<PoseWorkerResult | null>(null)
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
-  const [currentImage, setCurrentImage] = useState<string>(`${ASSETS}/4.png`)
-  const [videoSrc, setVideoSrc] = useState<string>(`${ASSETS}/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4`)
+  // The ?cors suffix skips browser-cache entries saved before these loads went
+  // through CORS — the demo assets carry a one-year immutable cache header, and
+  // a cached response without access-control-allow-origin fails the CORS check
+  // for as long as it lives.
+  const [currentImage, setCurrentImage] = useState<string>(`${ASSETS}/4.png?cors`)
+  const [videoSrc, setVideoSrc] = useState<string>(`${ASSETS}/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4?cors`)
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
   const solverRef = useRef<Solver>(new Solver())
   const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver>(new FaceBlendshapeSolver())
@@ -156,19 +159,6 @@ export const MotionCapture = ({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [])
-
-  // Babylon-based skeleton preview, loaded client-side only so @babylonjs/*
-  // code-splits out of the initial bundle (the main viewport is reze-engine/WebGPU).
-  const [DebugScene, setDebugScene] = useState<ComponentType<DebugSceneProps> | null>(null)
-  useEffect(() => {
-    let mounted = true
-    import("./debug-scene").then((mod) => {
-      if (mounted) setDebugScene(() => mod.default)
-    })
-    return () => {
-      mounted = false
-    }
   }, [])
 
   // Re-calibrate solver reference directions when a (new) model's rest pose arrives.
@@ -705,6 +695,7 @@ export const MotionCapture = ({
               <Image
                 src={currentImage}
                 alt="Motion capture input"
+                crossOrigin="anonymous"
                 ref={imageRef}
                 width={320}
                 height={320}
@@ -718,6 +709,13 @@ export const MotionCapture = ({
             <>
               <video
                 ref={videoRef}
+                // The demo video is served cross-origin from the assets bucket in
+                // production. Without CORS its frames are tainted: createImageBitmap
+                // still resolves, but transferring the bitmap to the pose worker
+                // throws DataCloneError — swallowed by the send .catch, so mocap
+                // silently never starts. Dev never sees this (assets come from
+                // public/, same-origin).
+                crossOrigin="anonymous"
                 className={`h-full w-full object-contain ${inputMode === "camera" ? "scale-x-[-1]" : ""}`}
                 playsInline
                 autoPlay={inputMode === "camera"}
@@ -774,7 +772,7 @@ export const MotionCapture = ({
 
         {/* Skeleton preview — desktop only */}
         <div className="hidden aspect-[16/10] border-t border-white/5 bg-black/50 md:block">
-          {DebugScene && <DebugScene landmarks={landmarks} />}
+          <DebugScene landmarks={landmarks} />
         </div>
       </div>
     </div>
