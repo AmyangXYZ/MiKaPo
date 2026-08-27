@@ -130,6 +130,14 @@ export const MotionCapture = ({
     video.addEventListener("seeked", onSeeked)
     video.currentTime = 1e9
   }, [])
+  // The page is prerendered, so a warm cache can finish loading the video's
+  // metadata before React hydrates — loadedmetadata and durationchange then
+  // fire with no listener attached and the duration sits at 0:00. On mount,
+  // read whatever the element already knows.
+  useEffect(() => {
+    const v = videoRef.current
+    if (v && v.readyState >= 1) resolveDuration(v)
+  }, [resolveDuration, inputMode])
   const formatTime = (s: number): string => {
     if (!Number.isFinite(s) || s < 0) return "0:00"
     const m = Math.floor(s / 60)
