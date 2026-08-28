@@ -34,6 +34,10 @@ export interface PoseWorkerResult {
 
 export type PoseWorkerResponse =
   | { type: "ready" }
+  /** The graph has been rebuilt for a new source and will detect the very next
+   *  frame it is handed. Playing before this lands means frames going by with
+   *  no pose behind them. */
+  | { type: "prepared" }
   | { type: "result"; result: PoseWorkerResult; mediaTs: number }
   | { type: "error"; message: string }
 
@@ -117,6 +121,7 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
           await landmarker.setOptions({ runningMode: msg.running })
           runningMode = msg.running
         }
+        post({ type: "prepared" })
         break
       case "reset":
         // Between stills, the landmarker must forget the previous one. Its
@@ -125,6 +130,7 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
         // landmarks, before any solving. setOptions rebuilds the graph, which
         // is the documented way to clear it without rebuilding the model.
         if (landmarker) await landmarker.setOptions({ runningMode })
+        post({ type: "prepared" })
         break
       case "video": {
         if (landmarker && runningMode === "VIDEO") {

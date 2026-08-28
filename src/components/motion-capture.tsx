@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback, memo } from "react"
 import Image from "next/image"
 import { BoneState, Solver, type BodyCollider } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
@@ -73,7 +73,7 @@ const snapshotPose = (pose: BoneState[], into: BoneState[] | null): BoneState[] 
   return into
 }
 
-export const MotionCapture = ({
+const MotionCaptureImpl = ({
   applyPose,
   applyFace,
   modelLoaded,
@@ -114,6 +114,8 @@ export const MotionCapture = ({
   /** Detector time per frame, smoothed. What the capture rate is made of. */
   const [inferenceMs, setInferenceMs] = useState(0)
   const inferenceEmaRef = useRef(0)
+  const arrivalEmaRef = useRef(0)
+  const lastArrivalRef = useRef(0)
   /** Set when returning to an image the capture loop has already consumed. */
   const redetectImageRef = useRef(false)
   const [inputMode, setInputMode] = useState<InputMode>("video")
@@ -173,6 +175,10 @@ export const MotionCapture = ({
 
   // Custom video controls — replaces native browser chrome to match the panel style.
   const [videoPlaying, setVideoPlaying] = useState(false)
+  /** False from the moment a new source is chosen until the detector says it
+   *  is rebuilt for it. Playing before then spends real frames on a graph that
+   *  is still tearing down the last source. */
+  const [sourceReady, setSourceReady] = useState(true)
   const [videoTime, setVideoTime] = useState(0)
   const [videoDuration, setVideoDuration] = useState(0)
   /** Accept a duration only once it is a real number. When the browser says
@@ -229,8 +235,9 @@ export const MotionCapture = ({
     return `${m}:${sec.toString().padStart(2, "0")}`
   }
   const toggleVideoPlay = () => {
-    // The conversion owns the playhead while it steps through the take.
-    if (!videoRef.current || convertingRef.current) return
+    // The conversion owns the playhead while it steps through the take, and a
+    // detector still rebuilding would miss the opening frames.
+    if (!videoRef.current || convertingRef.current || !sourceReady) return
     if (videoRef.current.paused) videoRef.current.play()
     else videoRef.current.pause()
   }
@@ -304,6 +311,15 @@ export const MotionCapture = ({
   const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
     const ms = result.inferenceMs ?? 0
     inferenceEmaRef.current = inferenceEmaRef.current > 0 ? inferenceEmaRef.current * 0.8 + ms * 0.2 : ms
+    const arrivedAt = performance.now()
+    const gap = arrivedAt - lastArrivalRef.current
+    lastArrivalRef.current = arrivedAt
+    // A gap that long is a stopped source, not a slow one.
+    if (gap > 0 && gap < 1000) {
+      arrivalEmaRef.current = arrivalEmaRef.current > 0 ? arrivalEmaRef.current * 0.8 + gap * 0.2 : gap
+    } else {
+      arrivalEmaRef.current = 0
+    }
     // Throttled React update — feeds only the debug skeleton preview.
     const now = performance.now()
     // A still produces exactly one result: dropping it to the throttle leaves
@@ -315,7 +331,10 @@ export const MotionCapture = ({
       // The status strip rides the same throttle: a readout that re-rendered
       // per detection would cost more than it reports.
       setTracking(true)
-      setCaptureHz(Math.round(1000 / Math.max(1, displayIntervalRef.current)))
+      // Measured between ARRIVALS: how many poses a second are actually being
+      // produced. Media-time spacing reads 30 Hz off a paused video, which is
+      // the frame interval of a source that is not being sampled at all.
+      setCaptureHz(arrivalEmaRef.current > 0 ? Math.round(1000 / arrivalEmaRef.current) : 0)
       setInferenceMs(Math.round(inferenceEmaRef.current))
     }
 
@@ -453,6 +472,8 @@ export const MotionCapture = ({
         ready = true
         setMediaPipeReady(true)
         onMediaPipeReadyChangeRef.current?.(true)
+      } else if (msg.type === "prepared") {
+        setSourceReady(true)
       } else if (msg.type === "result") {
         pending = false
         // Grab the next frame now rather than on the next animation frame:
@@ -568,6 +589,8 @@ export const MotionCapture = ({
     setCaptureHz(0)
     setInferenceMs(0)
     inferenceEmaRef.current = 0
+    arrivalEmaRef.current = 0
+    lastArrivalRef.current = 0
     displayPrevRef.current = null
     displayCurrRef.current = null
     lastMediaTsRef.current = -1
@@ -580,6 +603,7 @@ export const MotionCapture = ({
       resetModel?.()
       clearCaptureState()
       // Worker messages are FIFO — the mode switch lands before the next frame.
+      setSourceReady(false)
       workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
       // ...and the landmarker forgets the previous still, so this one is solved
       // on its own merits rather than tracked from the last.
@@ -603,11 +627,13 @@ export const MotionCapture = ({
       // is exactly the jarring cut this avoids.
       clearCaptureState()
       if (lastMedia === "IMAGE") {
+        setSourceReady(false)
         workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
         setCurrentImage("")
       }
-      // The landmarker's tracker still carries the previous video; the new
-      // one deserves a clean slate when playback starts.
+      // The landmarker's tracker still carries the previous video; the new one
+      // deserves a clean slate, and playback waits for it.
+      setSourceReady(false)
       workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
       setVideoSrc(url)
       setInputMode("video")
@@ -826,6 +852,7 @@ export const MotionCapture = ({
     userPickedMediaRef.current = true
     // Back to whichever file is loaded; with none, straight to the picker.
     if (lastMedia === "IMAGE" && currentImage) {
+      setSourceReady(false)
       workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
       workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
       // The capture loop skips an image it has already seen; coming back to one
@@ -835,7 +862,10 @@ export const MotionCapture = ({
       return
     }
     if (videoSrc) {
-      if (lastMedia === "IMAGE") workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
+      if (lastMedia === "IMAGE") {
+        setSourceReady(false)
+        workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
+      }
       setLastMedia("VIDEO")
       setInputMode("video")
       return
@@ -1001,7 +1031,7 @@ export const MotionCapture = ({
           <button
             type="button"
             onClick={toggleVideoPlay}
-            disabled={converting}
+            disabled={converting || !sourceReady}
             className="flex size-5 shrink-0 items-center justify-center rounded-chip text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground disabled:opacity-40"
             aria-label={videoPlaying ? "Pause" : "Play"}
           >
@@ -1038,7 +1068,15 @@ export const MotionCapture = ({
         aria-live="polite"
       >
         <span className={cn("truncate", tracking ? "text-foreground" : undefined)}>
-          {converting ? `Converting ${Math.round(progress * 100)}%` : exported ? `Saved ${exported}` : tracking ? "Tracking" : "No pose"}
+          {converting
+            ? `Converting ${Math.round(progress * 100)}%`
+            : !sourceReady
+              ? "Preparing detector"
+              : exported
+                ? `Saved ${exported}`
+                : tracking
+                  ? "Tracking"
+                  : "No pose"}
         </span>
         <span className="ml-auto shrink-0 tabular-nums">
           {captureHz > 0 ? `${captureHz} Hz` : "— Hz"}
@@ -1057,3 +1095,7 @@ export const MotionCapture = ({
     </>
   )
 }
+
+/** The panel re-renders on its own signals (a new preview frame, a status
+ *  tick), never because the scene around it drew a frame. */
+export const MotionCapture = memo(MotionCaptureImpl)

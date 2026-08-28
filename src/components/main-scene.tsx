@@ -117,6 +117,8 @@ export default function MainScene() {
    *  the engine, the solver and the capture pipeline all read their assets
    *  once at start, and unwinding that by hand would be three chances to
    *  leave something stale. */
+  const markUploadStored = useCallback(() => setHasUploads(true), [])
+
   const resetToDemo = useCallback(async () => {
     await clearUploads()
     window.location.reload()
@@ -224,7 +226,15 @@ export default function MainScene() {
         // The exported motion still carries its own per-chain state for whoever
         // plays it back.
         engine.setIKEnabled(false)
+        // Sampled, not streamed: setState per rendered frame re-rendered this
+        // component — and the capture panel under it — sixty times a second,
+        // for a number the eye reads twice. That work came straight out of the
+        // capture rate.
+        let statsAt = 0
         engine.runRenderLoop(() => {
+          const now = performance.now()
+          if (now - statsAt < 500) return
+          statsAt = now
           setStats(engine.getStats())
         })
         // Before any model: a floor that appears afterwards is one more thing
@@ -594,7 +604,7 @@ export default function MainScene() {
         colliders={colliders}
         modelMorphs={modelMorphs}
         exportVmd={exportVmd}
-        onUploadStored={() => setHasUploads(true)}
+        onUploadStored={markUploadStored}
       />
 
       {/* One message at a time. A failed boot leaves `modelLoaded` false, so the
