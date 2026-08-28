@@ -179,6 +179,25 @@ const MotionCaptureImpl = ({
    *  is rebuilt for it. Playing before then spends real frames on a graph that
    *  is still tearing down the last source. */
   const [sourceReady, setSourceReady] = useState(true)
+  const sourceGateTimerRef = useRef<number | null>(null)
+  /** Shut until the detector produces a pose for the new source. A rebuilt
+   *  graph answers in milliseconds; its first inference is far slower, and
+   *  that gap is exactly the frames that would play unposed. */
+  const closeSourceGate = useCallback(() => {
+    setSourceReady(false)
+    if (sourceGateTimerRef.current !== null) window.clearTimeout(sourceGateTimerRef.current)
+    // Footage with nobody in it still has to be playable.
+    sourceGateTimerRef.current = window.setTimeout(() => setSourceReady(true), 4000)
+  }, [])
+  const openSourceGate = useCallback(() => {
+    if (sourceGateTimerRef.current !== null) {
+      window.clearTimeout(sourceGateTimerRef.current)
+      sourceGateTimerRef.current = null
+    }
+    setSourceReady(true)
+  }, [])
+  const openSourceGateRef = useRef(openSourceGate)
+  openSourceGateRef.current = openSourceGate
   const [videoTime, setVideoTime] = useState(0)
   const [videoDuration, setVideoDuration] = useState(0)
   /** Accept a duration only once it is a real number. When the browser says
@@ -473,9 +492,14 @@ const MotionCaptureImpl = ({
         setMediaPipeReady(true)
         onMediaPipeReadyChangeRef.current?.(true)
       } else if (msg.type === "prepared") {
-        setSourceReady(true)
+        // The graph is rebuilt: take the standing frame now, so the pose is
+        // already there when playback is allowed to start.
+        lastVideoTime = -1
+        detect()
       } else if (msg.type === "result") {
         pending = false
+        // A pose for this source exists — that is what "ready" means.
+        openSourceGateRef.current()
         // Grab the next frame now rather than on the next animation frame:
         // waiting for rAF spends up to 16ms of every capture cycle idle.
         if (!awaitingRef.current) detect()
@@ -512,7 +536,7 @@ const MotionCaptureImpl = ({
         else return
       }
       const video = videoRef.current
-      if (video && video.videoWidth > 0 && video.currentTime !== lastVideoTime) {
+      if (video && video.videoWidth > 0 && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
         // Pacing: the in-flight guard above (one frame in the worker at a time)
         // plus the new-frame gate (source fps) — no artificial rate floor, so
         // result cadence stays as steady as the worker can deliver.
@@ -603,7 +627,7 @@ const MotionCaptureImpl = ({
       resetModel?.()
       clearCaptureState()
       // Worker messages are FIFO — the mode switch lands before the next frame.
-      setSourceReady(false)
+      closeSourceGate()
       workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
       // ...and the landmarker forgets the previous still, so this one is solved
       // on its own merits rather than tracked from the last.
@@ -627,13 +651,13 @@ const MotionCaptureImpl = ({
       // is exactly the jarring cut this avoids.
       clearCaptureState()
       if (lastMedia === "IMAGE") {
-        setSourceReady(false)
+        closeSourceGate()
         workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
         setCurrentImage("")
       }
       // The landmarker's tracker still carries the previous video; the new one
       // deserves a clean slate, and playback waits for it.
-      setSourceReady(false)
+      closeSourceGate()
       workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
       setVideoSrc(url)
       setInputMode("video")
@@ -852,7 +876,7 @@ const MotionCaptureImpl = ({
     userPickedMediaRef.current = true
     // Back to whichever file is loaded; with none, straight to the picker.
     if (lastMedia === "IMAGE" && currentImage) {
-      setSourceReady(false)
+      closeSourceGate()
       workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
       workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
       // The capture loop skips an image it has already seen; coming back to one
@@ -863,7 +887,7 @@ const MotionCaptureImpl = ({
     }
     if (videoSrc) {
       if (lastMedia === "IMAGE") {
-        setSourceReady(false)
+        closeSourceGate()
         workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
       }
       setLastMedia("VIDEO")
