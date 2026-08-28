@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState, useCallback, memo } from "react"
 import Image from "next/image"
 import { BoneState, Solver, type BodyCollider } from "@/lib/solver"
-import type { Landmark } from "@mediapipe/tasks-vision"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
 import { buildClip, clipSummary, RecordedFrame, VMD_FPS } from "@/lib/vmd"
 import { smoothTakeZeroPhase } from "@/lib/filters"
 import { cleanTake, type TakeFrame } from "@/lib/take-cleanup"
-import { FacingTracker, mirrorFrame } from "@/lib/facing"
 import { ASSETS } from "@/lib/assets"
 import { loadVideoUpload, saveVideoUpload } from "@/lib/asset-store"
 import { Quat, Vec3 } from "reze-engine"
@@ -151,7 +149,6 @@ const MotionCaptureImpl = ({
   // restore must never clobber a fresher choice.
   const userPickedMediaRef = useRef(false)
   const solverRef = useRef<Solver>(new Solver())
-  const facingRef = useRef(new FacingTracker())
   const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver>(new FaceBlendshapeSolver())
   const onUploadStoredRef = useRef(onUploadStored)
   onUploadStoredRef.current = onUploadStored
@@ -378,29 +375,6 @@ const MotionCaptureImpl = ({
     }
 
     if (!modelLoadedRef.current) return
-
-    // Which way the body faces, before anything is solved. A monocular stream
-    // reports a subject turning past profile as turning back the way they
-    // came; the face detector losing the face is what says otherwise. Applied
-    // to the landmarks themselves, so the preview shows what the solver sees.
-    const posed = result.poseWorldLandmarks[0] ?? null
-    if (facingRef.current.update(posed, Boolean(result.faceLandmarks?.[0]?.length))) {
-      const frame = {
-        pose: posed,
-        leftHand: result.leftHandWorldLandmarks[0] ?? null,
-        rightHand: result.rightHandWorldLandmarks[0] ?? null,
-      }
-      mirrorFrame(frame)
-      // Mirroring exchanges the sides, so the arrays are rebuilt from what it
-      // left behind. A hand that was absent stays absent — writing an empty
-      // slot back would hand the solver an array with nothing in it.
-      const put = (into: Landmark[][], set: Landmark[] | null) => {
-        into.length = 0
-        if (set) into.push(set)
-      }
-      put(result.leftHandWorldLandmarks, frame.leftHand)
-      put(result.rightHandWorldLandmarks, frame.rightHand)
-    }
 
     const isImage = inputModeRef.current === "image"
     const pose = solverRef.current.solve(result, timestampMs, isImage)
@@ -652,7 +626,6 @@ const MotionCaptureImpl = ({
    *  source that is no longer playing. */
   const clearCaptureState = () => {
     solverRef.current.reset()
-    facingRef.current.reset()
     faceBlendshapeSolverRef.current.reset()
     setLandmarks(null)
     setTracking(false)
@@ -894,9 +867,6 @@ const MotionCaptureImpl = ({
           pose: result.poseWorldLandmarks[0] ?? null,
           leftHand: result.leftHandWorldLandmarks[0] ?? null,
           rightHand: result.rightHandWorldLandmarks[0] ?? null,
-          // No face means the subject turned their back, which the pose
-          // stream alone cannot tell you.
-          faceSeen: Boolean(result.faceLandmarks?.[0]?.length),
         })
         // Face is solved as it arrives: morph weights are scalars with their
         // own filtering, and keeping 468 mesh points per frame to redo later

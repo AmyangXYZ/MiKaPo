@@ -1,5 +1,4 @@
 import { Landmark } from "@mediapipe/tasks-vision"
-import { FacingTracker, MIRRORED, mirrorFrame } from "./facing"
 
 /**
  * Landmark cleanup for a finished take.
@@ -21,9 +20,6 @@ export interface TakeFrame {
   pose: Landmark[] | null
   leftHand: Landmark[] | null
   rightHand: Landmark[] | null
-  /** Whether the face detector found a face on this frame — the one honest
-   *  signal in a monocular stream for which way the body is facing. */
-  faceSeen?: boolean
 }
 
 type Channel = "x" | "y" | "z"
@@ -33,9 +29,7 @@ const CHANNELS: Channel[] = ["x", "y", "z"]
 const SG7 = [-2, 3, 6, 7, 6, 3, -2]
 const SG7_HALF = 3
 
-type LandmarkSet = "pose" | "leftHand" | "rightHand"
-
-function seriesOf(frames: TakeFrame[], key: LandmarkSet): (Landmark[] | null)[] {
+function seriesOf(frames: TakeFrame[], key: keyof TakeFrame): (Landmark[] | null)[] {
   return frames.map((f) => f[key])
 }
 
@@ -128,6 +122,17 @@ function savitzkyGolay(sets: (Landmark[] | null)[], zGain: number): void {
 // Each frame is taken as it comes or with its sides exchanged, whichever
 // continues the previous frame — a decision that costs nothing when the labels
 // were right, because then the unswapped reading is always the closer one.
+
+/** Index pairs that exchange when a pose is read from the wrong side. */
+const MIRRORED: [number, number][] = [
+  [1, 4], [2, 5], [3, 6], // eyes
+  [7, 8], // ears
+  [9, 10], // mouth
+  [11, 12], [13, 14], [15, 16], // shoulders, elbows, wrists
+  [17, 18], [19, 20], [21, 22], // pinky, index, thumb
+  [23, 24], [25, 26], [27, 28], // hips, knees, ankles
+  [29, 30], [31, 32], // heels, foot indices
+]
 
 /** Bearing of the shoulder line in the ground plane. */
 function shoulderYaw(pose: Landmark[], swapped: boolean): number {
@@ -255,69 +260,17 @@ function bridgeDropouts(sets: (Landmark[] | null)[]): number {
   return bridged
 }
 
-
-// ─── Facing ────────────────────────────────────────────────────────────────
-//
-// A single camera cannot see which way a body faces. Depth is inferred, and
-// the inference has two answers that fit the same picture equally well: a
-// person turned a quarter to the left, and a person turned a quarter to the
-// right. Pose models resolve it from training bias, which means a subject
-// turning through profile is usually reported as turning back the way they
-// came. A full spin plays as a half spin that reconsiders — smoothly, with no
-// discontinuity anywhere for a continuity check to catch.
-//
-// The face is the tiebreaker. A face detector finds a face when someone is
-// facing the camera and finds nothing when they turn their back, which is
-// exactly the fact the pose stream is missing. Where the face is gone and the
-// body is side-on — the moment the two readings agree, so switching between
-// them is seamless — the pose is turned to face away.
-//
-// Rotating a bilaterally symmetric body 180° about its own vertical is the
-// same as mirroring its depth and exchanging its sides, and that is how it is
-// applied here.
-
 /**
- * Carry a turn through the half of it the camera cannot see.
- *
- * The same tracker the live path runs, over a take that is already recorded:
- * the decision is per frame either way, and the reasoning does not improve by
- * knowing the ending. It resolves both halves of the problem — a detector that
- * reports a spin as walking up to profile and back down, and a detector that
- * alternates between the two readings while the subject's back is turned.
- */
-export function continueTurns(frames: TakeFrame[]): number {
-  const tracker = new FacingTracker()
-  let turned = 0
-  for (const f of frames) {
-    if (!f.pose) continue
-    if (tracker.update(f.pose, f.faceSeen !== false)) {
-      mirrorFrame(f)
-      turned++
-    }
-  }
-  return turned
-}
-
-/**
- * Clean a whole take in place: turns carried through, sides made consistent,
- * brief dropouts bridged,
+ * Clean a whole take in place: sides made consistent, brief dropouts bridged,
  * spikes removed, then smoothed without phase shift.
  *
  * A frame the detector missed entirely stays missing: with nothing of the body
  * in it, there is no gap to bridge, and the solver's crossfades know what to
  * do with an absence.
  */
-export function cleanTake(
-  frames: TakeFrame[],
-  opts?: { zGain?: number },
-): { sideRepairs: number; bridged: number; turned: number } {
+export function cleanTake(frames: TakeFrame[], opts?: { zGain?: number }): { sideRepairs: number; bridged: number } {
   const zGain = opts?.zGain ?? 1
-  // Sides first, facing second. A detector that merely exchanges left and
-  // right leaves a half-turn jump, and turning the body around is the wrong
-  // repair for it — fixing the labels first leaves the facing pass looking at
-  // an honest turn.
   const sideRepairs = stabilizeHandedness(frames)
-  const turned = continueTurns(frames)
   let bridged = 0
   for (const key of ["pose", "leftHand", "rightHand"] as const) {
     const sets = seriesOf(frames, key)
@@ -325,5 +278,5 @@ export function cleanTake(
     medianOfThree(sets)
     savitzkyGolay(sets, zGain)
   }
-  return { sideRepairs, bridged, turned }
+  return { sideRepairs, bridged }
 }
