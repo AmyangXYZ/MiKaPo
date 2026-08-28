@@ -37,6 +37,8 @@ const DEBUG_PREVIEW_INTERVAL_MS = 66
  *  2-megapixel upload on every single frame, which is capture rate spent on
  *  pixels the model never sees. 960 keeps enough detail for hands and faces
  *  cropped out of the frame. */
+const DEMO_VIDEO = `${ASSETS}/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4`
+
 const CAPTURE_WIDTH = 960
 
 const PANEL_RECT_KEY = "mikapo.capture-panel.1"
@@ -84,6 +86,7 @@ const MotionCaptureImpl = ({
   modelMorphs,
   exportVmd,
   onUploadStored,
+  restoreDemoSignal,
 }: {
   applyPose: (boneStates: BoneState[], tweenMs: number) => void
   applyFace: (faceResult: FaceSolverResult, tweenMs: number) => void
@@ -101,6 +104,8 @@ const MotionCaptureImpl = ({
   /** Fired once an upload is actually persisted, so the header can offer the
    *  way back to the demo without waiting for a reload to notice. */
   onUploadStored?: () => void
+  /** Bumped when the app goes back to its bundled assets. */
+  restoreDemoSignal?: number
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
@@ -129,7 +134,7 @@ const MotionCaptureImpl = ({
   // Images have no default. A demo photo is a picture of someone else's pose —
   // the mode is worth entering only with your own.
   const [currentImage, setCurrentImage] = useState<string>("")
-  const [videoSrc, setVideoSrc] = useState<string>(`${ASSETS}/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4`)
+  const [videoSrc, setVideoSrc] = useState<string>(DEMO_VIDEO)
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
   // Set the moment the user picks any input this session — a slow IndexedDB
   // restore must never clobber a fresher choice.
@@ -619,6 +624,28 @@ const MotionCaptureImpl = ({
     displayCurrRef.current = null
     lastMediaTsRef.current = -1
   }
+
+  // Back to the bundled footage, in place: the uploaded source is dropped and
+  // the demo takes its slot without the page going away and coming back.
+  const firstDemoSignal = useRef(restoreDemoSignal)
+  useEffect(() => {
+    if (restoreDemoSignal === firstDemoSignal.current) return
+    firstDemoSignal.current = restoreDemoSignal
+    userPickedMediaRef.current = false
+    clearCaptureState()
+    closeSourceGate()
+    if (lastMedia === "IMAGE") {
+      workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
+    }
+    workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
+    setCurrentImage("")
+    setVideoSrc(DEMO_VIDEO)
+    setInputMode("video")
+    setLastMedia("VIDEO")
+    setVideoTime(0)
+    setVideoPlaying(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreDemoSignal])
 
   const loadImageFile = (file: File) => {
     {

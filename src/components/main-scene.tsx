@@ -113,16 +113,8 @@ export default function MainScene() {
     void hasStoredUploads().then(setHasUploads)
   }, [])
 
-  /** Forget both uploads and boot clean. A reload is the honest way to do it:
-   *  the engine, the solver and the capture pipeline all read their assets
-   *  once at start, and unwinding that by hand would be three chances to
-   *  leave something stale. */
   const markUploadStored = useCallback(() => setHasUploads(true), [])
 
-  const resetToDemo = useCallback(async () => {
-    await clearUploads()
-    window.location.reload()
-  }, [])
 
   // Build a rest-pose dict from the model's bone world positions. Solver uses
   // these to derive per-bone reference directions instead of the static defaults.
@@ -209,6 +201,54 @@ export default function MainScene() {
     [buildRestPose],
   )
 
+  /** Load the bundled character, replacing whatever is on stage. */
+  const loadDefaultModel = useCallback(async (): Promise<boolean> => {
+    const engine = engineRef.current
+    if (!engine || !USE_DEFAULT_ASSETS) return false
+    loadGenerationRef.current += 1
+    const gen = loadGenerationRef.current
+    try {
+      try {
+        engine.removeModel(loadedModelNameRef.current)
+      } catch {
+        /* nothing loaded under that name */
+      }
+      const model = await engine.loadModel(DEFAULT_MODEL_KEY, `${ASSETS}/models/塞尔凯特/塞尔凯特.pmx`)
+      if (gen !== loadGenerationRef.current) {
+        try {
+          engine.removeModel(DEFAULT_MODEL_KEY)
+        } catch {
+          /* a later load already replaced the registry */
+        }
+        return false
+      }
+      modelRef.current = model
+      loadedModelNameRef.current = DEFAULT_MODEL_KEY
+      await engine.autoStyleGroups(DEFAULT_MODEL_KEY, DEFAULT_STYLE_OVERRIDES)
+      await new Promise((r) => requestAnimationFrame(r))
+      buildRestPose(model)
+      setModelLoaded(true)
+      setEngineError(null)
+      return true
+    } catch (loadErr) {
+      setEngineError(loadErr instanceof Error ? loadErr.message : "Unknown error")
+      return false
+    }
+  }, [buildRestPose])
+
+  /** Bumped to send the capture panel back to the bundled video. */
+  const [demoSignal, setDemoSignal] = useState(0)
+
+  /** Forget both uploads and put the demo back — model and footage swapped on
+   *  the spot, so the scene never blinks out and comes back. */
+
+  const resetToDemo = useCallback(async () => {
+    await clearUploads()
+    setHasUploads(false)
+    setDemoSignal((n) => n + 1)
+    await loadDefaultModel()
+  }, [loadDefaultModel])
+
   const initEngine = useCallback(async () => {
     if (canvasRef.current) {
       try {
@@ -253,38 +293,12 @@ export default function MainScene() {
         // brings their own PMX via the folder picker.
         if (!USE_DEFAULT_ASSETS) return
 
-        const genBeforeDefault = loadGenerationRef.current
-        try {
-          const model = await engine.loadModel(DEFAULT_MODEL_KEY, `${ASSETS}/models/塞尔凯特/塞尔凯特.pmx`)
-          if (genBeforeDefault !== loadGenerationRef.current) {
-            try {
-              engine.removeModel(DEFAULT_MODEL_KEY)
-            } catch {
-              /* raced folder upload already replaced registry */
-            }
-            return
-          }
-
-          modelRef.current = model
-          loadedModelNameRef.current = DEFAULT_MODEL_KEY
-          console.log(model.getMaterials())
-
-          await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
-          await new Promise((r) => requestAnimationFrame(r))
-          buildRestPose(model)
-          setModelLoaded(true)
-          setEngineError(null)
-        } catch (loadErr) {
-          setEngineError(loadErr instanceof Error ? loadErr.message : "Unknown error")
-        }
-
-        // await engine.loadAnimation("/mikapo_animation.vmd")
-        // engine.playAnimation()
+        await loadDefaultModel()
       } catch (error) {
         setEngineError(error instanceof Error ? error.message : "Unknown error")
       }
     }
-  }, [buildRestPose, loadPmxFromFolder])
+  }, [loadDefaultModel, loadPmxFromFolder])
 
   useEffect(() => {
     void (async () => {
@@ -605,6 +619,7 @@ export default function MainScene() {
         modelMorphs={modelMorphs}
         exportVmd={exportVmd}
         onUploadStored={markUploadStored}
+        restoreDemoSignal={demoSignal}
       />
 
       {/* One message at a time. A failed boot leaves `modelLoaded` false, so the
