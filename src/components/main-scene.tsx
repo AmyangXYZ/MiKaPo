@@ -124,22 +124,6 @@ export default function MainScene() {
 
   // Build a rest-pose dict from the model's bone world positions. Solver uses
   // these to derive per-bone reference directions instead of the static defaults.
-  /** Static orbit centre at the character's rest センター plus a small lift.
-   *  センター carries the performance now — height from grounding, distance
-   *  from the depth rebuild — and a camera that follows it subtracts that
-   *  motion right back out of the frame. */
-  const frameModel = useCallback(
-    (model: Model) => {
-      try {
-        const c = model.getBoneWorldPosition("センター")
-        if (c) engineRef.current?.setCameraTarget(new Vec3(c.x, c.y + 3, c.z))
-      } catch {
-        // bone missing — keep the engine's default framing
-      }
-    },
-    [engineRef],
-  )
-
   const buildRestPose = useCallback((model: Model) => {
     const dict: Record<string, Vec3> = {}
     for (const name of SOLVER_REST_BONES) {
@@ -201,14 +185,12 @@ export default function MainScene() {
           /* removeModel no-op if name stale */
         }
         const model = await engine.loadModel(instanceKey, { files, pmxFile })
-        frameModel(model)
         await new Promise((resolve) => requestAnimationFrame(resolve))
         model.setName(stem)
         modelRef.current = model
         loadedModelNameRef.current = instanceKey
         await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
         buildRestPose(model)
-        frameModel(model)
         setModelLoaded(true)
         setEngineError(null)
         if (opts?.persist !== false) {
@@ -222,7 +204,7 @@ export default function MainScene() {
         return false
       }
     },
-    [buildRestPose, frameModel],
+    [buildRestPose],
   )
 
   const initEngine = useCallback(async () => {
@@ -231,12 +213,8 @@ export default function MainScene() {
         const engine = new Engine(canvasRef.current, {
           bloom: { color: new Vec3(0.5, 0.1, 0.9), intensity: 0.03 },
           // Further out than the engine default: a capture is watched whole —
-          // raised arms and a deep crouch both have to stay in frame. The
-          // target is the chest height of a standard MMD model: framing only
-          // once the model's own センター can be read means the first frames
-          // are drawn looking somewhere else, and the correction reads as the
-          // scene lurching.
-          camera: { distance: 30, target: new Vec3(0, 11, 0) },
+          // raised arms and a deep crouch both have to stay in frame.
+          camera: { distance: 30 },
         })
         engineRef.current = engine
         await engine.init()
@@ -281,13 +259,9 @@ export default function MainScene() {
           loadedModelNameRef.current = DEFAULT_MODEL_KEY
           console.log(model.getMaterials())
 
-          // Frame first, then reveal: the camera reads the model's own センター
-          // and the loading pill only clears once it is looking there.
-          frameModel(model)
           await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
           await new Promise((r) => requestAnimationFrame(r))
           buildRestPose(model)
-          frameModel(model)
           setModelLoaded(true)
           setEngineError(null)
         } catch (loadErr) {
@@ -300,7 +274,7 @@ export default function MainScene() {
         setEngineError(error instanceof Error ? error.message : "Unknown error")
       }
     }
-  }, [buildRestPose, frameModel, loadPmxFromFolder])
+  }, [buildRestPose, loadPmxFromFolder])
 
   useEffect(() => {
     void (async () => {
