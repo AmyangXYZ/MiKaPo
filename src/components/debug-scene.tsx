@@ -39,22 +39,37 @@ type LmSet = Pick<
 >
 
 /** Lerp every landmark between two results; t clamps at 1 (hold). */
-function lerpResults(a: LmSet, b: LmSet, t: number): LmSet {
-  const lerpArr = (pa?: { x: number; y: number; z: number; visibility?: number }[], pb?: typeof pa) => {
-    if (!pa || !pb || pa.length !== pb.length) return pb ? [pb] : []
-    return [
-      pb.map((q, i) => ({
-        x: pa[i].x + (q.x - pa[i].x) * t,
-        y: pa[i].y + (q.y - pa[i].y) * t,
-        z: pa[i].z + (q.z - pa[i].z) * t,
-        visibility: q.visibility,
-      })),
-    ]
+type Pt = { x: number; y: number; z: number; visibility?: number }
+
+/** Scratch the interpolation writes into. The preview runs on the display
+ *  clock, and building a fresh landmark set per frame handed the collector
+ *  ~4500 objects a second on the thread that also has to feed the detector. */
+const scratch: Record<"pose" | "left" | "right", Pt[]> = { pose: [], left: [], right: [] }
+
+function lerpInto(key: "pose" | "left" | "right", pa: Pt[] | undefined, pb: Pt[] | undefined, t: number): Pt[][] {
+  if (!pa || !pb || pa.length !== pb.length) return pb ? [pb] : []
+  const out = scratch[key]
+  if (out.length !== pb.length) {
+    out.length = 0
+    for (let i = 0; i < pb.length; i++) out.push({ x: 0, y: 0, z: 0, visibility: 1 })
   }
+  for (let i = 0; i < pb.length; i++) {
+    const q = pb[i]
+    const p = pa[i]
+    const o = out[i]
+    o.x = p.x + (q.x - p.x) * t
+    o.y = p.y + (q.y - p.y) * t
+    o.z = p.z + (q.z - p.z) * t
+    o.visibility = q.visibility
+  }
+  return [out]
+}
+
+function lerpResults(a: LmSet, b: LmSet, t: number): LmSet {
   return {
-    poseWorldLandmarks: lerpArr(a.poseWorldLandmarks[0], b.poseWorldLandmarks[0]) as LmSet["poseWorldLandmarks"],
-    leftHandWorldLandmarks: lerpArr(a.leftHandWorldLandmarks[0], b.leftHandWorldLandmarks[0]) as LmSet["leftHandWorldLandmarks"],
-    rightHandWorldLandmarks: lerpArr(a.rightHandWorldLandmarks[0], b.rightHandWorldLandmarks[0]) as LmSet["rightHandWorldLandmarks"],
+    poseWorldLandmarks: lerpInto("pose", a.poseWorldLandmarks[0], b.poseWorldLandmarks[0], t) as LmSet["poseWorldLandmarks"],
+    leftHandWorldLandmarks: lerpInto("left", a.leftHandWorldLandmarks[0], b.leftHandWorldLandmarks[0], t) as LmSet["leftHandWorldLandmarks"],
+    rightHandWorldLandmarks: lerpInto("right", a.rightHandWorldLandmarks[0], b.rightHandWorldLandmarks[0], t) as LmSet["rightHandWorldLandmarks"],
     faceLandmarks: [],
   }
 }
@@ -182,9 +197,15 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
     }
     // Continuous redraw: interpolation means every frame differs. The canvas
     // is small; this costs far less than the WebGPU viewport beside it.
+    // Half display rate: the preview interpolates a pose that arrives at ~15Hz,
+    // and the frames in between are worth less than the detection they cost.
     let raf = 0
+    let lastDraw = 0
     const loop = () => {
       raf = requestAnimationFrame(loop)
+      const now = performance.now()
+      if (now - lastDraw < 32) return
+      lastDraw = now
       drawRef.current()
     }
     loop()

@@ -1103,8 +1103,7 @@ const MotionCaptureImpl = ({
                   : "No pose"}
         </span>
         <span className="ml-auto shrink-0 tabular-nums">
-          {captureHz > 0 ? `${captureHz} Hz` : "— Hz"}
-          {inferenceMs > 0 && <span className="text-muted-foreground"> · {inferenceMs} ms</span>}
+          {captureHz > 0 ? `${captureHz} Hz` : "— Hz"} · {inferenceMs > 0 ? `${inferenceMs} ms` : "— ms"}
         </span>
       </footer>
     </div>
