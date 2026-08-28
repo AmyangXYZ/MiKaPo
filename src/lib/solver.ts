@@ -289,6 +289,12 @@ const FADE_IN_MS = 250
 const FADE_OUT_MS = 500
 const HAND_WARMUP_MS = 1000
 const HAND_GRACE_MS = 400
+/** How long a bone holds its last measurement before the fade to rest even
+ *  begins. Detection drops a frame here and there — a limb crossing the body,
+ *  a motion blur, a frame the model simply missed — and fading from the first
+ *  miss turns those into a visible dip toward bind and back. Holding first is
+ *  what the fade was meant to replace only for LONG absences. */
+const LOST_GRACE_MS = 250
 
 // Gate hysteresis: a bone that is already tracking stays in until visibility
 // drops WELL below the entry threshold. Without the gap, a landmark hovering
@@ -475,6 +481,8 @@ export class Solver {
   private heldMeasured: Record<string, Quat> = {}
   /** Tracking blend per bone: 0 = at rest, 1 = fully on the measurement. */
   private fades: Record<string, number> = {}
+  /** How long each bone has gone unmeasured, for the grace window. */
+  private lostMs: Record<string, number> = {}
   private fadePrevTs: number | null = null
   /** Hand hysteresis state (see HAND_WARMUP_MS / HAND_GRACE_MS). */
   private handEngagement = {
@@ -555,6 +563,7 @@ export class Solver {
       this.locals[def.name] = Quat.identity()
       this.heldMeasured[def.name] = Quat.identity()
       this.fades[def.name] = 0
+      this.lostMs[def.name] = 0
       this.worlds[def.name] = Quat.identity()
       this.filteredWorlds[def.name] = Quat.identity()
       return state
@@ -593,6 +602,7 @@ export class Solver {
     this.prevRoll = {}
     for (const key of Object.keys(this.fades)) {
       this.fades[key] = 0
+      this.lostMs[key] = 0
       this.heldMeasured[key].setIdentity()
     }
     for (const side of ["leftHand", "rightHand"] as const) {
@@ -1163,11 +1173,16 @@ export class Solver {
         held.set(sMeas)
       }
       let fade = this.fades[def.name]
+      let lost = this.lostMs[def.name]
+      lost = measured ? 0 : lost + fadeDt
+      this.lostMs[def.name] = lost
+      // An engaged hand inside its own grace window holds too — a flicker
+      // costs nothing.
       const graceHold =
-        !measured && def.kind !== "basis" && def.source !== "pose" && this.handEngagement[def.source].engaged
+        lost < LOST_GRACE_MS ||
+        (def.kind !== "basis" && def.source !== "pose" && this.handEngagement[def.source].engaged)
       if (unfiltered) fade = measured ? 1 : 0
       else if (measured) fade = Math.min(1, fade + fadeDt / FADE_IN_MS)
-      // An engaged hand inside its grace window holds — a flicker costs nothing.
       else if (!graceHold) fade = Math.max(0, fade - fadeDt / FADE_OUT_MS)
       this.fades[def.name] = fade
       const w = 0.5 - 0.5 * Math.cos(Math.PI * fade)
