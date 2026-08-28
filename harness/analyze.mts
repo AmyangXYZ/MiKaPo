@@ -158,8 +158,26 @@ function solveTake(frames: Frame[], mode: "live" | "export") {
   const order = frames.map((_, i) => i)
   const fwd = run(order)
   const bwd = run(order.slice().reverse()).reverse()
+  // Averaged where the passes agree; where they do not, the one that follows
+  // on from the frame before. Same rule the app exports with.
+  const MAX_APART = (60 * Math.PI) / 180
+  const previous: Quat[] = []
   const merged = fwd.map((a, i) =>
-    a.map((bs, j) => ({ name: bs.name, rotation: Quat.nlerp(bs.rotation, bwd[i][j].rotation, 0.5) })),
+    a.map((bs, j) => {
+      const other = bwd[i][j].rotation
+      const apart = Quat.angleTo(bs.rotation, other)
+      let rotation: Quat
+      if (apart <= MAX_APART) rotation = Quat.nlerp(bs.rotation, other, 0.5)
+      else {
+        const last = previous[j]
+        rotation =
+          last && Quat.angleTo(other, last) < Quat.angleTo(bs.rotation, last)
+            ? other.clone()
+            : bs.rotation.clone()
+      }
+      previous[j] = rotation
+      return { name: bs.name, rotation }
+    }),
   )
   smoothTakeZeroPhase(merged.map((boneStates, i) => ({ time: frames[i].time, boneStates })))
   return merged

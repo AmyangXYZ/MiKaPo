@@ -48,6 +48,11 @@ const DEMO_VIDEO = "/flash.mp4"
  *  the motion through each time. */
 const OFFLINE_SMOOTHING = { minCutoff: 3, beta: 6, dCutoff: 6 }
 
+/** How far the two passes may disagree and still be worth averaging. Beyond
+ *  this they have resolved an ambiguity differently, and their midpoint is a
+ *  pose neither of them found. */
+const MERGE_MAX_DISAGREEMENT = (60 * Math.PI) / 180
+
 const CAPTURE_WIDTH = 960
 
 const PANEL_RECT_KEY = "mikapo.capture-panel.1"
@@ -958,6 +963,14 @@ const MotionCaptureImpl = ({
     solver.setSmoothing(live.minCutoff, live.beta, live.dCutoff)
     solver.reset()
 
+    // Averaging the two passes is what cancels their lag, and it means
+    // something only where they agree. Where they do not — a frame the
+    // landmarks left genuinely ambiguous, which each direction resolves its
+    // own way — the midpoint of two nearly opposite rotations is a pose
+    // neither pass proposed, and it lands as a pop far larger than anything
+    // either one produced. There, the reading that follows on from the frame
+    // before is taken whole.
+    const previous: Quat[] = []
     for (let i = 0; i < take.length; i++) {
       const a = forward[i]
       const b = backward[i]
@@ -965,11 +978,23 @@ const MotionCaptureImpl = ({
         time: takeTimes[i],
         boneStates: a.map((bs, j) => {
           const other = b[j]
+          const apart = Quat.angleTo(bs.rotation, other.rotation)
+          let rotation: Quat
+          if (apart <= MERGE_MAX_DISAGREEMENT) {
+            rotation = Quat.nlerp(bs.rotation, other.rotation, 0.5)
+          } else {
+            const last = previous[j]
+            rotation =
+              last && Quat.angleTo(other.rotation, last) < Quat.angleTo(bs.rotation, last)
+                ? other.rotation.clone()
+                : bs.rotation.clone()
+          }
+          previous[j] = rotation
           const ta = bs.translation
           const tb = other.translation
           return {
             name: bs.name,
-            rotation: Quat.nlerp(bs.rotation, other.rotation, 0.5),
+            rotation,
             ...(ta && tb
               ? { translation: new Vec3((ta.x + tb.x) / 2, (ta.y + tb.y) / 2, (ta.z + tb.z) / 2) }
               : {}),
