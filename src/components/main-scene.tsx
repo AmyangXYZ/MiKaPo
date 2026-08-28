@@ -412,15 +412,24 @@ export default function MainScene() {
    * The clip is registered under its own name and never played, so the live pose
    * the user is still driving is untouched.
    */
-  const exportVmd = useCallback((clip: AnimationClip) => {
+  /**
+   * Write the clip out.
+   *
+   * Named after the footage it came from, so the motion lands in the folder
+   * beside its source and says which take it is. A webcam session has no such
+   * name, so it gets the app's and the moment's.
+   */
+  const exportVmd = useCallback((clip: AnimationClip, sourceName?: string) => {
     const model = modelRef.current
     if (!model || clip.frameCount === 0) return
     model.loadClip(EXPORT_CLIP_NAME, clip)
     const buffer = model.exportVmd(EXPORT_CLIP_NAME)
     const url = URL.createObjectURL(new Blob([buffer], { type: "application/octet-stream" }))
+    const stem = (sourceName ?? "").replace(/\.[^.]+$/, "").replace(/[\\/:*?"<>|]/g, "_").trim()
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T-]/g, "").replace(/(\d{8})(\d{4})/, "$1-$2")
     const link = document.createElement("a")
     link.href = url
-    link.download = `mikapo-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.vmd`
+    link.download = `${stem || `reze-mipo-${stamp}`}.vmd`
     link.click()
     URL.revokeObjectURL(url)
   }, [])

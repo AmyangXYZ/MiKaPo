@@ -102,7 +102,7 @@ const MotionCaptureImpl = ({
   resetModel?: () => void
   /** Hands a finished clip to the model, which writes the VMD. The engine owns
    *  the format — the same writer Reze Studio exports through. */
-  exportVmd?: (clip: ReturnType<typeof buildClip>) => void
+  exportVmd?: (clip: ReturnType<typeof buildClip>, sourceName?: string) => void
   // MMD rest-pose world bone positions, keyed by Japanese bone name.
   restPose?: Record<string, { x: number; y: number; z: number }> | null
   colliders?: BodyCollider[] | null
@@ -142,6 +142,8 @@ const MotionCaptureImpl = ({
   // the mode is worth entering only with your own.
   const [currentImage, setCurrentImage] = useState<string>("")
   const [videoSrc, setVideoSrc] = useState<string>(DEMO_VIDEO)
+  /** The uploaded file's name, so an export can be named after its source. */
+  const [sourceName, setSourceName] = useState("")
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
   // Set the moment the user picks any input this session — a slow IndexedDB
   // restore must never clobber a fresher choice.
@@ -225,6 +227,7 @@ const MotionCaptureImpl = ({
     void loadVideoUpload().then((file) => {
       if (!file || cancelled || userPickedMediaRef.current) return
       setVideoSrc(URL.createObjectURL(file))
+      setSourceName(file.name)
       setVideoTime(0)
       setInputMode("video")
       setLastMedia("VIDEO")
@@ -475,6 +478,8 @@ const MotionCaptureImpl = ({
   }, [])
   const handleResultRef = useRef(handleResult)
   handleResultRef.current = handleResult
+  const sourceNameRef = useRef(sourceName)
+  sourceNameRef.current = sourceName
   const exportVmdRef = useRef(exportVmd)
   exportVmdRef.current = exportVmd
 
@@ -647,6 +652,7 @@ const MotionCaptureImpl = ({
     workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
     setCurrentImage("")
     setVideoSrc(DEMO_VIDEO)
+    setSourceName("")
     setInputMode("video")
     setLastMedia("VIDEO")
     setVideoTime(0)
@@ -657,6 +663,7 @@ const MotionCaptureImpl = ({
   const loadImageFile = (file: File) => {
     {
       userPickedMediaRef.current = true
+      setSourceName(file.name)
       const url = URL.createObjectURL(file)
       resetModel?.()
       clearCaptureState()
@@ -676,6 +683,7 @@ const MotionCaptureImpl = ({
   const loadVideoFile = (file: File) => {
     {
       userPickedMediaRef.current = true
+      setSourceName(file.name)
       void saveVideoUpload(file).then((ok) => {
         if (ok) onUploadStoredRef.current?.()
       })
@@ -725,6 +733,7 @@ const MotionCaptureImpl = ({
   // Camera functions
   const toggleCamera = async () => {
     userPickedMediaRef.current = true
+    setSourceName("")
     if (isStreamActive) {
       stopCurrentInput()
     } else {
@@ -779,7 +788,7 @@ const MotionCaptureImpl = ({
         morphWeights: faceEnabledRef.current ? currentMorphWeightsRef.current : null,
       },
     ])
-    exportVmdRef.current?.(clip)
+    exportVmdRef.current?.(clip, sourceNameRef.current)
     setExported("pose saved")
   }, [])
 
@@ -967,7 +976,7 @@ const MotionCaptureImpl = ({
     // conversion's own stepping left it.
     if (frames.length > 0) applyPoseRef.current(currentBoneStatesRef.current, 0)
     const clip = buildClip(frames)
-    exportVmdRef.current?.(clip)
+    exportVmdRef.current?.(clip, sourceNameRef.current)
     const { frames: n, seconds } = clipSummary(clip)
     setExported(`${n}f · ${seconds.toFixed(1)}s`)
   }, [])
