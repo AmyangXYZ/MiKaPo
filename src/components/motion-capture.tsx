@@ -5,7 +5,6 @@ import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/
 import { buildClip, clipSummary, RecordedFrame, VMD_FPS } from "@/lib/vmd"
 import { smoothTakeZeroPhase } from "@/lib/filters"
 import { cleanTake, type TakeFrame } from "@/lib/take-cleanup"
-import { ASSETS } from "@/lib/assets"
 import { loadVideoUpload, saveVideoUpload } from "@/lib/asset-store"
 import { Quat, Vec3 } from "reze-engine"
 import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
@@ -38,7 +37,10 @@ const DEBUG_PREVIEW_INTERVAL_MS = 66
  *  2-megapixel upload on every single frame, which is capture rate spent on
  *  pixels the model never sees. 960 keeps enough detail for hands and faces
  *  cropped out of the frame. */
-const DEMO_VIDEO = `${ASSETS}/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4`
+/** Served from public/ rather than the assets bucket: at a megabyte it costs
+ *  less to ship with the app than a redirect would, and it is the same file in
+ *  development and in production. */
+const DEMO_VIDEO = "/flash.mp4"
 
 /** Smoothing for the two offline passes. Opened well past the live settings
  *  because the take gets filtered twice — once in each direction — and a
