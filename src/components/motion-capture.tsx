@@ -32,6 +32,13 @@ type InputMode = "image" | "video" | "camera" | null
  * directly from the detection callback and doesn't wait for React. */
 const DEBUG_PREVIEW_INTERVAL_MS = 66
 
+/** Width the detector is fed. MediaPipe scales the frame down internally
+ *  anyway; handing it 1080p means paying for a 2-megapixel bitmap copy and a
+ *  2-megapixel upload on every single frame, which is capture rate spent on
+ *  pixels the model never sees. 960 keeps enough detail for hands and faces
+ *  cropped out of the frame. */
+const CAPTURE_WIDTH = 960
+
 const PANEL_RECT_KEY = "mikapo.capture-panel.1"
 const PANEL_MIN_W = 240
 const PANEL_MIN_H = 300
@@ -104,6 +111,9 @@ export const MotionCapture = ({
   /** Status strip: is a body being found, and how fast frames are arriving. */
   const [tracking, setTracking] = useState(false)
   const [captureHz, setCaptureHz] = useState(0)
+  /** Detector time per frame, smoothed. What the capture rate is made of. */
+  const [inferenceMs, setInferenceMs] = useState(0)
+  const inferenceEmaRef = useRef(0)
   /** Set when returning to an image the capture loop has already consumed. */
   const redetectImageRef = useRef(false)
   const [inputMode, setInputMode] = useState<InputMode>("video")
@@ -292,6 +302,8 @@ export const MotionCapture = ({
   const displayClockRef = useRef(0)
   const lastMediaTsRef = useRef(-1)
   const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
+    const ms = result.inferenceMs ?? 0
+    inferenceEmaRef.current = inferenceEmaRef.current > 0 ? inferenceEmaRef.current * 0.8 + ms * 0.2 : ms
     // Throttled React update — feeds only the debug skeleton preview.
     const now = performance.now()
     // A still produces exactly one result: dropping it to the throttle leaves
@@ -304,6 +316,7 @@ export const MotionCapture = ({
       // per detection would cost more than it reports.
       setTracking(true)
       setCaptureHz(Math.round(1000 / Math.max(1, displayIntervalRef.current)))
+      setInferenceMs(Math.round(inferenceEmaRef.current))
     }
 
     if (!modelLoadedRef.current) return
@@ -442,6 +455,9 @@ export const MotionCapture = ({
         onMediaPipeReadyChangeRef.current?.(true)
       } else if (msg.type === "result") {
         pending = false
+        // Grab the next frame now rather than on the next animation frame:
+        // waiting for rAF spends up to 16ms of every capture cycle idle.
+        if (!awaitingRef.current) detect()
         // A conversion owns the worker while it runs; its awaiting frame takes
         // the reply instead of the live path.
         const awaiting = awaitingRef.current
@@ -465,7 +481,6 @@ export const MotionCapture = ({
     send({ type: "init" })
 
     const detect = () => {
-      rafId = requestAnimationFrame(detect)
       // A conversion steps the video itself; the opportunistic loop would fight
       // it for the worker and re-solve the same frames.
       if (!ready || convertingRef.current) return
@@ -487,7 +502,10 @@ export const MotionCapture = ({
         const mediaTs = video.currentTime * 1000
         pending = true
         pendingSince = now
-        createImageBitmap(video)
+        createImageBitmap(
+          video,
+          video.videoWidth > CAPTURE_WIDTH ? { resizeWidth: CAPTURE_WIDTH, resizeQuality: "medium" } : undefined,
+        )
           .then((bitmap) => send({ type: "video", bitmap, ts: performance.now(), mediaTs }, [bitmap]))
           .catch(() => {
             pending = false
@@ -504,14 +522,21 @@ export const MotionCapture = ({
         redetectImageRef.current = false
         pending = true
         pendingSince = now
-        createImageBitmap(img)
+        createImageBitmap(
+          img,
+          img.naturalWidth > CAPTURE_WIDTH ? { resizeWidth: CAPTURE_WIDTH, resizeQuality: "medium" } : undefined,
+        )
           .then((bitmap) => send({ type: "image", bitmap, mediaTs: performance.now() }, [bitmap]))
           .catch(() => {
             pending = false
           })
       }
     }
-    detect()
+    const pump = () => {
+      rafId = requestAnimationFrame(pump)
+      detect()
+    }
+    pump()
 
     return () => {
       cancelAnimationFrame(rafId)
@@ -541,6 +566,8 @@ export const MotionCapture = ({
     setLandmarks(null)
     setTracking(false)
     setCaptureHz(0)
+    setInferenceMs(0)
+    inferenceEmaRef.current = 0
     displayPrevRef.current = null
     displayCurrRef.current = null
     lastMediaTsRef.current = -1
@@ -1013,7 +1040,10 @@ export const MotionCapture = ({
         <span className={cn("truncate", tracking ? "text-foreground" : undefined)}>
           {converting ? `Converting ${Math.round(progress * 100)}%` : exported ? `Saved ${exported}` : tracking ? "Tracking" : "No pose"}
         </span>
-        <span className="ml-auto shrink-0 tabular-nums">{captureHz > 0 ? `${captureHz} Hz` : "— Hz"}</span>
+        <span className="ml-auto shrink-0 tabular-nums">
+          {captureHz > 0 ? `${captureHz} Hz` : "— Hz"}
+          {inferenceMs > 0 && <span className="text-muted-foreground"> · {inferenceMs} ms</span>}
+        </span>
       </footer>
     </div>
   )

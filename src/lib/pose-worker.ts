@@ -27,6 +27,9 @@ export interface PoseWorkerResult {
   poseLandmarks: HolisticLandmarkerResult["poseLandmarks"]
   /** Frame width/height — 2D landmark x is width-normalized. */
   imageAspect: number
+  /** Wall time the detector spent on this frame. The capture rate is set by
+   *  this number, so it is worth showing rather than guessing at. */
+  inferenceMs: number
 }
 
 export type PoseWorkerResponse =
@@ -39,11 +42,12 @@ let runningMode: "VIDEO" | "IMAGE" = "VIDEO"
 
 const post = (msg: PoseWorkerResponse) => (self as unknown as Worker).postMessage(msg)
 
-const emit = (result: HolisticLandmarkerResult, mediaTs: number, imageAspect: number) => {
+const emit = (result: HolisticLandmarkerResult, mediaTs: number, imageAspect: number, inferenceMs: number) => {
   post({
     type: "result",
     mediaTs,
     result: {
+      inferenceMs,
       poseWorldLandmarks: result.poseWorldLandmarks,
       leftHandWorldLandmarks: result.leftHandWorldLandmarks,
       rightHandWorldLandmarks: result.rightHandWorldLandmarks,
@@ -126,7 +130,10 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
         if (landmarker && runningMode === "VIDEO") {
           // Read before close — the result callback outlives the bitmap.
           const aspect = msg.bitmap.width / Math.max(1, msg.bitmap.height)
-          landmarker.detectForVideo(msg.bitmap, msg.ts, (result) => emit(result, msg.mediaTs, aspect))
+          const t0 = performance.now()
+          landmarker.detectForVideo(msg.bitmap, msg.ts, (result) =>
+            emit(result, msg.mediaTs, aspect, performance.now() - t0),
+          )
         }
         msg.bitmap.close()
         break
@@ -134,7 +141,8 @@ self.onmessage = async (e: MessageEvent<PoseWorkerRequest>) => {
       case "image": {
         if (landmarker && runningMode === "IMAGE") {
           const aspect = msg.bitmap.width / Math.max(1, msg.bitmap.height)
-          landmarker.detect(msg.bitmap, (result) => emit(result, msg.mediaTs, aspect))
+          const t0 = performance.now()
+          landmarker.detect(msg.bitmap, (result) => emit(result, msg.mediaTs, aspect, performance.now() - t0))
         }
         msg.bitmap.close()
         break
