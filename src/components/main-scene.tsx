@@ -466,7 +466,11 @@ export default function MainScene() {
             the same title Reze Engine and Reze Rig wear. */}
         <div className="pointer-events-auto flex h-10 shrink-0 items-center pl-1">
           <h1
-            className="text-xl font-light uppercase tracking-[0.2em] text-white md:text-2xl md:tracking-[0.3em]"
+            // All caps has no descenders, so ink centred by its line box reads
+            // about 0.1em high against the pills beside it; the nudge is
+            // optical only and takes no space. The trailing letter-space that
+            // tracking adds after the last glyph is taken back the same way.
+            className="translate-y-px text-xl font-light uppercase tracking-[0.2em] text-white md:translate-y-[2px] md:text-2xl md:tracking-[0.3em] md:-mr-[0.3em]"
             style={{ textShadow: "0 0 20px rgba(255, 255, 255, 0.3), 0 2px 10px rgba(0, 0, 0, 0.5)" }}
           >
             Reze MiPo
