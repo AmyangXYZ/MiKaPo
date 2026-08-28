@@ -24,5 +24,3 @@ export const SEGMENT_TRACK = "flex items-center gap-0.5 rounded-interior bg-whit
 
 /** Micro label: all-caps, one step down, spaced so small caps don't clot. */
 export const MICRO_LABEL = "text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground"
-
-export const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "5.0.0"

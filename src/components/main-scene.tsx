@@ -6,7 +6,7 @@ import { FolderOpen, Github, RotateCcw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { PILL, ICON_BUTTON, APP_VERSION } from "@/lib/chrome"
+import { PILL, ICON_BUTTON } from "@/lib/chrome"
 
 import {
   Engine,
@@ -464,16 +464,13 @@ export default function MainScene() {
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start gap-2">
         {/* The family wordmark: bare over the viewport, wide-tracked and lit —
             the same title Reze Engine and Reze Rig wear. */}
-        <div className="pointer-events-auto flex h-10 shrink-0 items-baseline gap-2 pl-1">
+        <div className="pointer-events-auto flex h-10 shrink-0 items-center pl-1">
           <h1
             className="text-xl font-light uppercase tracking-[0.2em] text-white md:text-2xl md:tracking-[0.3em]"
             style={{ textShadow: "0 0 20px rgba(255, 255, 255, 0.3), 0 2px 10px rgba(0, 0, 0, 0.5)" }}
           >
             Reze MiPo
           </h1>
-          <span className="shrink-0 rounded-full bg-blue-400/15 px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none text-blue-400">
-            v{APP_VERSION}
-          </span>
         </div>
 
         <div className="ml-auto flex items-start gap-2">
