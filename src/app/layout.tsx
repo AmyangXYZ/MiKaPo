@@ -36,7 +36,9 @@ export default function RootLayout({
       translate="no"
       className={`dark notranslate h-full select-none antialiased ${geistSans.variable} ${geistMono.variable}`}
     >
-      <body className="h-full bg-black text-foreground">
+      {/* The ground plane is magenta; the page behind the viewport is its
+          deep end, so a slow load and a loaded scene are the same colour. */}
+      <body className="h-full text-foreground" style={{ backgroundColor: "#4a044e" }}>
         <NoStickyFocus />
         <NoNativeContextMenu />
         <TooltipProvider delayDuration={200}>{children}</TooltipProvider>

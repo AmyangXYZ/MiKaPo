@@ -449,7 +449,7 @@ export default function MainScene() {
   )
 
   return (
-    <main className="relative h-dvh w-full overflow-hidden bg-black">
+    <main className="relative h-dvh w-full overflow-hidden bg-[#4a044e]">
       <input
         ref={pmxFolderInputRef}
         type="file"

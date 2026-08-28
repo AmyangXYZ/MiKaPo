@@ -37,24 +37,14 @@ const PANEL_MIN_W = 240
 const PANEL_MIN_H = 300
 
 /** Where the panel sits before anyone moves it: under the header, left edge,
- *  tall enough for the picture, the skeleton and the status strip. */
+ *  tall enough for the picture, the skeleton and the status strip. Narrow
+ *  windows get a narrower panel — a phone has no room for 320px of chrome
+ *  beside the character. */
 function initialPanelRect(): Rect {
-  if (typeof window === "undefined") return { x: 12, y: 60, w: 320, h: 470 }
-  return clampRect({ x: 12, y: 60, w: 320, h: 470 }, PANEL_MIN_W, PANEL_MIN_H)
-}
-
-/** Whether this device has a pointer that can drag a window. A phone gets a
- *  docked panel instead — a draggable one is a toy you cannot aim. */
-function useFinePointer(): boolean {
-  const [fine, setFine] = useState(false)
-  useEffect(() => {
-    const mq = window.matchMedia("(pointer: fine)")
-    const apply = () => setFine(mq.matches)
-    apply()
-    mq.addEventListener("change", apply)
-    return () => mq.removeEventListener("change", apply)
-  }, [])
-  return fine
+  if (typeof window === "undefined") return { x: 12, y: 56, w: 320, h: 470 }
+  const w = Math.min(320, Math.max(PANEL_MIN_W, window.innerWidth * 0.42))
+  const h = Math.min(470, Math.max(PANEL_MIN_H, window.innerHeight * 0.62))
+  return clampRect({ x: 12, y: 56, w, h }, PANEL_MIN_W, PANEL_MIN_H)
 }
 
 /** Copy a solver pose into a reusable buffer. The solver mutates its output
@@ -111,7 +101,6 @@ export const MotionCapture = ({
   /** Status strip: is a body being found, and how fast frames are arriving. */
   const [tracking, setTracking] = useState(false)
   const [captureHz, setCaptureHz] = useState(0)
-  const floating = useFinePointer()
   /** Set when returning to an image the capture loop has already consumed. */
   const redetectImageRef = useRef(false)
   const [inputMode, setInputMode] = useState<InputMode>("video")
@@ -814,18 +803,9 @@ export const MotionCapture = ({
       {/* Header — the whole strip drags the panel, except the controls in it. */}
       <header
         data-drag-handle
-        className={cn(
-          "flex shrink-0 items-center gap-1.5 border-b border-line px-1.5 py-1.5",
-          floating && "cursor-grab active:cursor-grabbing",
-        )}
+        className="flex shrink-0 cursor-grab items-center gap-1.5 border-b border-line px-1.5 py-1.5 active:cursor-grabbing"
       >
-        {floating && (
-          <GripVertical
-            className="size-3.5 shrink-0 text-muted-foreground"
-            strokeWidth={1.75}
-            aria-hidden
-          />
-        )}
+        <GripVertical className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden />
         <div className={cn(SEGMENT_TRACK, "min-w-0 flex-1")}>
           {SOURCES.map(({ key, label, Icon, active }) => (
             <button
@@ -990,17 +970,9 @@ export const MotionCapture = ({
     <>
       <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageUpload} hidden />
       <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoUpload} hidden />
-      {floating ? (
-        <FloatingPanel rect={rect} onRectChange={setRect} minW={PANEL_MIN_W} minH={PANEL_MIN_H}>
-          {panel}
-        </FloatingPanel>
-      ) : (
-        // No pointer to drag with: the panel is furniture, docked out of the
-        // model's way and sized to the phone rather than to a window.
-        <div className="absolute left-2 top-12 z-30 flex h-[46dvh] w-[45vw] min-w-[150px] max-w-[280px] flex-col">
-          {panel}
-        </div>
-      )}
+      <FloatingPanel rect={rect} onRectChange={setRect} minW={PANEL_MIN_W} minH={PANEL_MIN_H}>
+        {panel}
+      </FloatingPanel>
     </>
   )
 }
