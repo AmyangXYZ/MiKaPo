@@ -128,10 +128,11 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, cw, ch)
 
-      // World landmarks are hip-centred metres and a standing body spans ~1.9m.
-      // Scale to whichever axis runs out first, so the figure fits a wide strip
-      // and a tall one alike without per-frame zoom jitter.
-      const scale = Math.min(ch / 2.4, cw / 1.6)
+      // World landmarks are hip-centred metres and a standing body spans ~1.9m,
+      // so a divisor near 2 fills the height with a little air left for a
+      // raised arm. Scale to whichever axis runs out first, so the figure fits
+      // a wide strip and a tall one alike without per-frame zoom jitter.
+      const scale = Math.min(ch / 2.05, cw / 1.5)
 
       // MediaPipe world: y down, z away — flip y.
       const project = (lm: { x: number; y: number; z: number }): [number, number] => {
