@@ -249,6 +249,37 @@ const BASIS_LANDMARKS: Record<string, string[]> = {
 const MIN_VISIBILITY = 0.35
 
 // ---------------------------------------------------------------------------
+// Anatomical plausibility
+//
+// The detector's own confidence does not report this. Measured on footage
+// where it swings a body 165° between two frames, it rates those frames 0.999
+// — the same as every other frame in the take. Confidence answers "can I see
+// this point", and a body reconstructed inside out is perfectly visible.
+//
+// What does report it is the skeleton's own geometry. The distance across the
+// shoulders is a bone: it cannot change length whatever the body does, and on
+// the frames where the detection collapses it drops to a quarter of what it
+// was. A frame that fails that test is refused outright rather than repaired
+// — its geometry is exactly what cannot be trusted to decide anything, and
+// the solver already knows how to hold a pose through frames it has no
+// measurement for.
+// ---------------------------------------------------------------------------
+
+/** Segments that hold their length whatever the body does. */
+const RIGID_SEGMENTS: [string, string][] = [
+  ["left_shoulder", "right_shoulder"],
+  ["left_hip", "right_hip"],
+  ["left_shoulder", "left_hip"],
+  ["right_shoulder", "right_hip"],
+]
+/** How far a rigid segment may stray from its own running length. Measured
+ *  across three real takes: never tripped on 1267 frames of sound detection,
+ *  and caught the collapsed frames in the take that flips. */
+const RIGID_TOLERANCE = 0.6
+/** Frames of sound detection before the check has a length to judge against. */
+const RIGID_WARMUP = 20
+
+// ---------------------------------------------------------------------------
 // Z-depth policy (docs/solver-improvements.md #1)
 //
 // MediaPipe's x/y come off the image and arrive already smoothed; its z is an
@@ -444,6 +475,12 @@ export class Solver {
     leftHand: zBank(21),
     rightHand: zBank(21),
   }
+  /** Running length of each rigid segment, and how many sound frames have
+   *  contributed to it. */
+  private rigidLength: number[] = RIGID_SEGMENTS.map(() => 0)
+  private rigidSeen = 0
+  /** Anatomical plausibility gate; disable to solve every frame as given. */
+  plausibilityEnabled = true
   /** Whether each bank carries state — a source that dropped out re-seeds its
    *  filters on return instead of easing z across the gap. */
   private zActive: Record<LandmarkSource, boolean> = { pose: false, leftHand: false, rightHand: false }
@@ -597,6 +634,8 @@ export class Solver {
     this.depthBaseX = 0
     this.depthBaseFrames = 0
     this.fadePrevTs = null
+    this.rigidLength = RIGID_SEGMENTS.map(() => 0)
+    this.rigidSeen = 0
     this.chestMeasuredFrame = false
     this.shoulderTilt = 0
     for (const key of Object.keys(this.rollFilters)) this.rollFilters[key].reset()
@@ -985,6 +1024,39 @@ export class Solver {
     }
   }
 
+  /**
+   * Whether this frame's skeleton could belong to a body, and fold it into the
+   * running lengths if so.
+   *
+   * Returns false for a frame the detector got wrong in a way its confidence
+   * does not admit to.
+   */
+  private plausible(pose: Landmark[]): boolean {
+    const lengths: number[] = []
+    for (const [a, b] of RIGID_SEGMENTS) {
+      const p = pose[PoseLandmarksTable[a]]
+      const q = pose[PoseLandmarksTable[b]]
+      if (!p || !q) return true
+      lengths.push(Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z))
+    }
+    if (this.rigidSeen >= RIGID_WARMUP) {
+      for (let i = 0; i < lengths.length; i++) {
+        const ref = this.rigidLength[i]
+        if (ref <= 1e-6) continue
+        const ratio = lengths[i] / ref
+        if (ratio < RIGID_TOLERANCE || ratio > 1 / RIGID_TOLERANCE) return false
+      }
+    }
+    // Only sound frames shape the reference, or a run of bad ones would teach
+    // the check to accept them.
+    this.rigidSeen++
+    const w = this.rigidSeen <= RIGID_WARMUP ? 1 / this.rigidSeen : 0.02
+    for (let i = 0; i < lengths.length; i++) {
+      this.rigidLength[i] += (lengths[i] - this.rigidLength[i]) * w
+    }
+    return true
+  }
+
   /** Rest world position of a bone, as captured by calibrate(). */
   private refsPos(name: string): XYZ | null {
     return this.restPos[name] ?? null
@@ -1107,6 +1179,10 @@ export class Solver {
       landmarks.rightHandWorldLandmarks?.[0]?.length === 21 ? landmarks.rightHandWorldLandmarks[0] : null,
       "rightHand", this.rightHandBuf, timestampMs, filterZ,
     )
+    // A frame that fails the shape test is treated as one the detector did not
+    // produce: every pose-driven bone holds, and the crossfades take it from
+    // there.
+    if (this.pose && this.plausibilityEnabled && !this.plausible(this.pose)) this.pose = null
     this.pose2d = landmarks.poseLandmarks?.[0]?.length === 33 ? landmarks.poseLandmarks[0] : null
     if (landmarks.imageAspect) this.imageAspect = landmarks.imageAspect
 
