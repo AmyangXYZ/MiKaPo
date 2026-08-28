@@ -290,6 +290,60 @@ const RIGID_WARMUP = 20
 
 const Z_SMOOTHING = { minCutoff: 1.0, beta: 1.0, dCutoff: 2.0 }
 
+// ---------------------------------------------------------------------------
+// Per-signal filtering (docs/solver-improvements.md #7)
+//
+// One tuning for every bone is one tuning for signals that have nothing in
+// common. A spine turns slowly and a fingertip does not; smoothing them alike
+// means the spine still shakes at settings loose enough for the finger, and
+// the finger lags at settings tight enough for the spine.
+//
+// So each measured DIRECTION is filtered as its own named signal, before any
+// of it becomes a rotation. The filtering happens on the unit direction and
+// the result is renormalised, so it can move where a bone points without ever
+// changing how long the bone is.
+//
+// Cutoffs are per group, and they follow the body: the closer a segment is to
+// the root, the slower what it measures actually moves, and the more of the
+// jitter in it is noise.
+// ---------------------------------------------------------------------------
+
+interface SignalTuning {
+  minCutoff: number
+  beta: number
+  dCutoff: number
+}
+
+/** Trunk and pelvis: slow, heavy, and the thing every other bone hangs from. */
+const SIGNAL_TRUNK: SignalTuning = { minCutoff: 0.6, beta: 1.0, dCutoff: 3.0 }
+/** Neck and head: slow, but a head turn is a real gesture. */
+const SIGNAL_HEAD: SignalTuning = { minCutoff: 1.0, beta: 2.0, dCutoff: 4.0 }
+/** Upper arm and thigh: the big limb segments. */
+const SIGNAL_LIMB: SignalTuning = { minCutoff: 1.2, beta: 3.0, dCutoff: 4.0 }
+/** Forearm, shin, foot: further out, faster, noisier. */
+const SIGNAL_DISTAL: SignalTuning = { minCutoff: 1.6, beta: 4.0, dCutoff: 4.0 }
+/** Hands and fingers: fastest things on a body, and the least worth lagging. */
+const SIGNAL_HAND: SignalTuning = { minCutoff: 2.5, beta: 6.0, dCutoff: 5.0 }
+
+function tuningFor(name: string): SignalTuning {
+  if (name.includes("指") || name.includes("手首") || name.includes("手捩")) return SIGNAL_HAND
+  if (name.includes("ひじ") || name.includes("ひざ") || name.includes("足首")) return SIGNAL_DISTAL
+  if (name.includes("腕") || name === "左足" || name === "右足") return SIGNAL_LIMB
+  if (name === "首" || name === "頭") return SIGNAL_HEAD
+  return SIGNAL_TRUNK
+}
+
+/**
+ * How much the whole bank is slowed down for a subject the camera can barely
+ * resolve.
+ *
+ * Landmark noise is roughly fixed in pixels, so a body half the size in frame
+ * carries twice the angular noise. Cutoffs scale with the subject's own
+ * measured size, which is the adaptation that keeps one set of numbers honest
+ * across a webcam at arm's length and a dancer across a room.
+ */
+const SIGNAL_SIZE_REFERENCE = 0.3
+
 /** Focal length in image-height units (vertical FOV ≈ 43°, a typical webcam).
  *  Only scales the amplitude of toward/away motion — the direction and the
  *  proportions survive a wrong guess. */
@@ -508,6 +562,13 @@ export class Solver {
   private zActive: Record<LandmarkSource, boolean> = { pose: false, leftHand: false, rightHand: false }
   /** Per-landmark z low-pass; disable to hand the solver MediaPipe's raw z. */
   zFilterEnabled = true
+  /** Per-signal direction filtering; disable to solve from raw directions. */
+  signalFilterEnabled = true
+  /** One filter per measured direction, made on first sight of that signal. */
+  private signalFilters: Record<string, Vec3OneEuroFilter> = {}
+  /** This frame's clock and the subject's size, for the bank above. */
+  private frameTs = 0
+  private sizeScale = 1
   /** Projective センター depth. Off — mocap is in-place: the 2D spine estimate
    *  drifts over a session and slowly walks the model off its mark, so the
    *  rebuild is opt-in for whoever wants toward/away travel despite that. */
@@ -603,6 +664,7 @@ export class Solver {
     this.moveFilters = {}
     // Roll filters scale off the same settings.
     this.rollFilters = {}
+    this.signalFilters = {}
   }
 
   /** The live smoothing settings, so an offline pass can match them. */
@@ -666,6 +728,7 @@ export class Solver {
     this.chestMeasuredFrame = false
     this.shoulderTilt = 0
     for (const key of Object.keys(this.rollFilters)) this.rollFilters[key].reset()
+    for (const key of Object.keys(this.signalFilters)) this.signalFilters[key].reset()
     this.prevRoll = {}
     for (const key of Object.keys(this.fades)) {
       this.fades[key] = 0
@@ -1090,6 +1153,31 @@ export class Solver {
     return true
   }
 
+  /**
+   * Smooth one named direction and hand back a unit vector.
+   *
+   * Filtering happens in the frame the direction was MEASURED in — world
+   * space — rather than after it has been rotated into a parent that is
+   * itself moving, so a parent's own noise never enters the child's signal.
+   * The result is renormalised: the filter may move where a bone points and
+   * may not change how long it is.
+   */
+  private filterDirection(name: string, dir: Vec3): void {
+    if (!this.signalFilterEnabled) return
+    let f = this.signalFilters[name]
+    if (!f) {
+      const t = tuningFor(name)
+      // A smaller subject carries more angular noise per pixel, so the whole
+      // bank slows down with the body's measured size.
+      const scale = this.sizeScale
+      f = new Vec3OneEuroFilter(t.minCutoff * scale, t.beta * scale, t.dCutoff)
+      this.signalFilters[name] = f
+    }
+    f.filterInto(dir.x, dir.y, dir.z, this.frameTs, dir)
+    const len = dir.length()
+    if (len > 1e-6) dir.setXYZ(dir.x / len, dir.y / len, dir.z / len)
+  }
+
   /** Rest world position of a bone, as captured by calibrate(). */
   private refsPos(name: string): XYZ | null {
     return this.restPos[name] ?? null
@@ -1218,6 +1306,25 @@ export class Solver {
     if (this.pose && this.plausibilityEnabled && !this.plausible(this.pose)) this.pose = null
     this.pose2d = landmarks.poseLandmarks?.[0]?.length === 33 ? landmarks.poseLandmarks[0] : null
     if (landmarks.imageAspect) this.imageAspect = landmarks.imageAspect
+
+    // The signal bank runs on the same clock everything else does, and is out
+    // of the way entirely for a still.
+    this.frameTs = timestampMs
+    const wasSignalFiltering = this.signalFilterEnabled
+    if (unfiltered) this.signalFilterEnabled = false
+    // Subject size, from the one span that is always measurable and rigid.
+    if (this.pose) {
+      const l = this.pose[PoseLandmarksTable.left_shoulder]
+      const r = this.pose[PoseLandmarksTable.right_shoulder]
+      if (l && r) {
+        const span = Math.hypot(l.x - r.x, l.y - r.y, l.z - r.z)
+        if (span > 1e-3) {
+          // Smaller in frame means noisier per degree, so the bank slows down.
+          const ratio = Math.max(0.5, Math.min(1.5, span / SIGNAL_SIZE_REFERENCE))
+          this.sizeScale = this.sizeScale * 0.95 + ratio * 0.05
+        }
+      }
+    }
 
     // Crossfade clock (media time, so conversions pace identically to live).
     // Capped per tick: a detection stall must not hand one frame a huge step —
@@ -1377,6 +1484,7 @@ export class Solver {
       else world.set(local)
     }
     this.solveGrounding(timestampMs, unfiltered)
+    this.signalFilterEnabled = wasSignalFiltering
 
     return this.outputs
   }
@@ -1613,6 +1721,11 @@ export class Solver {
     if (this.visibility(def.source, [def.from, def.to]) < this.visGate(def.name)) return false
 
     Vec3.subtractInto(to, from, sDir)
+    if (sDir.length() < 1e-6) return false
+    sDir.normalizeInPlace()
+    // The signal is smoothed here, where it was measured, and only then does
+    // it become a rotation in someone else's frame.
+    this.filterDirection(def.name, sDir)
     const parentWorld = def.parent ? this.worlds[def.parent] : null
     if (parentWorld) Quat.rotateVecInvInto(parentWorld, sDir, sDir)
     if (sDir.length() < 1e-6) return false
@@ -1792,7 +1905,9 @@ export class Solver {
         if (!this.point("pose", "left_shoulder", sA) || !this.point("pose", "right_shoulder", sB)) return false
         // spineY = shoulder center (pose world origin is the hip center)
         sDir.setXYZ((sA.x + sB.x) / 2, (sA.y + sB.y) / 2, (sA.z + sB.z) / 2).normalizeInPlace()
+        this.filterDirection("spine", sDir)
         Vec3.subtractInto(sA, sB, sC).normalizeInPlace()
+        this.filterDirection("shoulderLine", sC)
         // Shoulder-line tilt, read BEFORE the basis orthogonalizes it away —
         // the clavicles carry it (applyShoulderRhythm), the trunk cannot.
         const lean = sC.dot(sDir)
@@ -1823,7 +1938,9 @@ export class Solver {
         // landmark exists); lower/upper differ in X (hip vs shoulder line),
         // which captures twist.
         Vec3.subtractInto(sFrom, sTo, sDir).normalizeInPlace()
+        this.filterDirection("pelvisUp", sDir)
         Vec3.subtractInto(sA, sB, sC).normalizeInPlace()
+        this.filterDirection("hipLine", sC)
         Solver.basisFromYAndX(sDir, sC, out)
         this.applyPelvisTuck(out)
         return true
@@ -1834,13 +1951,15 @@ export class Solver {
         const parentWorld = this.worlds[def.parent!]
         // X = ear axis, Z = back (ear center − eye center; eyes sit forward of
         // ears), Y = cross — one basis, one decomposition, no gimbal compounding.
-        Vec3.subtractInto(sA, sB, sC)
+        Vec3.subtractInto(sA, sB, sC).normalizeInPlace()
+        this.filterDirection("earAxis", sC)
         Quat.rotateVecInvInto(parentWorld, sC, sC).normalizeInPlace() // earX in parent frame
         sDir.setXYZ(
           (sA.x + sB.x - sFrom.x - sTo.x) / 2,
           (sA.y + sB.y - sFrom.y - sTo.y) / 2,
           (sA.z + sB.z - sFrom.z - sTo.z) / 2,
-        )
+        ).normalizeInPlace()
+        this.filterDirection("headBack", sDir)
         Quat.rotateVecInvInto(parentWorld, sDir, sDir).normalizeInPlace() // back in parent frame
         // Gram-Schmidt earX ⊥ back, then Y = back × X
         const d = sC.dot(sDir)
