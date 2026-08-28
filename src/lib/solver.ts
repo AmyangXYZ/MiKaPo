@@ -425,6 +425,10 @@ const LOST_GRACE_MS = 250
 // at the threshold makes the crossfade oscillate — a visible breathing.
 const VISIBILITY_EXIT = 0.25
 
+/** A head cannot turn this far in one frame; a basis that says it did has
+ *  flipped. */
+const HEAD_MAX_STEP = (100 * Math.PI) / 180
+
 // Roll stabilizing. Roll — rotation about the bone's own axis — is the
 // noisiest channel the witness solve produces: near a straight limb the
 // perpendicular lever is short, so centimetre landmark noise becomes several
@@ -457,6 +461,11 @@ const SHOULDER_TILT_DAMP_ANGLE = 90 * DEG
 // unobservable (straight limb) and we fall back to shortest-arc.
 const WITNESS_FADE_LO = 0.15
 const WITNESS_FADE_HI = 0.35
+
+// Disagreement between a witness and the arc it corrects, past which the
+// witness is describing its own basis flipping rather than a limb rolling.
+const WITNESS_FLIP_LO = (110 * Math.PI) / 180
+const WITNESS_FLIP_HI = (165 * Math.PI) / 180
 
 // Canonical rest bend planes in parent-local frame. MMD rest poses have straight
 // elbows/knees, so the rest child direction can't serve as the roll reference —
@@ -640,6 +649,9 @@ export class Solver {
    *  expressed against. */
   private pelvisBasis = Quat.identity()
   private pelvisMeasured = false
+  /** Last accepted head basis, for the continuity check above. */
+  private headPrev = Quat.identity()
+  private headSeen = false
   private chestMeasuredFrame = false
   /** Whether the calibrated model has an 上半身2 to take its half; without one
    *  the whole chest rotation stays on 上半身. */
@@ -754,6 +766,7 @@ export class Solver {
     this.chestMeasuredFrame = false
     this.chestHalfSeen = false
     this.pelvisMeasured = false
+    this.headSeen = false
     this.shoulderTilt = 0
     for (const key of Object.keys(this.rollFilters)) this.rollFilters[key].reset()
     for (const key of Object.keys(this.signalFilters)) this.signalFilters[key].reset()
@@ -1832,7 +1845,7 @@ export class Solver {
     const primary = this.witnessSolution(def, def.witness!, WITNESS_REST[def.name] ?? null, parentWorld, sQ3)
     // How much of the roll the primary witness could actually see. Whatever it
     // leaves is the room the fallback may claim.
-    const t = Solver.witnessFade(primary)
+    const t = Solver.witnessFade(primary) * Solver.flipGuard(out, sQ3)
     if (t > 0) {
       if (Quat.dot(out, sQ3) < 0) sQ3.setXYZW(-sQ3.x, -sQ3.y, -sQ3.z, -sQ3.w)
       Quat.nlerpInto(out, sQ3, t, out)
@@ -1844,10 +1857,30 @@ export class Solver {
     const room = 1 - t
     if (room <= 1e-3 || !def.rollFallback) return
     const fallback = this.witnessSolution(def, def.rollFallback, this.getRef(def.rollFallback), parentWorld, sQ4)
-    const t2 = Solver.witnessFade(fallback) * room
+    const t2 = Solver.witnessFade(fallback) * room * Solver.flipGuard(out, sQ4)
     if (t2 <= 0) return
     if (Quat.dot(out, sQ4) < 0) sQ4.setXYZW(-sQ4.x, -sQ4.y, -sQ4.z, -sQ4.w)
     Quat.nlerpInto(out, sQ4, t2, out)
+  }
+
+  /**
+   * How far a witness may be trusted when it disagrees with the arc it is
+   * correcting.
+   *
+   * A witness builds a basis from a child segment, and a basis flips when the
+   * segment it is built from passes through the parent's own axis — a limb
+   * straightening does exactly that. What comes back then is a half turn away
+   * from the pose being corrected, which is not a roll a limb performed
+   * between two frames; it is the same orientation described the other way
+   * round. Past a certain disagreement the witness is telling us about its own
+   * geometry rather than about the body.
+   */
+  private static flipGuard(current: Quat, witness: Quat): number {
+    const angle = Quat.angleTo(current, witness)
+    if (angle <= WITNESS_FLIP_LO) return 1
+    if (angle >= WITNESS_FLIP_HI) return 0
+    const t = 1 - (angle - WITNESS_FLIP_LO) / (WITNESS_FLIP_HI - WITNESS_FLIP_LO)
+    return t * t * (3 - 2 * t)
   }
 
   /** Smoothstep from "roll unobservable" to "witness fully trusted". */
@@ -2059,6 +2092,14 @@ export class Solver {
         sC.setXYZ(sC.x - sDir.x * d, sC.y - sDir.y * d, sC.z - sDir.z * d).normalizeInPlace()
         Vec3.crossInto(sDir, sC, sA)
         Quat.fromBasisInto(sC, sA, sDir, out)
+        // A head basis is built from ears and eyes, which a detector keeps
+        // reporting confidently after the face has turned away from the
+        // camera — and where it puts them then can face the wrong way
+        // entirely. A head does not turn a half circle between two frames, so
+        // a basis that says one did is describing the detector, not the body.
+        if (this.headSeen && Quat.angleTo(out, this.headPrev) > HEAD_MAX_STEP) return false
+        this.headPrev.set(out)
+        this.headSeen = true
         return true
       }
     }
