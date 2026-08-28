@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Harness recordings and builds — regenerate with harness/record.mjs
+harness/fixtures/
+harness/.build/

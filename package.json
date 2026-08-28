@@ -6,7 +6,9 @@
     "dev": "next dev -p 4000",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "harness": "npx esbuild harness/analyze.mts --bundle --format=esm --platform=node --outfile=harness/.build/analyze.mjs --log-level=warning && node harness/.build/analyze.mjs",
+    "harness:record": "node harness/record.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.32",
