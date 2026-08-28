@@ -201,14 +201,15 @@ export default function MainScene() {
           /* removeModel no-op if name stale */
         }
         const model = await engine.loadModel(instanceKey, { files, pmxFile })
+        frameModel(model)
         await new Promise((resolve) => requestAnimationFrame(resolve))
         model.setName(stem)
         modelRef.current = model
         loadedModelNameRef.current = instanceKey
         await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
-        setModelLoaded(true)
         buildRestPose(model)
         frameModel(model)
+        setModelLoaded(true)
         setEngineError(null)
         if (opts?.persist !== false) {
           void saveModelUpload(files, pmxFile, stem)
@@ -230,8 +231,12 @@ export default function MainScene() {
         const engine = new Engine(canvasRef.current, {
           bloom: { color: new Vec3(0.5, 0.1, 0.9), intensity: 0.03 },
           // Further out than the engine default: a capture is watched whole —
-          // raised arms and a deep crouch both have to stay in frame.
-          camera: { distance: 30 },
+          // raised arms and a deep crouch both have to stay in frame. The
+          // target is the chest height of a standard MMD model: framing only
+          // once the model's own センター can be read means the first frames
+          // are drawn looking somewhere else, and the correction reads as the
+          // scene lurching.
+          camera: { distance: 30, target: new Vec3(0, 11, 0) },
         })
         engineRef.current = engine
         await engine.init()
@@ -244,22 +249,21 @@ export default function MainScene() {
         engine.runRenderLoop(() => {
           setStats(engine.getStats())
         })
+        // Before any model: a floor that appears afterwards is one more thing
+        // moving in the first second.
+        engine.addGround({ diffuseColor: new Vec3(0.9, 0.1, 0.9) })
 
         // A previously uploaded model survives the refresh — it wins over
         // both the bundled default and the empty boot. Eviction or a failed
         // load falls through to the defaults below.
         const stored = await loadModelUpload()
         if (stored && (await loadPmxFromFolder(stored.files, stored.pmxFile, { persist: false, quiet: true }))) {
-          engine.addGround({ diffuseColor: new Vec3(0.9, 0.1, 0.9) })
           return
         }
 
-        if (!USE_DEFAULT_ASSETS) {
-          // No bundled model: the scene boots empty (ground only) and the user
-          // brings their own PMX via the folder picker.
-          engine.addGround({ diffuseColor: new Vec3(0.9, 0.1, 0.9) })
-          return
-        }
+        // No bundled model: the scene boots empty (ground only) and the user
+        // brings their own PMX via the folder picker.
+        if (!USE_DEFAULT_ASSETS) return
 
         const genBeforeDefault = loadGenerationRef.current
         try {
@@ -277,12 +281,14 @@ export default function MainScene() {
           loadedModelNameRef.current = DEFAULT_MODEL_KEY
           console.log(model.getMaterials())
 
+          // Frame first, then reveal: the camera reads the model's own センター
+          // and the loading pill only clears once it is looking there.
+          frameModel(model)
           await engine.autoStyleGroups(loadedModelNameRef.current, DEFAULT_STYLE_OVERRIDES)
-          setModelLoaded(true)
           await new Promise((r) => requestAnimationFrame(r))
           buildRestPose(model)
           frameModel(model)
-          engine.addGround({ diffuseColor: new Vec3(0.9, 0.1, 0.9) })
+          setModelLoaded(true)
           setEngineError(null)
         } catch (loadErr) {
           setEngineError(loadErr instanceof Error ? loadErr.message : "Unknown error")
