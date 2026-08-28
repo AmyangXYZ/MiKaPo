@@ -1,15 +1,10 @@
 /// <reference lib="webworker" />
-// MediaPipe detection worker. Detection runs off the main thread so the WebGPU
-// render loop never blocks on it — frames arrive as transferred ImageBitmaps,
-// results go back as plain landmark arrays.
-//
-// The body comes from PoseLandmarker rather than from HolisticLandmarker.
-// Holistic bundles a pose model that cannot be chosen, and on recorded footage
-// it swings the body a half turn between adjacent frames: four such flips in
-// eight seconds, worst 165°. The standalone model, given the same frames at
-// the same thresholds, produces none at all — and costs less than half as
-// much per frame. Hands and face are the two models still to come back.
-import { FilesetResolver, PoseLandmarker, PoseLandmarkerResult, type NormalizedLandmark, type Landmark } from "@mediapipe/tasks-vision"
+// MediaPipe holistic detection worker. Detection takes ~20-30ms per frame; on
+// the main thread that blocked the WebGPU render loop and capped the app at
+// ~20 FPS. Here it shares nothing with rendering — frames arrive as transferred
+// ImageBitmaps, results go back as plain landmark arrays.
+import { ASSETS } from "@/lib/assets"
+import { FilesetResolver, HolisticLandmarker, HolisticLandmarkerResult } from "@mediapipe/tasks-vision"
 
 export type PoseWorkerRequest =
   | { type: "init" }
@@ -18,17 +13,18 @@ export type PoseWorkerRequest =
   | { type: "image"; bitmap: ImageBitmap; mediaTs: number }
   | { type: "reset" }
 
-/** What the app consumes, structured-clone friendly. The hand and face arrays
- * stay empty while those models are out: the solver reads an absent set the
- * same way it reads a lost one, and crossfades those bones to rest. */
+/** Subset of HolisticLandmarkerResult the app consumes (structured-clone friendly).
+ * Face ships as mesh landmarks: the blendshape subgraph doesn't run on the
+ * holistic GPU delegate ("No support of const"), so the face solver measures
+ * geometry on the mesh instead. */
 export interface PoseWorkerResult {
-  poseWorldLandmarks: Landmark[][]
-  leftHandWorldLandmarks: Landmark[][]
-  rightHandWorldLandmarks: Landmark[][]
-  faceLandmarks: NormalizedLandmark[][]
+  poseWorldLandmarks: HolisticLandmarkerResult["poseWorldLandmarks"]
+  leftHandWorldLandmarks: HolisticLandmarkerResult["leftHandWorldLandmarks"]
+  rightHandWorldLandmarks: HolisticLandmarkerResult["rightHandWorldLandmarks"]
+  faceLandmarks: HolisticLandmarkerResult["faceLandmarks"]
   /** Image-space pose landmarks: the solver's projective depth rebuild reads
    * the 2D spine length, which the hip-centred world landmarks cannot carry. */
-  poseLandmarks: NormalizedLandmark[][]
+  poseLandmarks: HolisticLandmarkerResult["poseLandmarks"]
   /** Frame width/height — 2D landmark x is width-normalized. */
   imageAspect: number
   /** Wall time the detector spent on this frame. The capture rate is set by
@@ -45,24 +41,22 @@ export type PoseWorkerResponse =
   | { type: "result"; result: PoseWorkerResult; mediaTs: number }
   | { type: "error"; message: string }
 
-let landmarker: PoseLandmarker | null = null
+let landmarker: HolisticLandmarker | null = null
 let runningMode: "VIDEO" | "IMAGE" = "VIDEO"
 
 const post = (msg: PoseWorkerResponse) => (self as unknown as Worker).postMessage(msg)
 
-const NONE: never[] = []
-
-const emit = (result: PoseLandmarkerResult, mediaTs: number, imageAspect: number, inferenceMs: number) => {
+const emit = (result: HolisticLandmarkerResult, mediaTs: number, imageAspect: number, inferenceMs: number) => {
   post({
     type: "result",
     mediaTs,
     result: {
       inferenceMs,
-      poseWorldLandmarks: result.worldLandmarks,
-      poseLandmarks: result.landmarks,
-      leftHandWorldLandmarks: NONE,
-      rightHandWorldLandmarks: NONE,
-      faceLandmarks: NONE,
+      poseWorldLandmarks: result.poseWorldLandmarks,
+      leftHandWorldLandmarks: result.leftHandWorldLandmarks,
+      rightHandWorldLandmarks: result.rightHandWorldLandmarks,
+      faceLandmarks: result.faceLandmarks,
+      poseLandmarks: result.poseLandmarks,
       imageAspect,
     },
   })
@@ -75,23 +69,23 @@ async function init(): Promise<void> {
 
   const createOptions = {
     baseOptions: {
-      // Served from public/ for now. It belongs in the assets bucket like the
-      // rest, once it is uploaded there.
-      modelAssetPath: "/pose_landmarker_full.task",
+      // Self-hosted snapshot of Google's float16 holistic_landmarker — their
+      // /latest/ URL can change bytes under us; this one cannot.
+      modelAssetPath: `${ASSETS}/holistic_landmarker.task`,
       delegate: "GPU" as const,
     },
     minPosePresenceConfidence: 0.7,
     minPoseDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.7,
-    numPoses: 1,
+    minFaceDetectionConfidence: 0.4,
+    minHandLandmarksConfidence: 0.95,
     runningMode: "VIDEO" as const,
   }
 
   try {
-    landmarker = await PoseLandmarker.createFromOptions(vision, createOptions)
+    landmarker = await HolisticLandmarker.createFromOptions(vision, createOptions)
   } catch (gpuError) {
     console.warn("GPU delegate failed in worker, falling back to CPU:", gpuError)
-    landmarker = await PoseLandmarker.createFromOptions(vision, {
+    landmarker = await HolisticLandmarker.createFromOptions(vision, {
       ...createOptions,
       baseOptions: { ...createOptions.baseOptions, delegate: "CPU" },
     })
