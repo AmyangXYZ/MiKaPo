@@ -76,6 +76,7 @@ export const MotionCapture = ({
   colliders,
   modelMorphs,
   exportVmd,
+  onUploadStored,
 }: {
   applyPose: (boneStates: BoneState[], tweenMs: number) => void
   applyFace: (faceResult: FaceSolverResult, tweenMs: number) => void
@@ -90,6 +91,9 @@ export const MotionCapture = ({
   colliders?: BodyCollider[] | null
   // Morph names present on the loaded model — resolves blendshape mappings.
   modelMorphs?: string[] | null
+  /** Fired once an upload is actually persisted, so the header can offer the
+   *  way back to the demo without waiting for a reload to notice. */
+  onUploadStored?: () => void
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
@@ -117,6 +121,8 @@ export const MotionCapture = ({
   const userPickedMediaRef = useRef(false)
   const solverRef = useRef<Solver>(new Solver())
   const faceBlendshapeSolverRef = useRef<FaceBlendshapeSolver>(new FaceBlendshapeSolver())
+  const onUploadStoredRef = useRef(onUploadStored)
+  onUploadStoredRef.current = onUploadStored
   const onMediaPipeReadyChangeRef = useRef(onMediaPipeReadyChange)
   useEffect(() => {
     onMediaPipeReadyChangeRef.current = onMediaPipeReadyChange
@@ -534,7 +540,9 @@ export const MotionCapture = ({
     const file = event.target.files?.[0]
     if (file && file.type.includes("video")) {
       userPickedMediaRef.current = true
-      void saveVideoUpload(file)
+      void saveVideoUpload(file).then((ok) => {
+        if (ok) onUploadStoredRef.current?.()
+      })
       const url = URL.createObjectURL(file)
       // No model reset: the model holds its pose until the user plays the new
       // video, then transitions to its motion — a bind-pose snap in between

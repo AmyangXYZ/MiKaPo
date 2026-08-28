@@ -472,11 +472,11 @@ export default function MainScene() {
             the same title Reze Engine and Reze Rig wear. */}
         <div className="pointer-events-auto flex h-10 shrink-0 items-center pl-1">
           <h1
-            // All caps has no descenders, so ink centred by its line box reads
-            // about 0.1em high against the pills beside it; the nudge is
-            // optical only and takes no space. The trailing letter-space that
-            // tracking adds after the last glyph is taken back the same way.
-            className="translate-y-px text-xl font-light uppercase tracking-[0.2em] text-white md:translate-y-[2px] md:text-2xl md:tracking-[0.3em] md:-mr-[0.3em]"
+            // The trailing letter-space that tracking leaves after the last
+            // glyph is taken back so the wordmark ends where it looks like it
+            // ends. Vertical centring is the flex box's job — h-10 either side
+            // of the row, one centre line.
+            className="text-base font-light uppercase leading-none tracking-[0.2em] text-white md:text-lg md:tracking-[0.28em] md:-mr-[0.28em]"
             style={{ textShadow: "0 0 20px rgba(255, 255, 255, 0.3), 0 2px 10px rgba(0, 0, 0, 0.5)" }}
           >
             Reze MiPo
@@ -620,6 +620,7 @@ export default function MainScene() {
         colliders={colliders}
         modelMorphs={modelMorphs}
         exportVmd={exportVmd}
+        onUploadStored={() => setHasUploads(true)}
       />
 
       {/* One message at a time. A failed boot leaves `modelLoaded` false, so the
