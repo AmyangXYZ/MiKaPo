@@ -838,6 +838,12 @@ const MotionCaptureImpl = ({
 
         const pose = solverRef.current.solve(result, t * 1000)
         currentBoneStatesRef.current = pose
+        // The preview watches the conversion too — a take being stepped is
+        // exactly when you want to see what the detector is finding.
+        if (performance.now() - lastDebugUpdateRef.current >= DEBUG_PREVIEW_INTERVAL_MS) {
+          lastDebugUpdateRef.current = performance.now()
+          setLandmarks(result)
+        }
         // Applied untweened: the character steps through the take as it converts,
         // which is the progress bar people actually watch.
         applyPoseRef.current(pose, 0)
@@ -1120,7 +1126,7 @@ const MotionCaptureImpl = ({
       >
         <span className={cn("truncate", tracking ? "text-foreground" : undefined)}>
           {converting
-            ? `Converting ${Math.round(progress * 100)}%`
+            ? "Converting to VMD"
             : !sourceReady
               ? "Preparing detector"
               : exported
@@ -1130,7 +1136,15 @@ const MotionCaptureImpl = ({
                   : "No pose"}
         </span>
         <span className="ml-auto shrink-0 tabular-nums">
-          {captureHz > 0 ? `${captureHz} Hz` : "— Hz"} · {inferenceMs > 0 ? `${inferenceMs} ms` : "— ms"}
+          {converting ? (
+            // Live rate means nothing here: the take is stepped frame by frame
+            // at VMD's own 30 fps and takes exactly as long as it takes.
+            `${Math.round(progress * 100)}% · 30 Hz`
+          ) : (
+            <>
+              {captureHz > 0 ? `${captureHz} Hz` : "— Hz"} · {inferenceMs > 0 ? `${inferenceMs} ms` : "— ms"}
+            </>
+          )}
         </span>
       </footer>
     </div>
