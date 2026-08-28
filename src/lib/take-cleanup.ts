@@ -106,94 +106,6 @@ function savitzkyGolay(sets: (Landmark[] | null)[], zGain: number): void {
 }
 
 
-// ─── Left/right continuity ─────────────────────────────────────────────────
-//
-// A pose model decides which limb is which from what it can see, and a body
-// turned away from the camera gives it very little to go on. The usual result
-// is that the labels swap for the frames where the subject faces away: the
-// shoulder line reverses between one frame and the next, the solver rotates
-// the trunk 180° to match, and a full turn plays back as a half turn that
-// changes its mind.
-//
-// A turn is continuous and a mislabel is not, so the two are easy to tell
-// apart with the neighbours in hand: at 30fps, the shoulder line moving more
-// than 140° in a single frame would be four full revolutions a second.
-//
-// Each frame is taken as it comes or with its sides exchanged, whichever
-// continues the previous frame — a decision that costs nothing when the labels
-// were right, because then the unswapped reading is always the closer one.
-
-/** Index pairs that exchange when a pose is read from the wrong side. */
-const MIRRORED: [number, number][] = [
-  [1, 4], [2, 5], [3, 6], // eyes
-  [7, 8], // ears
-  [9, 10], // mouth
-  [11, 12], [13, 14], [15, 16], // shoulders, elbows, wrists
-  [17, 18], [19, 20], [21, 22], // pinky, index, thumb
-  [23, 24], [25, 26], [27, 28], // hips, knees, ankles
-  [29, 30], [31, 32], // heels, foot indices
-]
-
-/** Bearing of the shoulder line in the ground plane. */
-function shoulderYaw(pose: Landmark[], swapped: boolean): number {
-  const l = pose[swapped ? 12 : 11]
-  const r = pose[swapped ? 11 : 12]
-  if (!l || !r) return NaN
-  return Math.atan2(l.x - r.x, l.z - r.z)
-}
-
-function angleGap(a: number, b: number): number {
-  let d = Math.abs(a - b) % (2 * Math.PI)
-  if (d > Math.PI) d = 2 * Math.PI - d
-  return d
-}
-
-/**
- * Hold left and right consistent across a take, exchanging the sides on frames
- * where the detector read the body from the wrong side. The hands swap with
- * the pose they belong to.
- *
- * The first frame is taken on trust: nothing precedes it to be continuous
- * with, and a subject almost always starts facing the camera.
- */
-export function stabilizeHandedness(frames: TakeFrame[]): number {
-  let previous = NaN
-  let swapped = false
-  let repaired = 0
-  for (const f of frames) {
-    const pose = f.pose
-    if (!pose || pose.length < 33) continue
-    const asIs = shoulderYaw(pose, swapped)
-    const flipped = shoulderYaw(pose, !swapped)
-    if (Number.isNaN(asIs) || Number.isNaN(flipped)) continue
-    if (!Number.isNaN(previous)) {
-      // Only a reading that is WILDLY discontinuous gets overruled, and only
-      // when exchanging the sides actually restores continuity.
-      const keepGap = angleGap(asIs, previous)
-      const swapGap = angleGap(flipped, previous)
-      if (keepGap > 140 * (Math.PI / 180) && swapGap < keepGap * 0.5) {
-        swapped = !swapped
-        repaired++
-      }
-    }
-    if (swapped) {
-      for (const [a, b] of MIRRORED) {
-        if (a < pose.length && b < pose.length) {
-          const t = pose[a]
-          pose[a] = pose[b]
-          pose[b] = t
-        }
-      }
-      const hand = f.leftHand
-      f.leftHand = f.rightHand
-      f.rightHand = hand
-    }
-    previous = shoulderYaw(pose, false)
-  }
-  return repaired
-}
-
-
 // ─── Dropouts ──────────────────────────────────────────────────────────────
 //
 // A limb that the detector loses for a moment — crossing the body, blurred by
@@ -268,9 +180,8 @@ function bridgeDropouts(sets: (Landmark[] | null)[]): number {
  * in it, there is no gap to bridge, and the solver's crossfades know what to
  * do with an absence.
  */
-export function cleanTake(frames: TakeFrame[], opts?: { zGain?: number }): { sideRepairs: number; bridged: number } {
+export function cleanTake(frames: TakeFrame[], opts?: { zGain?: number }): { bridged: number } {
   const zGain = opts?.zGain ?? 1
-  const sideRepairs = stabilizeHandedness(frames)
   let bridged = 0
   for (const key of ["pose", "leftHand", "rightHand"] as const) {
     const sets = seriesOf(frames, key)
@@ -278,5 +189,5 @@ export function cleanTake(frames: TakeFrame[], opts?: { zGain?: number }): { sid
     medianOfThree(sets)
     savitzkyGolay(sets, zGain)
   }
-  return { sideRepairs, bridged }
+  return { bridged }
 }

@@ -144,59 +144,30 @@ function solveTake(frames: Frame[], mode: "live" | "export") {
     return poses
   }
 
-  // The export path, as the app runs it: clean the landmarks, solve both ways,
-  // average, then fit.
+  // The export path, as the app runs it: clean the landmarks, solve once with
+  // the filters opened up, then fit the finished take without phase shift.
   const take: TakeFrame[] = frames.map((f) => ({
     pose: (f.pose as never) ?? null,
     leftHand: (f.leftHand as never) ?? null,
     rightHand: (f.rightHand as never) ?? null,
   }))
   cleanTake(take, { zGain: 1 })
-  const run = (order: number[]) => {
-    solver.reset()
-    solver.setSmoothing(3, 6, 6)
-    const out: BoneState[][] = []
-    let clock = 0
-    for (const i of order) {
-      clock += 1000 / 30
-      const pose = solver.solve(
-        {
-          poseWorldLandmarks: take[i].pose ? [take[i].pose] : [],
-          leftHandWorldLandmarks: take[i].leftHand ? [take[i].leftHand] : [],
-          rightHandWorldLandmarks: take[i].rightHand ? [take[i].rightHand] : [],
-        } as never,
-        clock,
-      )
-      out.push(pose.map((b) => ({ name: b.name, rotation: b.rotation.clone() })))
-    }
-    return out
+  solver.reset()
+  solver.setSmoothing(3, 6, 6)
+  const out: BoneState[][] = []
+  for (let i = 0; i < take.length; i++) {
+    const pose = solver.solve(
+      {
+        poseWorldLandmarks: take[i].pose ? [take[i].pose] : [],
+        leftHandWorldLandmarks: take[i].leftHand ? [take[i].leftHand] : [],
+        rightHandWorldLandmarks: take[i].rightHand ? [take[i].rightHand] : [],
+      } as never,
+      frames[i].time * 1000,
+    )
+    out.push(pose.map((b) => ({ name: b.name, rotation: b.rotation.clone() })))
   }
-  const order = frames.map((_, i) => i)
-  const fwd = run(order)
-  const bwd = run(order.slice().reverse()).reverse()
-  // Averaged where the passes agree; where they do not, the one that follows
-  // on from the frame before. Same rule the app exports with.
-  const MAX_APART = (60 * Math.PI) / 180
-  const previous: Quat[] = []
-  const merged = fwd.map((a, i) =>
-    a.map((bs, j) => {
-      const other = bwd[i][j].rotation
-      const apart = Quat.angleTo(bs.rotation, other)
-      let rotation: Quat
-      if (apart <= MAX_APART) rotation = Quat.nlerp(bs.rotation, other, 0.5)
-      else {
-        const last = previous[j]
-        rotation =
-          last && Quat.angleTo(other, last) < Quat.angleTo(bs.rotation, last)
-            ? other.clone()
-            : bs.rotation.clone()
-      }
-      previous[j] = rotation
-      return { name: bs.name, rotation }
-    }),
-  )
-  smoothTakeZeroPhase(merged.map((boneStates, i) => ({ time: frames[i].time, boneStates })))
-  return merged
+  smoothTakeZeroPhase(out.map((boneStates, i) => ({ time: frames[i].time, boneStates })))
+  return out
 }
 
 /** A row of characters showing a signal over time — readable in a terminal,

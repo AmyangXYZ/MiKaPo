@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, useCallback, memo } from "react"
 import Image from "next/image"
 import { BoneState, Solver, type BodyCollider } from "@/lib/solver"
 import { FaceBlendshapeSolver, FaceSolverResult, FaceMorphWeights } from "@/lib/face-blendshape-solver"
-import { buildClip, clipSummary, RecordedFrame, VMD_FPS } from "@/lib/vmd"
+import { buildClip, clipSummary, RecordedFrame } from "@/lib/vmd"
 import { smoothTakeZeroPhase } from "@/lib/filters"
 import { cleanTake, type TakeFrame } from "@/lib/take-cleanup"
 import { loadVideoUpload, saveVideoUpload } from "@/lib/asset-store"
-import { Quat, Vec3 } from "reze-engine"
+import { Vec3 } from "reze-engine"
 import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -42,16 +42,10 @@ const DEBUG_PREVIEW_INTERVAL_MS = 66
  *  development and in production. */
 const DEMO_VIDEO = "/flash.mp4"
 
-/** Smoothing for the two offline passes. Opened well past the live settings
- *  because the take gets filtered twice — once in each direction — and a
- *  filter that has to survive being applied twice can afford to let more of
- *  the motion through each time. */
+/** Smoothing for the offline pass. Opened past the live settings because a
+ *  zero-phase fit runs over the finished take afterwards and takes out what
+ *  this leaves behind, without the lag a tighter filter would cost. */
 const OFFLINE_SMOOTHING = { minCutoff: 3, beta: 6, dCutoff: 6 }
-
-/** How far the two passes may disagree and still be worth averaging. Beyond
- *  this they have resolved an ambiguity differently, and their midpoint is a
- *  pose neither of them found. */
-const MERGE_MAX_DISAGREEMENT = (60 * Math.PI) / 180
 
 const CAPTURE_WIDTH = 960
 
@@ -921,88 +915,45 @@ const MotionCaptureImpl = ({
     // geometry that turns a centimetre into eight degrees.
     cleanTake(take, { zGain: 1 })
 
-    // Pass two: solve the cleaned take FORWARDS, then again BACKWARDS, and
-    // average the two. Every causal filter's lag is equal and opposite in the
-    // two directions, so the average carries none of it, and each frame has
-    // been smoothed twice — which is why the filters are opened up for these
-    // passes. Measured against solving the take once with live settings:
-    // 20% less error against ground truth, and less frame-to-frame shake.
+    // Pass two: solve the cleaned take once, forwards, with the filters opened
+    // up because a zero-phase fit follows.
+    //
+    // It used to be solved backwards as well and the two averaged, so that
+    // each filter's lag would cancel. That works on a solver whose output
+    // depends only on the frame in front of it, and this one's does not: the
+    // crossfades, the engagement hysteresis, the plausibility gate and the
+    // spine's choice of square root all depend on what came BEFORE, which
+    // when time runs the other way is what comes after. Measured on real
+    // takes, the two passes ended up as much as 108° apart on the trunk, and
+    // the average of two poses a hundred degrees apart is a third that
+    // neither pass proposed — a body that breaks apart where it swings the
+    // most, which is exactly where the reports came from.
     const solver = solverRef.current
     const live = solver.getSmoothing()
-    const runPass = (order: number[]) => {
-      solver.reset()
-      solver.setSmoothing(OFFLINE_SMOOTHING.minCutoff, OFFLINE_SMOOTHING.beta, OFFLINE_SMOOTHING.dCutoff)
-      const out: BoneState[][] = []
-      // A synthetic clock: the filters need time to move forward, and in the
-      // backward pass the take's own stamps run the other way.
-      let clock = 0
-      for (const i of order) {
-        clock += 1000 / VMD_FPS
-        const f = take[i]
-        const pose = solver.solve(
-          {
-            poseWorldLandmarks: f.pose ? [f.pose] : [],
-            leftHandWorldLandmarks: f.leftHand ? [f.leftHand] : [],
-            rightHandWorldLandmarks: f.rightHand ? [f.rightHand] : [],
-          },
-          clock,
-        )
-        out.push(
-          pose.map((bs) => ({
-            name: bs.name,
-            rotation: bs.rotation.clone(),
-            ...(bs.translation ? { translation: new Vec3(bs.translation.x, bs.translation.y, bs.translation.z) } : {}),
-          })),
-        )
-      }
-      return out
-    }
-    const order = take.map((_, i) => i)
-    const forward = runPass(order)
-    const backward = runPass(order.slice().reverse()).reverse()
-    solver.setSmoothing(live.minCutoff, live.beta, live.dCutoff)
     solver.reset()
-
-    // Averaging the two passes is what cancels their lag, and it means
-    // something only where they agree. Where they do not — a frame the
-    // landmarks left genuinely ambiguous, which each direction resolves its
-    // own way — the midpoint of two nearly opposite rotations is a pose
-    // neither pass proposed, and it lands as a pop far larger than anything
-    // either one produced. There, the reading that follows on from the frame
-    // before is taken whole.
-    const previous: Quat[] = []
+    solver.setSmoothing(OFFLINE_SMOOTHING.minCutoff, OFFLINE_SMOOTHING.beta, OFFLINE_SMOOTHING.dCutoff)
     for (let i = 0; i < take.length; i++) {
-      const a = forward[i]
-      const b = backward[i]
+      const f = take[i]
+      const pose = solver.solve(
+        {
+          poseWorldLandmarks: f.pose ? [f.pose] : [],
+          leftHandWorldLandmarks: f.leftHand ? [f.leftHand] : [],
+          rightHandWorldLandmarks: f.rightHand ? [f.rightHand] : [],
+        },
+        takeTimes[i] * 1000,
+      )
       frames.push({
         time: takeTimes[i],
-        boneStates: a.map((bs, j) => {
-          const other = b[j]
-          const apart = Quat.angleTo(bs.rotation, other.rotation)
-          let rotation: Quat
-          if (apart <= MERGE_MAX_DISAGREEMENT) {
-            rotation = Quat.nlerp(bs.rotation, other.rotation, 0.5)
-          } else {
-            const last = previous[j]
-            rotation =
-              last && Quat.angleTo(other.rotation, last) < Quat.angleTo(bs.rotation, last)
-                ? other.rotation.clone()
-                : bs.rotation.clone()
-          }
-          previous[j] = rotation
-          const ta = bs.translation
-          const tb = other.translation
-          return {
-            name: bs.name,
-            rotation,
-            ...(ta && tb
-              ? { translation: new Vec3((ta.x + tb.x) / 2, (ta.y + tb.y) / 2, (ta.z + tb.z) / 2) }
-              : {}),
-          }
-        }),
+        boneStates: pose.map((bs) => ({
+          name: bs.name,
+          rotation: bs.rotation.clone(),
+          ...(bs.translation ? { translation: new Vec3(bs.translation.x, bs.translation.y, bs.translation.z) } : {}),
+        })),
         morphWeights: takeMorphs[i],
       })
     }
+    solver.setSmoothing(live.minCutoff, live.beta, live.dCutoff)
+    solver.reset()
 
     // And the same zero-phase fit over the solved rotations and translations,
     // which catches what survives the landmark pass: the geometry's own
