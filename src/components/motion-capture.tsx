@@ -10,7 +10,7 @@ import { Vec3 } from "reze-engine"
 import type { PoseWorkerRequest, PoseWorkerResponse, PoseWorkerResult } from "@/lib/pose-worker"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Camera, Image as ImageIcon, Video, Webcam, Pause, Play, Download, Square, GripVertical } from "lucide-react"
+import { Camera, Image as ImageIcon, Video, Webcam, Pause, Play, Download, Square, GripVertical, Upload } from "lucide-react"
 import DebugScene from "./debug-scene"
 import { FloatingPanel, clampRect, type Rect } from "./floating-panel"
 import { useStoredRect } from "@/hooks/use-stored-rect"
@@ -97,8 +97,7 @@ export const MotionCapture = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
-  const imageInputRef = useRef<HTMLInputElement>(null)
-  const videoInputRef = useRef<HTMLInputElement>(null)
+  const mediaInputRef = useRef<HTMLInputElement>(null)
   const workerRef = useRef<Worker | null>(null)
   const [mediaPipeReady, setMediaPipeReady] = useState(false)
   const [landmarks, setLandmarks] = useState<PoseWorkerResult | null>(null)
@@ -518,10 +517,19 @@ export const MotionCapture = ({
     }
   }, [])
 
-  // Handle image upload
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  /** One picker for both: what the file IS decides which mode it opens, so
+   *  there is a single obvious way to bring your own footage in. */
+  const handleMediaUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
-    if (file && file.type.includes("image")) {
+    // Cleared so picking the same file twice still fires a change.
+    event.target.value = ""
+    if (!file) return
+    if (file.type.startsWith("video/")) loadVideoFile(file)
+    else if (file.type.startsWith("image/")) loadImageFile(file)
+  }
+
+  const loadImageFile = (file: File) => {
+    {
       userPickedMediaRef.current = true
       const url = URL.createObjectURL(file)
       resetModel?.()
@@ -539,10 +547,8 @@ export const MotionCapture = ({
     }
   }
 
-  // Handle video upload
-  const handleVideoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (file && file.type.includes("video")) {
+  const loadVideoFile = (file: File) => {
+    {
       userPickedMediaRef.current = true
       void saveVideoUpload(file).then((ok) => {
         if (ok) onUploadStoredRef.current?.()
@@ -769,40 +775,42 @@ export const MotionCapture = ({
 
   /** Switch the capture source. A source with nothing loaded opens its picker
    *  instead — the segment is where you go for that input, either way. */
-  const selectSource = (mode: "camera" | "video" | "image") => {
-    if (mode === "camera") {
+  const selectSource = (key: "camera" | "media") => {
+    if (key === "camera") {
       void toggleCamera()
       return
     }
     if (isStreamActive) stopCurrentInput()
     userPickedMediaRef.current = true
-    if (mode === "video") {
-      if (!videoSrc) {
-        videoInputRef.current?.click()
-        return
-      }
+    // Back to whichever file is loaded; with none, straight to the picker.
+    if (lastMedia === "IMAGE" && currentImage) {
+      workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
+      workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
+      // The capture loop skips an image it has already seen; coming back to one
+      // has to re-solve it, or the model keeps whatever the video left behind.
+      redetectImageRef.current = true
+      setInputMode("image")
+      return
+    }
+    if (videoSrc) {
       if (lastMedia === "IMAGE") workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
       setLastMedia("VIDEO")
       setInputMode("video")
       return
     }
-    if (!currentImage) {
-      imageInputRef.current?.click()
-      return
-    }
-    workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
-    workerRef.current?.postMessage({ type: "reset" } satisfies PoseWorkerRequest)
-    // The capture loop skips an image it has already seen; coming back to one
-    // has to re-solve it, or the model keeps whatever the video left behind.
-    redetectImageRef.current = true
-    setLastMedia("IMAGE")
-    setInputMode("image")
+    mediaInputRef.current?.click()
   }
 
+  // Two sources, because there are two: the camera, and a file. Which KIND of
+  // file is the file's business, not a mode the user has to pick first.
   const SOURCES = [
     { key: "camera", label: "Webcam", Icon: Webcam, active: inputMode === "camera" },
-    { key: "video", label: "Video", Icon: Video, active: inputMode === "video" },
-    { key: "image", label: "Image", Icon: ImageIcon, active: inputMode === "image" },
+    {
+      key: "media",
+      label: "Media",
+      Icon: inputMode === "image" ? ImageIcon : Video,
+      active: inputMode === "video" || inputMode === "image",
+    },
   ] as const
 
   const exportDisabled = (inputMode !== "video" && inputMode !== "image") || !mediaPipeReady
@@ -839,6 +847,23 @@ export const MotionCapture = ({
             Live
           </span>
         )}
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={!mediaPipeReady}
+              onClick={() => mediaInputRef.current?.click()}
+              className="size-7 shrink-0 rounded-lg text-muted-foreground hover:bg-white/5 hover:text-foreground"
+              aria-label="Upload a video or image"
+            >
+              <Upload className="size-4" strokeWidth={1.75} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Upload a video or image</TooltipContent>
+        </Tooltip>
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -980,8 +1005,7 @@ export const MotionCapture = ({
 
   return (
     <>
-      <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageUpload} hidden />
-      <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoUpload} hidden />
+      <input ref={mediaInputRef} type="file" accept="video/*,image/*" onChange={handleMediaUpload} hidden />
       <FloatingPanel rect={rect} onRectChange={setRect} minW={PANEL_MIN_W} minH={PANEL_MIN_H}>
         {panel}
       </FloatingPanel>
