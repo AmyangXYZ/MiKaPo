@@ -14,6 +14,12 @@ const FPS = Number(params.get("fps") ?? 30)
 const WIDTH = Number(params.get("width") ?? 960)
 const START = Number(params.get("start") ?? 0)
 const SECONDS = Number(params.get("seconds") ?? 0)
+// The detector's own thresholds, so a recording can answer what changing them
+// would do rather than leaving it to argument.
+const PRESENCE = Number(params.get("presence") ?? 0.7)
+const DETECTION = Number(params.get("detection") ?? 0.7)
+const HANDS = Number(params.get("hands") ?? 0.95)
+const FACE = Number(params.get("face") ?? 0.4)
 
 const say = (msg) => {
   console.log(msg)
@@ -36,10 +42,10 @@ async function main() {
 
   const options = {
     baseOptions: { modelAssetPath: "/media/holistic_landmarker.task", delegate: "GPU" },
-    minPosePresenceConfidence: 0.7,
-    minPoseDetectionConfidence: 0.7,
-    minFaceDetectionConfidence: 0.4,
-    minHandLandmarksConfidence: 0.95,
+    minPosePresenceConfidence: PRESENCE,
+    minPoseDetectionConfidence: DETECTION,
+    minFaceDetectionConfidence: FACE,
+    minHandLandmarksConfidence: HANDS,
     runningMode: "VIDEO",
   }
   let landmarker
@@ -53,7 +59,7 @@ async function main() {
       baseOptions: { ...options.baseOptions, delegate: "CPU" },
     })
   }
-  say(`landmarker ready on ${delegate}`)
+  say(`landmarker ready on ${delegate} · presence ${PRESENCE} detection ${DETECTION} hands ${HANDS} face ${FACE}`)
 
   // Frames come from the server as images ffmpeg decoded, one per file.
   //
@@ -93,6 +99,7 @@ async function main() {
       fps: FPS,
       width: WIDTH,
       delegate,
+      thresholds: { presence: PRESENCE, detection: DETECTION, hands: HANDS, face: FACE },
       sourceSize: [manifest.width, manifest.height],
       frames,
     }),

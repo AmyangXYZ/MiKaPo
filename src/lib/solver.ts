@@ -320,6 +320,28 @@ const FADE_IN_MS = 250
 const FADE_OUT_MS = 500
 const HAND_WARMUP_MS = 1000
 const HAND_GRACE_MS = 400
+
+// Legs the camera never sees.
+//
+// Framed from the waist up, the detector places a knee and an ankle anyway and
+// says plainly that it cannot see them — around 0.2. A per-frame gate on that
+// number flickers, because the number hovers: the leg engages, disengages and
+// re-engages, and the crossfade chases it. What it needs is a state that
+// changes slowly, like the one hands already have, so a leg that is out of
+// shot simply stays at rest.
+const LEG_WARMUP_MS = 500
+const LEG_GRACE_MS = 500
+/** Which leg a bone belongs to, for that state. */
+const LEG_OF: Record<string, "左" | "右"> = {
+  左足: "左", 左ひざ: "左", 左足首: "左",
+  右足: "右", 右ひざ: "右", 右足首: "右",
+}
+/** The landmarks that say whether a leg is really in shot. The hip is nearly
+ *  always confident and says nothing about the rest of the leg. */
+const LEG_LANDMARKS: Record<"左" | "右", string[]> = {
+  左: ["left_knee", "left_ankle"],
+  右: ["right_knee", "right_ankle"],
+}
 /** How long a bone holds its last measurement before the fade to rest even
  *  begins. Detection drops a frame here and there — a limb crossing the body,
  *  a motion blur, a frame the model simply missed — and fading from the first
@@ -526,6 +548,11 @@ export class Solver {
     leftHand: { seen: 0, gone: 0, engaged: false },
     rightHand: { seen: 0, gone: 0, engaged: false },
   }
+  /** The same, for legs that leave the frame (see LEG_WARMUP_MS). */
+  private legEngagement = {
+    左: { seen: 0, gone: 0, engaged: true },
+    右: { seen: 0, gone: 0, engaged: true },
+  }
   /** Full measured chest rotation and its half, staged by the 上半身 solve for
    *  the 上半身2 def that runs right after it. */
   private chestHalf = Quat.identity()
@@ -650,6 +677,12 @@ export class Solver {
       h.seen = 0
       h.gone = 0
       h.engaged = false
+    }
+    for (const side of ["左", "右"] as const) {
+      const leg = this.legEngagement[side]
+      leg.seen = 0
+      leg.gone = 0
+      leg.engaged = true
     }
     for (const source of ["pose", "leftHand", "rightHand"] as const) {
       for (const f of this.zFilters[source]) f.reset()
@@ -1197,6 +1230,20 @@ export class Solver {
       if (d > 0) fadeDt = Math.min(d, 100)
     }
     this.fadePrevTs = timestampMs
+    for (const side of ["左", "右"] as const) {
+      const leg = this.legEngagement[side]
+      // A leg starts engaged: most footage shows one, and a body already
+      // standing in shot should not have to earn its legs back.
+      if (this.visibility("pose", LEG_LANDMARKS[side]) >= MIN_VISIBILITY) {
+        leg.seen += fadeDt
+        leg.gone = 0
+        if (leg.seen >= LEG_WARMUP_MS) leg.engaged = true
+      } else {
+        leg.gone += fadeDt
+        leg.seen = 0
+        if (leg.gone >= LEG_GRACE_MS) leg.engaged = false
+      }
+    }
     for (const side of ["leftHand", "rightHand"] as const) {
       const h = this.handEngagement[side]
       if (this.handConfidence(side) >= MIN_VISIBILITY) {
@@ -1237,6 +1284,10 @@ export class Solver {
       if (measured && def.kind !== "basis" && def.source !== "pose" && !this.handEngagement[def.source].engaged) {
         measured = false
       }
+      // And a leg the camera is not showing stays where it rests.
+      const legSide = LEG_OF[def.name]
+      if (measured && legSide && !this.legEngagement[legSide].engaged) measured = false
+
       const held = this.heldMeasured[def.name]
       if (measured) {
         if (sMeas.w < 0) sMeas.setXYZW(-sMeas.x, -sMeas.y, -sMeas.z, -sMeas.w)
@@ -1530,18 +1581,28 @@ export class Solver {
     return this.pose?.[PoseLandmarksTable[wristName]]?.visibility ?? 1
   }
 
+  /**
+   * How well the landmarks a bone reads are actually seen — the WORST of
+   * them, not their average.
+   *
+   * A bone is solved from the segment between two points, so it is only as
+   * sound as the point the detector is least sure of. Averaging lets a
+   * confident end carry a hopeless one: framed from the waist up, the hip sits
+   * at 0.62 and the knee at 0.23, whose mean clears a 0.35 gate — so the
+   * thigh was solved every frame from a knee the camera never saw, and the
+   * legs shook while the detector was saying plainly that it could not see
+   * them.
+   */
   private visibility(source: LandmarkSource, points: Point[]): number {
     if (source !== "pose") return this.handConfidence(source)
     if (!this.pose) return 1
-    let sum = 0
-    let n = 0
+    let worst = 1
     for (const p of points) {
       for (const name of typeof p === "string" ? [p] : p) {
-        sum += this.pose[PoseLandmarksTable[name]]?.visibility ?? 1
-        n++
+        worst = Math.min(worst, this.pose[PoseLandmarksTable[name]]?.visibility ?? 1)
       }
     }
-    return n > 0 ? sum / n : 1
+    return worst
   }
 
   /** Returns whether a measurement was written into `out`. */
