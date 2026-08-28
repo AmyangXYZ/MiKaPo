@@ -71,7 +71,15 @@ function DebugScene({ landmarks }: { landmarks: PoseWorkerResult | null }) {
   const currAtRef = useRef(0)
   const intervalRef = useRef(200)
   useEffect(() => {
-    if (!landmarks || landmarks === currRef.current) return
+    // Null means the source changed: the preview has nothing to show until the
+    // new one is detected, and holding the old skeleton beside a model that
+    // has moved on is worse than showing nothing.
+    if (!landmarks) {
+      prevRef.current = null
+      currRef.current = null
+      return
+    }
+    if (landmarks === currRef.current) return
     const now = performance.now()
     if (currRef.current) {
       const dt = now - currAtRef.current

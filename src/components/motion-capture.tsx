@@ -294,7 +294,10 @@ export const MotionCapture = ({
   const handleResult = useCallback((result: PoseWorkerResult, timestampMs: number) => {
     // Throttled React update — feeds only the debug skeleton preview.
     const now = performance.now()
-    if (now - lastDebugUpdateRef.current >= DEBUG_PREVIEW_INTERVAL_MS) {
+    // A still produces exactly one result: dropping it to the throttle leaves
+    // the preview showing the previous source for good, next to a model that
+    // has already moved.
+    if (inputModeRef.current === "image" || now - lastDebugUpdateRef.current >= DEBUG_PREVIEW_INTERVAL_MS) {
       lastDebugUpdateRef.current = now
       setLandmarks(result)
       // The status strip rides the same throttle: a readout that re-rendered
@@ -528,13 +531,27 @@ export const MotionCapture = ({
     else if (file.type.startsWith("image/")) loadImageFile(file)
   }
 
+  /** Everything that describes the previous source, dropped together: the
+   *  solver's history, the preview, the interpolation pair and the readouts.
+   *  Leaving any one of them behind is how the panel ends up describing a
+   *  source that is no longer playing. */
+  const clearCaptureState = () => {
+    solverRef.current.reset()
+    faceBlendshapeSolverRef.current.reset()
+    setLandmarks(null)
+    setTracking(false)
+    setCaptureHz(0)
+    displayPrevRef.current = null
+    displayCurrRef.current = null
+    lastMediaTsRef.current = -1
+  }
+
   const loadImageFile = (file: File) => {
     {
       userPickedMediaRef.current = true
       const url = URL.createObjectURL(file)
       resetModel?.()
-      solverRef.current.reset()
-      faceBlendshapeSolverRef.current.reset()
+      clearCaptureState()
       // Worker messages are FIFO — the mode switch lands before the next frame.
       workerRef.current?.postMessage({ type: "mode", running: "IMAGE" } satisfies PoseWorkerRequest)
       // ...and the landmarker forgets the previous still, so this one is solved
@@ -557,8 +574,7 @@ export const MotionCapture = ({
       // No model reset: the model holds its pose until the user plays the new
       // video, then transitions to its motion — a bind-pose snap in between
       // is exactly the jarring cut this avoids.
-      solverRef.current.reset()
-      faceBlendshapeSolverRef.current.reset()
+      clearCaptureState()
       if (lastMedia === "IMAGE") {
         workerRef.current?.postMessage({ type: "mode", running: "VIDEO" } satisfies PoseWorkerRequest)
         setCurrentImage("")
@@ -604,8 +620,7 @@ export const MotionCapture = ({
       try {
         stopCurrentInput()
         resetModel?.()
-        solverRef.current.reset()
-      faceBlendshapeSolverRef.current.reset()
+        clearCaptureState()
         setInputMode("camera")
         setIsStreamActive(true)
 
