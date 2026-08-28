@@ -154,6 +154,9 @@ const fingerBase = (side: "左" | "右", source: LandmarkSource, finger: string,
 })
 
 const BONE_DEFS: BoneDef[] = [
+  // The pelvis first: the chest is expressed against it, so it has to exist
+  // before the chest is asked what it is doing relative to it.
+  { kind: "basis", name: "下半身", parent: null },
   { kind: "basis", name: "上半身", parent: null },
   // The measured chest rotation is split evenly across 上半身∘上半身2, so the
   // spine curves instead of hinging at one joint. Everything that sits under
@@ -169,7 +172,6 @@ const BONE_DEFS: BoneDef[] = [
     to: ["left_ear", "right_ear"],
   },
   { kind: "basis", name: "頭", parent: "首" },
-  { kind: "basis", name: "下半身", parent: null },
 
   { kind: "direction", name: "左足", parent: "下半身", source: "pose", from: "left_hip", to: "left_knee", witness: "左ひざ", rollFallback: "左足首" },
   { kind: "direction", name: "右足", parent: "下半身", source: "pose", from: "right_hip", to: "right_knee", witness: "右ひざ", rollFallback: "右足首" },
@@ -634,6 +636,10 @@ export class Solver {
    *  the 上半身2 def that runs right after it. */
   private chestHalf = Quat.identity()
   private chestHalfSeen = false
+  /** The pelvis as measured, before its own tuck — what the chest is
+   *  expressed against. */
+  private pelvisBasis = Quat.identity()
+  private pelvisMeasured = false
   private chestMeasuredFrame = false
   /** Whether the calibrated model has an 上半身2 to take its half; without one
    *  the whole chest rotation stays on 上半身. */
@@ -747,6 +753,7 @@ export class Solver {
     this.rigidSeen = 0
     this.chestMeasuredFrame = false
     this.chestHalfSeen = false
+    this.pelvisMeasured = false
     this.shoulderTilt = 0
     for (const key of Object.keys(this.rollFilters)) this.rollFilters[key].reset()
     for (const key of Object.keys(this.signalFilters)) this.signalFilters[key].reset()
@@ -1963,6 +1970,16 @@ export class Solver {
         if (out.w < 0) out.setXYZW(-out.x, -out.y, -out.z, -out.w)
         this.chestMeasuredFrame = true
         if (this.hasUpperBody2) {
+          // What the chest does RELATIVE TO THE HIPS is what the spine is for.
+          // Splitting the chest's whole rotation instead hands the waist every
+          // degree of it — a body turned 37° against its own hips wrung at one
+          // joint, which is what the mesh shows.
+          if (this.pelvisMeasured) {
+            Quat.conjugateInto(this.pelvisBasis, sQ)
+            Quat.multiplyInto(sQ, out, sQ2)
+            out.set(sQ2)
+            if (out.w < 0) out.setXYZW(-out.x, -out.y, -out.z, -out.w)
+          }
           // Split the chest rotation evenly across 上半身∘上半身2 so the spine
           // curves: R^½ ∘ R^½ = R, and normalize(I + R) is one of the two
           // square roots.
@@ -1987,7 +2004,11 @@ export class Solver {
           }
           this.chestHalf.set(chosen)
           this.chestHalfSeen = true
-          out.set(this.chestHalf)
+          // 上半身 wears the hips plus half the twist; 上半身2 wears the other
+          // half. Composed, that is the chest exactly where it was measured,
+          // with the waist asked for half of what it used to be.
+          if (this.pelvisMeasured) Quat.multiplyInto(this.pelvisBasis, this.chestHalf, out)
+          else out.set(this.chestHalf)
         }
         return true
       }
@@ -2009,6 +2030,11 @@ export class Solver {
         Vec3.subtractInto(sA, sB, sC).normalizeInPlace()
         this.filterDirection("hipLine", sC)
         Solver.basisFromYAndX(sDir, sC, out)
+        // Kept before the tuck: the tuck is a pitch this pelvis carries on its
+        // own, and the chest should be measured against where the hips FACE,
+        // not against how far they are tipped under.
+        this.pelvisBasis.set(out)
+        this.pelvisMeasured = true
         this.applyPelvisTuck(out)
         return true
       }
