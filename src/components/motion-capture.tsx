@@ -1075,14 +1075,11 @@ const MotionCaptureImpl = ({
           </div>
         )}
 
-        {converting && (
-          <div className="absolute inset-x-0 bottom-0 h-0.5 bg-white/10">
-            <div className="h-full bg-blue-400 transition-[width]" style={{ width: `${Math.round(progress * 100)}%` }} />
-          </div>
-        )}
       </div>
 
-      {/* Transport — video only; a webcam has no timeline and a still has no time. */}
+      {/* Transport — video only; a webcam has no timeline and a still has no time.
+          A conversion steps this same playhead, so the scrubber is the progress
+          bar and there is no second one to keep in agreement with it. */}
       {inputMode === "video" && videoSrc && (
         <div className="flex shrink-0 items-center gap-2 border-t border-line px-2 py-1.5">
           <button
