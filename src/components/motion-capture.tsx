@@ -109,12 +109,16 @@ export const MotionCapture = ({
   const redetectImageRef = useRef(false)
   const [inputMode, setInputMode] = useState<InputMode>("video")
   const [isStreamActive, setIsStreamActive] = useState(false)
-  // The ?cors suffix skips browser-cache entries saved before these loads went
-  // through CORS — the demo assets carry a one-year immutable cache header, and
-  // a cached response without access-control-allow-origin fails the CORS check
-  // for as long as it lives.
-  const [currentImage, setCurrentImage] = useState<string>(`${ASSETS}/4.png?cors`)
-  const [videoSrc, setVideoSrc] = useState<string>(`${ASSETS}/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4?cors`)
+  // No ?cors suffix. It was once a browser-cache buster, and became the
+  // problem: the edge cached THAT url's response from the old domain, without
+  // an access-control-allow-origin the new one accepts, and served the stale
+  // copy under a one-year immutable header. The bare url varies on Origin and
+  // answers each domain correctly.
+  //
+  // Images have no default. A demo photo is a picture of someone else's pose —
+  // the mode is worth entering only with your own.
+  const [currentImage, setCurrentImage] = useState<string>("")
+  const [videoSrc, setVideoSrc] = useState<string>(`${ASSETS}/Stellar (스텔라) - Vibrato (떨려요)- DANCE COVER.mp4`)
   const [lastMedia, setLastMedia] = useState<"IMAGE" | "VIDEO">("VIDEO")
   // Set the moment the user picks any input this session — a slow IndexedDB
   // restore must never clobber a fresher choice.
@@ -869,7 +873,7 @@ export const MotionCapture = ({
 
       {/* The source picture. */}
       <div className="relative min-h-0 flex-1 bg-black">
-        {inputMode === "image" && (
+        {inputMode === "image" && currentImage && (
           <div className="flex h-full w-full items-center justify-center">
             <Image
               src={currentImage}
@@ -911,7 +915,7 @@ export const MotionCapture = ({
           />
         )}
 
-        {!inputMode && (
+        {(!inputMode || (inputMode === "image" && !currentImage)) && (
           <div className="flex h-full w-full items-center justify-center">
             <Camera className="size-8 text-muted-foreground" strokeWidth={1.5} />
           </div>
