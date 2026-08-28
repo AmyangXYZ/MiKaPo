@@ -429,6 +429,25 @@ const VISIBILITY_EXIT = 0.25
  *  flipped. */
 const HEAD_MAX_STEP = (100 * Math.PI) / 180
 
+// ---------------------------------------------------------------------------
+// One body, facing one way
+//
+// The trunk is solved from the hips, the chest from the shoulders and the head
+// from ears and eyes, and nothing has ever required the three to agree. When a
+// detector reads one of them backwards — which it does, confidently, the
+// moment a body turns away — the result is a head facing behind a chest that
+// faces front, which no neck permits and no viewer forgives.
+//
+// A neck turns something like eighty degrees and a waist rather less. These
+// ceilings sit well past either, so an honest pose never meets them: what they
+// catch is a joint being asked for a rotation a body cannot make.
+// ---------------------------------------------------------------------------
+
+/** How far the head may be turned from the chest it sits on. */
+const NECK_MAX = (100 * Math.PI) / 180
+/** How far the chest may be turned from the hips it sits on. */
+const WAIST_MAX = (60 * Math.PI) / 180
+
 // Roll stabilizing. Roll — rotation about the bone's own axis — is the
 // noisiest channel the witness solve produces: near a straight limb the
 // perpendicular lever is short, so centimetre landmark noise becomes several
@@ -1242,6 +1261,41 @@ export class Solver {
     }
   }
 
+  /**
+   * Hold a rotation to what a joint can do, by easing it back toward rest
+   * until it fits rather than cutting it off — a clamp that snaps would trade
+   * one visible fault for another.
+   */
+  private static limitRotation(q: Quat, max: number): boolean {
+    const angle = 2 * Math.acos(Math.min(1, Math.abs(q.w)))
+    if (angle <= max || angle < 1e-6) return false
+    const t = max / angle
+    const sign = q.w < 0 ? -1 : 1
+    q.setXYZW(q.x * t * sign, q.y * t * sign, q.z * t * sign, sign * q.w * t + (1 - t))
+    q.normalize()
+    return true
+  }
+
+  /**
+   * Keep the head on the body it belongs to.
+   *
+   * 首 and 頭 together are the head's rotation against the chest, and that is
+   * the quantity a neck limits — neither bone alone. Whatever the pair asks
+   * for beyond what a neck permits is taken back out of 頭, so the head ends
+   * up as far round as it can go and no further, and 首 keeps the share of the
+   * turn it was given.
+   */
+  private limitNeck(): void {
+    const neck = this.locals["首"]
+    const head = this.locals["頭"]
+    if (!neck || !head) return
+    Quat.multiplyInto(neck, head, sQ2)
+    if (!Solver.limitRotation(sQ2, NECK_MAX)) return
+    // head = 首⁻¹ ∘ (what the neck is allowed to be)
+    Quat.conjugateInto(neck, sQ)
+    Quat.multiplyInto(sQ, sQ2, head)
+  }
+
   /** Rest world position of a bone, as captured by calibrate(). */
   private refsPos(name: string): XYZ | null {
     return this.restPos[name] ?? null
@@ -1494,6 +1548,7 @@ export class Solver {
       else world.set(local)
     }
 
+    this.limitNeck()
     // Shoulder rhythm rewrites 肩 and 腕 locals, so the world chain is rebuilt
     // before anything downstream reads it.
     this.applyShoulderRhythm()
@@ -2012,6 +2067,7 @@ export class Solver {
             Quat.multiplyInto(sQ, out, sQ2)
             out.set(sQ2)
             if (out.w < 0) out.setXYZW(-out.x, -out.y, -out.z, -out.w)
+            Solver.limitRotation(out, WAIST_MAX)
           }
           // Split the chest rotation evenly across 上半身∘上半身2 so the spine
           // curves: R^½ ∘ R^½ = R, and normalize(I + R) is one of the two
