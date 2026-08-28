@@ -176,6 +176,8 @@ const MotionCaptureImpl = ({
   // machine happens to be.
   const [converting, setConverting] = useState(false)
   const [progress, setProgress] = useState(0)
+  /** Milliseconds left in the conversion, from the rate it has managed so far. */
+  const [etaMs, setEtaMs] = useState(0)
   const [exported, setExported] = useState<string | null>(null)
   const convertingRef = useRef(false)
   const cancelRef = useRef(false)
@@ -849,6 +851,7 @@ const MotionCaptureImpl = ({
     const takeMorphs: (FaceMorphWeights | null)[] = []
 
     let lastPaint = 0
+    const startedAt = performance.now()
     try {
       let bitmap = await grab(0)
       for (let t = 0; t < video.duration && !cancelRef.current; t += step) {
@@ -883,7 +886,12 @@ const MotionCaptureImpl = ({
         const now = performance.now()
         if (now - lastPaint > 100) {
           lastPaint = now
-          setProgress(t / video.duration)
+          const done = t / video.duration
+          setProgress(done)
+          // Averaged over the whole run rather than the last frame: seeks and
+          // detections vary enough that an instantaneous estimate would count
+          // down unevenly, which is worse than counting down slightly wrong.
+          setEtaMs(done > 0.02 ? ((now - startedAt) * (1 - done)) / done : 0)
         }
       }
     } finally {
@@ -891,6 +899,7 @@ const MotionCaptureImpl = ({
       convertingRef.current = false
       setConverting(false)
       setProgress(0)
+      setEtaMs(0)
       // The take's last frame stays on screen; without this the display loop
       // would snap back to the pair it held before the conversion started.
       displayPrevRef.current = null
@@ -1222,8 +1231,9 @@ const MotionCaptureImpl = ({
         <span className="ml-auto shrink-0 tabular-nums">
           {converting ? (
             // Live rate means nothing here: the take is stepped frame by frame
-            // at VMD's own 30 fps and takes exactly as long as it takes.
-            `${Math.round(progress * 100)}% · 30 Hz`
+            // at VMD's own 30 fps and takes exactly as long as it takes — so
+            // how long that is belongs on screen.
+            `${etaMs > 0 ? `${formatTime(etaMs / 1000)} left · ` : ""}${Math.round(progress * 100)}% · 30 Hz`
           ) : (
             <>
               {captureHz > 0 ? `${captureHz} Hz` : "— Hz"} · {inferenceMs > 0 ? `${inferenceMs} ms` : "— ms"}
