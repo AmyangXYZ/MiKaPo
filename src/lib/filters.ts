@@ -277,9 +277,10 @@ export class Vec3OneEuroFilter {
  * Per bone, hemisphere-aligned, in place.
  */
 export function smoothTakeZeroPhase(
-  frames: { time: number; boneStates: { name: string; rotation: Quat }[] }[],
+  frames: { time: number; boneStates: { name: string; rotation: Quat; translation?: Vec3 }[] }[],
   opts?: { keepFastAbove?: number; fullyKeepAbove?: number },
 ): void {
+  smoothTakeTranslations(frames)
   if (frames.length < 5) return
   // Quadratic SG, 7-wide (±3 frames ≈ ±0.1 s at 30 fps).
   const K = [-2, 3, 6, 7, 6, 3, -2]
@@ -343,6 +344,47 @@ export function smoothTakeZeroPhase(
         aligned.normalize()
       }
       seq[i].q.set(aligned)
+    }
+  }
+}
+
+/**
+ * The same zero-phase fit over the translations a take carries — センター's
+ * height, which grounding recomputes per frame from whichever foot is lower.
+ * A support handover is a step in that series, and a step is exactly what a
+ * quadratic fit rounds off without moving in time.
+ */
+function smoothTakeTranslations(
+  frames: { time: number; boneStates: { name: string; rotation: Quat; translation?: Vec3 }[] }[],
+): void {
+  if (frames.length < 7) return
+  const K = [-2, 3, 6, 7, 6, 3, -2]
+  const HALF = 3
+  const byBone = new Map<string, Vec3[]>()
+  for (const f of frames) {
+    for (const bs of f.boneStates) {
+      if (!bs.translation) continue
+      let seq = byBone.get(bs.name)
+      if (!seq) byBone.set(bs.name, (seq = []))
+      seq.push(bs.translation)
+    }
+  }
+  for (const seq of byBone.values()) {
+    if (seq.length < K.length) continue
+    const src = seq.map((v) => ({ x: v.x, y: v.y, z: v.z }))
+    for (let i = 0; i < seq.length; i++) {
+      let x = 0, y = 0, z = 0, wsum = 0
+      for (let k = -HALF; k <= HALF; k++) {
+        const j = i + k
+        if (j < 0 || j >= src.length) continue
+        const c = K[k + HALF]
+        x += src[j].x * c
+        y += src[j].y * c
+        z += src[j].z * c
+        wsum += c
+      }
+      if (wsum === 0) continue
+      seq[i].setXYZ(x / wsum, y / wsum, z / wsum)
     }
   }
 }

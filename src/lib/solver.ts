@@ -556,6 +556,7 @@ export class Solver {
   /** Anatomical finger clamps; disable to reproduce unclamped shortest-arc output. */
   bendClampEnabled = true
 
+
   constructor() {
     this.outputs = BONE_DEFS.map((def) => {
       const state: BoneState = { name: def.name, rotation: Quat.identity() }
