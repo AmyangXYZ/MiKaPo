@@ -226,6 +226,21 @@ const GROUNDING_BONES = ["センター"] as const
  *  is the joint itself, which says nothing about clavicle elevation. */
 const SHOULDER_BONES = ["左肩", "右肩"] as const
 
+/**
+ * The twist bones an MMD arm is built around.
+ *
+ * A rig carries 腕捩 between 腕 and ひじ, with three followers taking a
+ * quarter, a half and three quarters of it, so a forearm rotating carries the
+ * sleeve around with it instead of pinching where the twist lands. Putting
+ * that rotation on 腕 itself — which is what happens when nothing writes 腕捩
+ * — twists the whole upper arm from the shoulder, and the mesh collapses at
+ * exactly the joint the twist bones exist to protect.
+ *
+ * The rotation is not changed, only moved: 腕 keeps its swing, 腕捩 takes the
+ * turn about the arm's own axis, and the two compose to what was solved.
+ */
+const ARM_TWIST_BONES = ["左腕捩", "右腕捩"] as const
+
 // Scratch for the clearance pass — it runs per arm, per frame.
 const _clearA = Quat.identity()
 const _clearB = Quat.identity()
@@ -464,6 +479,7 @@ export const SOLVER_REST_BONES: readonly string[] = [
   "上半身", "上半身2", "下半身",
   "センター",
   "左腕", "右腕", "左ひじ", "右ひじ", "左手首", "右手首",
+  "左腕捩", "右腕捩",
   "左中指１", "右中指１",
   "左親指１", "左親指２", "右親指１", "右親指２",
   "左人指１", "左人指２", "右人指１", "右人指２",
@@ -621,6 +637,8 @@ export class Solver {
   /** Whether the calibrated model has an 上半身2 to take its half; without one
    *  the whole chest rotation stays on 上半身. */
   private hasUpperBody2 = true
+  /** Whether the loaded model carries 腕捩 (see ARM_TWIST_BONES). */
+  private hasArmTwist = false
   /** Shoulder-line tilt (radians, + = left shoulder up), for the 肩 share. */
   private shoulderTilt = 0
   /** Extra-calm scalar filters on the roll channel (see ROLL_STABILIZED). */
@@ -695,9 +713,10 @@ export class Solver {
       this.filteredWorlds[def.name] = Quat.identity()
       return state
     })
-    // The clavicles: no landmark pair drives them, they take a share of the
-    // arm's own rotation (see applyShoulderRhythm).
-    for (const name of SHOULDER_BONES) {
+    // The clavicles and the arm-twist bones: no landmark pair drives either.
+    // The clavicle takes a share of the arm's rotation (applyShoulderRhythm);
+    // the twist bone takes the part of it that turns about the arm's own axis.
+    for (const name of [...SHOULDER_BONES, ...ARM_TWIST_BONES]) {
       const state: BoneState = { name, rotation: Quat.identity() }
       this.outputByName[name] = state
       this.outputs.push(state)
@@ -1178,6 +1197,29 @@ export class Solver {
     if (len > 1e-6) dir.setXYZ(dir.x / len, dir.y / len, dir.z / len)
   }
 
+  /**
+   * Move the arm's axial turn onto its twist bone.
+   *
+   * Runs on the finished output, after filtering and after grounding has read
+   * the chain, so nothing upstream sees a different arm than it solved. What
+   * the engine composes — 腕 then 腕捩 — is exactly the rotation that went in.
+   */
+  private distributeArmTwist(): void {
+    if (!this.hasArmTwist) return
+    for (const side of ["左", "右"] as const) {
+      const arm = this.outputByName[side + "腕"]?.rotation
+      const twistBone = this.outputByName[side + "腕捩"]?.rotation
+      if (!arm || !twistBone) continue
+      const axis = this.getRef(side + "腕")
+      Quat.twistAroundAxisInto(arm, axis, sQ)
+      twistBone.set(sQ)
+      // swing = arm ∘ twist⁻¹, so that swing ∘ twist is the arm again.
+      sQ.conjugate()
+      Quat.multiplyInto(arm, sQ, sQ2)
+      arm.set(sQ2)
+    }
+  }
+
   /** Rest world position of a bone, as captured by calibrate(). */
   private refsPos(name: string): XYZ | null {
     return this.restPos[name] ?? null
@@ -1211,6 +1253,8 @@ export class Solver {
 
     this.restPos = restWorldPos
     this.hasUpperBody2 = !!restWorldPos["上半身2"]
+    // Without these bones the twist has nowhere to go and stays on the arm.
+    this.hasArmTwist = !!restWorldPos["左腕捩"] && !!restWorldPos["右腕捩"]
 
     // Spine length for the projective depth rebuild: shoulder-line centre to
     // hip-line centre, the same segment the 2D measurement spans (the arm and
@@ -1484,6 +1528,7 @@ export class Solver {
       else world.set(local)
     }
     this.solveGrounding(timestampMs, unfiltered)
+    this.distributeArmTwist()
     this.signalFilterEnabled = wasSignalFiltering
 
     return this.outputs
