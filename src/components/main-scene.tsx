@@ -518,7 +518,7 @@ export default function MainScene() {
 
           <div className={cn(PILL, "pointer-events-auto flex h-10 items-center gap-1 px-1.5")}>
             <Button variant="ghost" size="icon" asChild className={ICON_BUTTON}>
-              <Link href="https://github.com/AmyangXYZ/MiKaPo" target="_blank" aria-label="GitHub">
+              <Link href="https://github.com/AmyangXYZ/reze-mipo" target="_blank" aria-label="GitHub">
                 <Github className="size-4" strokeWidth={1.75} />
               </Link>
             </Button>
