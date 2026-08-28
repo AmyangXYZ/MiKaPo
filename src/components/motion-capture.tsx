@@ -867,6 +867,9 @@ const MotionCaptureImpl = ({
           pose: result.poseWorldLandmarks[0] ?? null,
           leftHand: result.leftHandWorldLandmarks[0] ?? null,
           rightHand: result.rightHandWorldLandmarks[0] ?? null,
+          // No face means the subject turned their back, which the pose
+          // stream alone cannot tell you.
+          faceSeen: Boolean(result.faceLandmarks?.[0]?.length),
         })
         // Face is solved as it arrives: morph weights are scalars with their
         // own filtering, and keeping 468 mesh points per frame to redo later

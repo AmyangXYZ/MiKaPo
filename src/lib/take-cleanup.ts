@@ -20,6 +20,9 @@ export interface TakeFrame {
   pose: Landmark[] | null
   leftHand: Landmark[] | null
   rightHand: Landmark[] | null
+  /** Whether the face detector found a face on this frame — the one honest
+   *  signal in a monocular stream for which way the body is facing. */
+  faceSeen?: boolean
 }
 
 type Channel = "x" | "y" | "z"
@@ -29,7 +32,9 @@ const CHANNELS: Channel[] = ["x", "y", "z"]
 const SG7 = [-2, 3, 6, 7, 6, 3, -2]
 const SG7_HALF = 3
 
-function seriesOf(frames: TakeFrame[], key: keyof TakeFrame): (Landmark[] | null)[] {
+type LandmarkSet = "pose" | "leftHand" | "rightHand"
+
+function seriesOf(frames: TakeFrame[], key: LandmarkSet): (Landmark[] | null)[] {
   return frames.map((f) => f[key])
 }
 
@@ -260,16 +265,116 @@ function bridgeDropouts(sets: (Landmark[] | null)[]): number {
   return bridged
 }
 
+
+// ─── Facing ────────────────────────────────────────────────────────────────
+//
+// A single camera cannot see which way a body faces. Depth is inferred, and
+// the inference has two answers that fit the same picture equally well: a
+// person turned a quarter to the left, and a person turned a quarter to the
+// right. Pose models resolve it from training bias, which means a subject
+// turning through profile is usually reported as turning back the way they
+// came. A full spin plays as a half spin that reconsiders — smoothly, with no
+// discontinuity anywhere for a continuity check to catch.
+//
+// The face is the tiebreaker. A face detector finds a face when someone is
+// facing the camera and finds nothing when they turn their back, which is
+// exactly the fact the pose stream is missing. Where the face is gone and the
+// body is side-on — the moment the two readings agree, so switching between
+// them is seamless — the pose is turned to face away.
+//
+// Rotating a bilaterally symmetric body 180° about its own vertical is the
+// same as mirroring its depth and exchanging its sides, and that is how it is
+// applied here.
+
+/** Frames without a face before the subject is taken to have turned away. */
+const AWAY_RUN = 4
+/** How side-on the body must be for the two readings to agree, as a fraction
+ *  of the shoulder line's own length. */
+const PROFILE_RATIO = 0.6
+
+/** Turn one frame's pose to face the other way, in place. */
+function faceAway(f: TakeFrame): void {
+  const pose = f.pose
+  if (!pose) return
+  let cz = 0
+  for (const p of pose) cz += p.z
+  cz /= pose.length || 1
+  for (const p of pose) p.z = 2 * cz - p.z
+  for (const hand of [f.leftHand, f.rightHand]) {
+    if (!hand) continue
+    let hz = 0
+    for (const p of hand) hz += p.z
+    hz /= hand.length || 1
+    for (const p of hand) p.z = 2 * hz - p.z
+  }
+  for (const [a, b] of MIRRORED) {
+    if (a < pose.length && b < pose.length) {
+      const t = pose[a]
+      pose[a] = pose[b]
+      pose[b] = t
+    }
+  }
+  const hand = f.leftHand
+  f.leftHand = f.rightHand
+  f.rightHand = hand
+}
+
+/** How side-on the body is: 0 square to the camera, 1 fully in profile. */
+function profileness(pose: Landmark[]): number {
+  const l = pose[11]
+  const r = pose[12]
+  if (!l || !r) return 0
+  const dx = Math.abs(l.x - r.x)
+  const dz = Math.abs(l.z - r.z)
+  const span = Math.hypot(dx, dz)
+  return span > 1e-6 ? dz / span : 0
+}
+
 /**
- * Clean a whole take in place: sides made consistent, brief dropouts bridged,
+ * Carry a turn through the half of it the camera cannot see.
+ *
+ * Only spans the face detector calls empty are touched, and only when the body
+ * is side-on where they begin and end — a face lost to motion blur while the
+ * subject is square to the camera changes nothing.
+ */
+export function continueTurns(frames: TakeFrame[]): number {
+  let turned = 0
+  let i = 0
+  while (i < frames.length) {
+    if (frames[i].faceSeen !== false || !frames[i].pose) {
+      i++
+      continue
+    }
+    const start = i
+    while (i < frames.length && frames[i].faceSeen === false) i++
+    const end = i // exclusive
+    if (end - start < AWAY_RUN) continue
+    const before = frames[start - 1]?.pose ?? frames[start].pose
+    const after = frames[end]?.pose ?? frames[end - 1].pose
+    if (!before || !after) continue
+    // Both ends side-on: the two readings agree there, so the switch is seamless.
+    if (profileness(before) < PROFILE_RATIO || profileness(after) < PROFILE_RATIO) continue
+    for (let k = start; k < end; k++) faceAway(frames[k])
+    turned += end - start
+  }
+  return turned
+}
+
+/**
+ * Clean a whole take in place: turns carried through, sides made consistent,
+ * brief dropouts bridged,
  * spikes removed, then smoothed without phase shift.
  *
  * A frame the detector missed entirely stays missing: with nothing of the body
  * in it, there is no gap to bridge, and the solver's crossfades know what to
  * do with an absence.
  */
-export function cleanTake(frames: TakeFrame[], opts?: { zGain?: number }): { sideRepairs: number; bridged: number } {
+export function cleanTake(
+  frames: TakeFrame[],
+  opts?: { zGain?: number },
+): { sideRepairs: number; bridged: number; turned: number } {
   const zGain = opts?.zGain ?? 1
+  const turned = continueTurns(frames)
   const sideRepairs = stabilizeHandedness(frames)
   let bridged = 0
   for (const key of ["pose", "leftHand", "rightHand"] as const) {
@@ -278,5 +383,5 @@ export function cleanTake(frames: TakeFrame[], opts?: { zGain?: number }): { sid
     medianOfThree(sets)
     savitzkyGolay(sets, zGain)
   }
-  return { sideRepairs, bridged }
+  return { sideRepairs, bridged, turned }
 }
