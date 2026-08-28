@@ -1,4 +1,5 @@
 import { Landmark } from "@mediapipe/tasks-vision"
+import { FacingTracker, MIRRORED, mirrorFrame } from "./facing"
 
 /**
  * Landmark cleanup for a finished take.
@@ -127,17 +128,6 @@ function savitzkyGolay(sets: (Landmark[] | null)[], zGain: number): void {
 // Each frame is taken as it comes or with its sides exchanged, whichever
 // continues the previous frame — a decision that costs nothing when the labels
 // were right, because then the unswapped reading is always the closer one.
-
-/** Index pairs that exchange when a pose is read from the wrong side. */
-const MIRRORED: [number, number][] = [
-  [1, 4], [2, 5], [3, 6], // eyes
-  [7, 8], // ears
-  [9, 10], // mouth
-  [11, 12], [13, 14], [15, 16], // shoulders, elbows, wrists
-  [17, 18], [19, 20], [21, 22], // pinky, index, thumb
-  [23, 24], [25, 26], [27, 28], // hips, knees, ankles
-  [29, 30], [31, 32], // heels, foot indices
-]
 
 /** Bearing of the shoulder line in the ground plane. */
 function shoulderYaw(pose: Landmark[], swapped: boolean): number {
@@ -286,76 +276,24 @@ function bridgeDropouts(sets: (Landmark[] | null)[]): number {
 // same as mirroring its depth and exchanging its sides, and that is how it is
 // applied here.
 
-/** Frames without a face before the subject is taken to have turned away. */
-const AWAY_RUN = 4
-/** How side-on the body must be for the two readings to agree, as a fraction
- *  of the shoulder line's own length. */
-const PROFILE_RATIO = 0.6
-
-/** Turn one frame's pose to face the other way, in place. */
-function faceAway(f: TakeFrame): void {
-  const pose = f.pose
-  if (!pose) return
-  let cz = 0
-  for (const p of pose) cz += p.z
-  cz /= pose.length || 1
-  for (const p of pose) p.z = 2 * cz - p.z
-  for (const hand of [f.leftHand, f.rightHand]) {
-    if (!hand) continue
-    let hz = 0
-    for (const p of hand) hz += p.z
-    hz /= hand.length || 1
-    for (const p of hand) p.z = 2 * hz - p.z
-  }
-  for (const [a, b] of MIRRORED) {
-    if (a < pose.length && b < pose.length) {
-      const t = pose[a]
-      pose[a] = pose[b]
-      pose[b] = t
-    }
-  }
-  const hand = f.leftHand
-  f.leftHand = f.rightHand
-  f.rightHand = hand
-}
-
-/** How side-on the body is: 0 square to the camera, 1 fully in profile. */
-function profileness(pose: Landmark[]): number {
-  const l = pose[11]
-  const r = pose[12]
-  if (!l || !r) return 0
-  const dx = Math.abs(l.x - r.x)
-  const dz = Math.abs(l.z - r.z)
-  const span = Math.hypot(dx, dz)
-  return span > 1e-6 ? dz / span : 0
-}
-
 /**
  * Carry a turn through the half of it the camera cannot see.
  *
- * Only spans the face detector calls empty are touched, and only when the body
- * is side-on where they begin and end — a face lost to motion blur while the
- * subject is square to the camera changes nothing.
+ * The same tracker the live path runs, over a take that is already recorded:
+ * the decision is per frame either way, and the reasoning does not improve by
+ * knowing the ending. It resolves both halves of the problem — a detector that
+ * reports a spin as walking up to profile and back down, and a detector that
+ * alternates between the two readings while the subject's back is turned.
  */
 export function continueTurns(frames: TakeFrame[]): number {
+  const tracker = new FacingTracker()
   let turned = 0
-  let i = 0
-  while (i < frames.length) {
-    if (frames[i].faceSeen !== false || !frames[i].pose) {
-      i++
-      continue
+  for (const f of frames) {
+    if (!f.pose) continue
+    if (tracker.update(f.pose, f.faceSeen !== false)) {
+      mirrorFrame(f)
+      turned++
     }
-    const start = i
-    while (i < frames.length && frames[i].faceSeen === false) i++
-    const end = i // exclusive
-    if (end - start < AWAY_RUN) continue
-    const before = frames[start - 1]?.pose ?? frames[start].pose
-    const after = frames[end]?.pose ?? frames[end - 1].pose
-    if (!before || !after) continue
-    // Both ends side-on: the two readings agree there, so the switch is seamless.
-    if (profileness(before) < PROFILE_RATIO || profileness(after) < PROFILE_RATIO) continue
-    for (let k = start; k < end; k++) faceAway(frames[k])
-    turned += end - start
   }
   return turned
 }
@@ -374,8 +312,12 @@ export function cleanTake(
   opts?: { zGain?: number },
 ): { sideRepairs: number; bridged: number; turned: number } {
   const zGain = opts?.zGain ?? 1
-  const turned = continueTurns(frames)
+  // Sides first, facing second. A detector that merely exchanges left and
+  // right leaves a half-turn jump, and turning the body around is the wrong
+  // repair for it — fixing the labels first leaves the facing pass looking at
+  // an honest turn.
   const sideRepairs = stabilizeHandedness(frames)
+  const turned = continueTurns(frames)
   let bridged = 0
   for (const key of ["pose", "leftHand", "rightHand"] as const) {
     const sets = seriesOf(frames, key)

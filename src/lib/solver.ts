@@ -1093,28 +1093,21 @@ export class Solver {
    */
   solve(landmarks: SolverInput, timestampMs: number = performance.now(), unfiltered = false): BoneState[] {
     const filterZ = this.zFilterEnabled && !unfiltered
+    // Optional chaining throughout: a set can be present, absent, or present
+    // and empty, and the solver is not the place to find that out the hard way.
     this.pose = this.intake(
-      landmarks.poseWorldLandmarks.length > 0 && landmarks.poseWorldLandmarks[0].length === 33
-        ? landmarks.poseWorldLandmarks[0]
-        : null,
+      landmarks.poseWorldLandmarks?.[0]?.length === 33 ? landmarks.poseWorldLandmarks[0] : null,
       "pose", this.poseBuf, timestampMs, filterZ,
     )
     this.leftHand = this.intake(
-      landmarks.leftHandWorldLandmarks.length > 0 && landmarks.leftHandWorldLandmarks[0].length === 21
-        ? landmarks.leftHandWorldLandmarks[0]
-        : null,
+      landmarks.leftHandWorldLandmarks?.[0]?.length === 21 ? landmarks.leftHandWorldLandmarks[0] : null,
       "leftHand", this.leftHandBuf, timestampMs, filterZ,
     )
     this.rightHand = this.intake(
-      landmarks.rightHandWorldLandmarks.length > 0 && landmarks.rightHandWorldLandmarks[0].length === 21
-        ? landmarks.rightHandWorldLandmarks[0]
-        : null,
+      landmarks.rightHandWorldLandmarks?.[0]?.length === 21 ? landmarks.rightHandWorldLandmarks[0] : null,
       "rightHand", this.rightHandBuf, timestampMs, filterZ,
     )
-    this.pose2d =
-      landmarks.poseLandmarks && landmarks.poseLandmarks.length > 0 && landmarks.poseLandmarks[0].length === 33
-        ? landmarks.poseLandmarks[0]
-        : null
+    this.pose2d = landmarks.poseLandmarks?.[0]?.length === 33 ? landmarks.poseLandmarks[0] : null
     if (landmarks.imageAspect) this.imageAspect = landmarks.imageAspect
 
     // Crossfade clock (media time, so conversions pace identically to live).
