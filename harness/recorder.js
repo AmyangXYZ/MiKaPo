@@ -6,7 +6,7 @@
 // landmarks back. Nothing here solves anything — solving is what the replay
 // does, over and over, on the recording this leaves behind.
 
-import { FilesetResolver, HolisticLandmarker } from "@mediapipe/tasks-vision"
+import { FilesetResolver, HolisticLandmarker, PoseLandmarker } from "@mediapipe/tasks-vision"
 
 const params = new URLSearchParams(location.search)
 const VIDEO = params.get("video") ?? "flash.mp4"
@@ -20,6 +20,10 @@ const PRESENCE = Number(params.get("presence") ?? 0.7)
 const DETECTION = Number(params.get("detection") ?? 0.7)
 const HANDS = Number(params.get("hands") ?? 0.95)
 const FACE = Number(params.get("face") ?? 0.4)
+// "holistic" is the bundled graph, whose pose model cannot be chosen. "full"
+// and "heavy" run the standalone PoseLandmarker instead, which is the choice
+// XR Animator exposes and the reason to find out whether it matters.
+const MODEL = params.get("model") ?? "holistic"
 
 const say = (msg) => {
   console.log(msg)
@@ -48,18 +52,35 @@ async function main() {
     minHandLandmarksConfidence: HANDS,
     runningMode: "VIDEO",
   }
+  const poseOptions = {
+    baseOptions: { modelAssetPath: `/media/pose_landmarker_${MODEL}.task`, delegate: "GPU" },
+    minPosePresenceConfidence: PRESENCE,
+    minPoseDetectionConfidence: DETECTION,
+    minTrackingConfidence: DETECTION,
+    numPoses: 1,
+    runningMode: "VIDEO",
+  }
+  const make = async (delegate) => {
+    if (MODEL === "holistic") {
+      return HolisticLandmarker.createFromOptions(fileset, {
+        ...options,
+        baseOptions: { ...options.baseOptions, delegate },
+      })
+    }
+    return PoseLandmarker.createFromOptions(fileset, {
+      ...poseOptions,
+      baseOptions: { ...poseOptions.baseOptions, delegate },
+    })
+  }
   let landmarker
   let delegate = "GPU"
   try {
-    landmarker = await HolisticLandmarker.createFromOptions(fileset, options)
+    landmarker = await make("GPU")
   } catch {
     delegate = "CPU"
-    landmarker = await HolisticLandmarker.createFromOptions(fileset, {
-      ...options,
-      baseOptions: { ...options.baseOptions, delegate: "CPU" },
-    })
+    landmarker = await make("CPU")
   }
-  say(`landmarker ready on ${delegate} · presence ${PRESENCE} detection ${DETECTION} hands ${HANDS} face ${FACE}`)
+  say(`${MODEL} ready on ${delegate} · presence ${PRESENCE} detection ${DETECTION} hands ${HANDS} face ${FACE}`)
 
   // Frames come from the server as images ffmpeg decoded, one per file.
   //
@@ -71,18 +92,21 @@ async function main() {
   say(`${manifest.count} frames of ${VIDEO} at ${manifest.width}×${manifest.height}`)
 
   const frames = []
+  let spent = 0
   // detectForVideo insists on a clock that only goes forward.
   let tick = 0
   for (let n = 0; n < manifest.count; n++) {
     const blob = await (await fetch(`/frame/${n}`)).blob()
     const bitmap = await createImageBitmap(blob)
     tick += 1000 / FPS
+    const t0 = performance.now()
     const result = landmarker.detectForVideo(bitmap, tick)
+    spent += performance.now() - t0
     bitmap.close()
     frames.push({
       time: manifest.start + n / FPS,
-      pose: plain(result.poseWorldLandmarks?.[0]),
-      pose2d: plain(result.poseLandmarks?.[0]),
+      pose: plain(result.worldLandmarks?.[0] ?? result.poseWorldLandmarks?.[0]),
+      pose2d: plain(result.landmarks?.[0] ?? result.poseLandmarks?.[0]),
       leftHand: plain(result.leftHandWorldLandmarks?.[0]),
       rightHand: plain(result.rightHandWorldLandmarks?.[0]),
       faceSeen: Boolean(result.faceLandmarks?.[0]?.length),
@@ -90,7 +114,7 @@ async function main() {
     if (frames.length % 60 === 0) say(`${frames.length}/${manifest.count} frames`)
   }
 
-  say(`done: ${frames.length} frames`)
+  say(`done: ${frames.length} frames · ${(spent / frames.length).toFixed(1)}ms per detection (${MODEL}, software GL)`)
   await fetch("/result", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -99,6 +123,7 @@ async function main() {
       fps: FPS,
       width: WIDTH,
       delegate,
+      model: MODEL,
       thresholds: { presence: PRESENCE, detection: DETECTION, hands: HANDS, face: FACE },
       sourceSize: [manifest.width, manifest.height],
       frames,

@@ -43,3 +43,7 @@ next-env.d.ts
 # Harness recordings and builds — regenerate with harness/record.mjs
 harness/fixtures/
 harness/.build/
+
+# Detector weights — fetched, not source. full: mediapipe-models bucket,
+# pose_landmarker/pose_landmarker_full/float16/latest
+public/*.task

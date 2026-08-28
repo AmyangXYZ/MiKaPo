@@ -37,6 +37,7 @@ const presence = flag("presence", "0.7")
 const detection = flag("detection", "0.7")
 const hands = flag("hands", "0.95")
 const face = flag("face", "0.4")
+const model = flag("model", "holistic")
 
 if (!existsSync(CHROME)) {
   console.error("Chrome not found at", CHROME)
@@ -145,7 +146,7 @@ server.listen(PORT)
 const target =
   `http://127.0.0.1:${PORT}/?video=${encodeURIComponent(video)}&fps=${fps}&width=${width}` +
   `&start=${start}&seconds=${seconds}` +
-  `&presence=${presence}&detection=${detection}&hands=${hands}&face=${face}`
+  `&presence=${presence}&detection=${detection}&hands=${hands}&face=${face}&model=${model}`
 console.log("recording", video, "→", target)
 
 const chrome = spawn(

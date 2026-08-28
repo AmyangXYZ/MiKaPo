@@ -633,6 +633,7 @@ export class Solver {
   /** Full measured chest rotation and its half, staged by the 上半身 solve for
    *  the 上半身2 def that runs right after it. */
   private chestHalf = Quat.identity()
+  private chestHalfSeen = false
   private chestMeasuredFrame = false
   /** Whether the calibrated model has an 上半身2 to take its half; without one
    *  the whole chest rotation stays on 上半身. */
@@ -745,6 +746,7 @@ export class Solver {
     this.rigidLength = RIGID_SEGMENTS.map(() => 0)
     this.rigidSeen = 0
     this.chestMeasuredFrame = false
+    this.chestHalfSeen = false
     this.shoulderTilt = 0
     for (const key of Object.keys(this.rollFilters)) this.rollFilters[key].reset()
     for (const key of Object.keys(this.signalFilters)) this.signalFilters[key].reset()
@@ -1962,9 +1964,29 @@ export class Solver {
         this.chestMeasuredFrame = true
         if (this.hasUpperBody2) {
           // Split the chest rotation evenly across 上半身∘上半身2 so the spine
-          // curves. normalize(I + R) is exactly R^½, and R^½∘R^½ = R.
-          this.chestHalf.setXYZW(out.x, out.y, out.z, out.w + 1)
-          this.chestHalf.normalize()
+          // curves: R^½ ∘ R^½ = R, and normalize(I + R) is one of the two
+          // square roots.
+          //
+          // TWO, and which one is nearer changes as the chest passes a half
+          // turn — which is precisely what a body turning all the way around
+          // does. Taking the nearer one each frame flips the split by 180°
+          // there. The chest still composes correctly, so the pose looks
+          // right in a landmark preview, while the neck, head and both arms
+          // hang off 上半身2 and are thrown a half turn with it.
+          //
+          // So the root is chosen for continuity with the last one instead.
+          const wPlus = out.w + 1
+          const wMinus = out.w - 1
+          const nPlus = Math.hypot(out.x, out.y, out.z, wPlus)
+          const nMinus = Math.hypot(out.x, out.y, out.z, wMinus)
+          sQ.setXYZW(out.x / nPlus, out.y / nPlus, out.z / nPlus, wPlus / nPlus)
+          let chosen = sQ
+          if (nMinus > 1e-4 && this.chestHalfSeen) {
+            sQ2.setXYZW(out.x / nMinus, out.y / nMinus, out.z / nMinus, wMinus / nMinus)
+            if (Math.abs(Quat.dot(sQ2, this.chestHalf)) > Math.abs(Quat.dot(sQ, this.chestHalf))) chosen = sQ2
+          }
+          this.chestHalf.set(chosen)
+          this.chestHalfSeen = true
           out.set(this.chestHalf)
         }
         return true

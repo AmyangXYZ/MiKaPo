@@ -92,6 +92,22 @@ const PARENTS: Record<string, string | null> = {
 
 const _chain = Quat.identity()
 const _acc = Quat.identity()
+const twistScratch = Quat.identity()
+
+/** The composed world rotation of a bone, walking its parents. */
+function worldOf(states: Map<string, Quat>, name: string): Quat | null {
+  if (!states.get(name)) return null
+  _acc.setIdentity()
+  const stack: string[] = []
+  for (let n: string | null = name; n; n = PARENTS[n] ?? null) stack.push(n)
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const q = states.get(stack[i])
+    if (!q) continue
+    Quat.multiplyInto(_acc, q, _chain)
+    _acc.set(_chain)
+  }
+  return _acc
+}
 
 /** Where a bone points in the world, walking its parents. */
 function worldDirection(states: Map<string, Quat>, name: string, out: Vec3): Vec3 {
@@ -303,10 +319,46 @@ for (const mode of ["live", "export"] as const) {
       worldDirection(byName[i], bone, b)
       range = Math.max(range, deg(Math.acos(Math.max(-1, Math.min(1, mean.dot(b))))))
     }
+    // Roll: the turn about a bone's own axis. A landmark preview cannot show
+    // it — the stick figure is identical whichever way the limb is twisted —
+    // so a roll that flips is invisible everywhere except on the character,
+    // which is exactly the report that keeps arriving.
+    let rollJitter = 0
+    let rollPops = 0
+    let rollWorst = 0
+    let rollN = 0
+    let prevRoll = NaN
+    const axis = new Vec3(0, 0, 0)
+    for (let i = 0; i < byName.length; i++) {
+      const q = worldOf(byName[i], bone)
+      if (!q) continue
+      Quat.rotateVecInto(q, vy, axis)
+      // Twist of the world rotation about the direction the bone points.
+      Quat.twistAroundAxisInto(q, axis, twistScratch)
+      const k = twistScratch.x * axis.x + twistScratch.y * axis.y + twistScratch.z * axis.z
+      let roll = 2 * Math.atan2(k, twistScratch.w)
+      if (roll > Math.PI) roll -= 2 * Math.PI
+      else if (roll < -Math.PI) roll += 2 * Math.PI
+      if (!Number.isNaN(prevRoll)) {
+        let d = roll - prevRoll
+        while (d > Math.PI) d -= 2 * Math.PI
+        while (d < -Math.PI) d += 2 * Math.PI
+        const dd = Math.abs(deg(d))
+        rollJitter += dd
+        rollWorst = Math.max(rollWorst, dd)
+        if (dd > 20) rollPops++
+        rollN++
+      }
+      prevRoll = roll
+    }
+
     rows.push(
       `  ${bone.padEnd(6)} ${(jitter / Math.max(1, n)).toFixed(2).padStart(6)}°/frame   worst ${worst
         .toFixed(0)
-        .padStart(3)}°   pops ${String(pops).padStart(3)}   range ${range.toFixed(0).padStart(3)}°`,
+        .padStart(3)}°   pops ${String(pops).padStart(3)}   range ${range.toFixed(0).padStart(3)}°` +
+        `   │ roll ${(rollJitter / Math.max(1, rollN)).toFixed(2).padStart(6)}°/frame worst ${rollWorst
+          .toFixed(0)
+          .padStart(3)}° pops ${String(rollPops).padStart(3)}`,
     )
   }
   console.log(rows.join("\n"))
