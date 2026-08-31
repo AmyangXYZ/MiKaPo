@@ -213,7 +213,7 @@ export default function MainScene() {
       } catch {
         /* nothing loaded under that name */
       }
-      const model = await engine.loadModel(DEFAULT_MODEL_KEY, `${ASSETS}/models/塞尔凯特/塞尔凯特.pmx`)
+      const model = await engine.loadModel(DEFAULT_MODEL_KEY, "https://assets.reze.one/demo/reze/reze.pmx")
       if (gen !== loadGenerationRef.current) {
         try {
           engine.removeModel(DEFAULT_MODEL_KEY)
